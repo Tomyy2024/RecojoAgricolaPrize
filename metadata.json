@@ -1,0 +1,6 @@
+{
+  "name": "Recojo de Fruta - AgroField",
+  "description": "Sistema de gestión agrícola, programación de campo, control de tareo y recojo de jabas de fruta con sincronización en la nube y escaneo de DNI.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
