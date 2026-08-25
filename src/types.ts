@@ -90,7 +90,7 @@ export interface Lider {
   lider: string;
   dni: string;
   nombres?: string;
-  grupo: string;
+  grupo?: string;
   fechaAlta?: string;
 }
 

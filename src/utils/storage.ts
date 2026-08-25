@@ -296,12 +296,11 @@ export function getLideres(): Lider[] {
   const workers = getTrabajadores();
   const liderList: Lider[] = [];
   workers.forEach(w => {
-    if (w.lider && !liderList.some(l => l.dni === w.dni && l.grupo === (w.grupo || ''))) {
+    if (w.lider && !liderList.some(l => l.dni === w.dni || l.lider.toLowerCase() === w.lider!.toLowerCase())) {
       liderList.push({
         lider: w.lider,
         dni: w.dni,
         nombres: w.nombres,
-        grupo: w.grupo || 'Grupo 01',
         fechaAlta: w.fecha ? w.fecha.slice(0, 10) : getLocalToday()
       });
     }

@@ -121,38 +121,35 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
 
   // Combined leaders list (from state + real records)
   const availableLideres = useMemo(() => {
-    const list: { nombre: string; dni: string; grupo: string }[] = [];
+    const map = new Map<string, { nombre: string; dni: string }>();
 
     lideres.forEach((l) => {
-      if (l.lider && !list.some((item) => item.nombre.toLowerCase() === l.lider.toLowerCase() && item.grupo.toLowerCase() === l.grupo.toLowerCase())) {
-        list.push({ nombre: l.lider, dni: l.dni, grupo: l.grupo });
+      if (l.lider && l.lider.trim()) {
+        const key = l.dni ? l.dni.trim() : l.lider.trim().toLowerCase();
+        map.set(key, { nombre: l.lider.trim(), dni: l.dni ? l.dni.trim() : '' });
       }
     });
 
     trabajadores.forEach((t) => {
-      if (t.lider && !list.some((item) => item.nombre.toLowerCase() === t.lider!.toLowerCase())) {
-        list.push({ nombre: t.lider, dni: t.dni, grupo: t.grupo || '' });
+      if (t.lider && t.lider.trim()) {
+        const key = t.dni ? t.dni.trim() : t.lider.trim().toLowerCase();
+        if (!map.has(key)) {
+          map.set(key, { nombre: t.lider.trim(), dni: t.dni ? t.dni.trim() : '' });
+        }
       }
     });
 
     detalleJabas.forEach((dj) => {
-      if (dj.lider && !list.some((item) => item.nombre.toLowerCase() === dj.lider!.toLowerCase())) {
-        list.push({ nombre: dj.lider, dni: dj.dni, grupo: dj.grupo || '' });
+      if (dj.lider && dj.lider.trim()) {
+        const key = dj.dni ? dj.dni.trim() : dj.lider.trim().toLowerCase();
+        if (!map.has(key)) {
+          map.set(key, { nombre: dj.lider.trim(), dni: dj.dni ? dj.dni.trim() : '' });
+        }
       }
     });
 
-    return list;
+    return Array.from(map.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
   }, [lideres, trabajadores, detalleJabas]);
-
-  // Auto-sync leader when selected group changes
-  useEffect(() => {
-    const matched = availableLideres.find(
-      (l) => normalizeGrupo(l.grupo) === normalizeGrupo(filtroGrupo)
-    );
-    if (matched) {
-      setFiltroLider(matched.nombre);
-    }
-  }, [filtroGrupo, availableLideres]);
 
   // Búsqueda rápida dentro de la lista de trabajadores
   const [searchWorker, setSearchWorker] = useState<string>('');
@@ -344,8 +341,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
           metaByDni[t.dni]?.lider ||
           t.lider ||
           filtroLider ||
-          availableLideres.find((l) => normalizeGrupo(l.grupo) === normalizeGrupo(t.grupo || filtroGrupo))?.nombre ||
-          'Antony Cerron';
+          (availableLideres.length > 0 ? availableLideres[0].nombre : 'Antony Cerron');
 
         map.set(t.dni, {
           worker: {

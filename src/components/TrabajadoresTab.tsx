@@ -87,10 +87,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
   // Leader registration state (Sub-module)
   const [showLeaderForm, setShowLeaderForm] = useState(false);
-  const [liderGrupo, setLiderGrupo] = useState('');
   const [liderNombre, setLiderNombre] = useState('');
   const [liderDni, setLiderDni] = useState('');
-  const [filtroGrupoLideres, setFiltroGrupoLideres] = useState('');
 
   // Scanner modal state
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -161,36 +159,28 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return Array.from(set).sort();
   }, [grupos, trabajadores, lideres]);
 
-  // Combined leaders list (from state + real records)
+  // Combined leaders list (from state + real records) - independent of any group
   const availableLideres = useMemo(() => {
-    const list: { nombre: string; dni: string; grupo: string }[] = [];
+    const map = new Map<string, { nombre: string; dni: string }>();
 
     lideres.forEach((l) => {
-      if (l.lider && !list.some((item) => item.nombre.toLowerCase() === l.lider.toLowerCase() && item.grupo.toLowerCase() === l.grupo.toLowerCase())) {
-        list.push({ nombre: l.lider, dni: l.dni, grupo: l.grupo });
+      if (l.lider && l.lider.trim()) {
+        const key = l.dni ? l.dni.trim() : l.lider.trim().toLowerCase();
+        map.set(key, { nombre: l.lider.trim(), dni: l.dni ? l.dni.trim() : '' });
       }
     });
 
     trabajadores.forEach((t) => {
-      if (t.lider && !list.some((item) => item.nombre.toLowerCase() === t.lider!.toLowerCase())) {
-        list.push({ nombre: t.lider, dni: t.dni, grupo: t.grupo || '' });
+      if (t.lider && t.lider.trim()) {
+        const key = t.dni ? t.dni.trim() : t.lider.trim().toLowerCase();
+        if (!map.has(key)) {
+          map.set(key, { nombre: t.lider.trim(), dni: t.dni ? t.dni.trim() : '' });
+        }
       }
     });
 
-    return list;
+    return Array.from(map.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
   }, [lideres, trabajadores]);
-
-  // Auto update leader when group changes if match exists
-  useEffect(() => {
-    if (!cuadrillaGrupo) return;
-    const matched = availableLideres.find(
-      (l) => l.grupo.toLowerCase() === cuadrillaGrupo.toLowerCase()
-    );
-    if (matched) {
-      setCuadrillaLider(matched.nombre);
-      setCuadrillaLiderDni(matched.dni);
-    }
-  }, [cuadrillaGrupo, availableLideres]);
 
   // Helper for normalizations
   const normalizeStr = (text?: string) =>
@@ -373,21 +363,14 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       onSaveGrupo(clean);
     }
     setCuadrillaGrupo(clean);
-    if (!liderGrupo) {
-      setLiderGrupo(clean);
-    }
     setNewGrupoNombre('');
     setShowGrupoForm(false);
     onToast(`✅ Grupo "${clean}" registrado y seleccionado`);
   };
 
-  // Register new Leader
+  // Register new Leader (Independent of groups)
   const handleRegisterLider = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!liderGrupo) {
-      onToast('⚠️ Selecciona un grupo para el líder');
-      return;
-    }
     if (!liderNombre.trim()) {
       onToast('⚠️ Ingresa el nombre del líder');
       return;
@@ -401,15 +384,13 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       lider: liderNombre.trim(),
       dni: liderDni.trim(),
       nombres: liderNombre.trim(),
-      grupo: liderGrupo,
       fechaAlta: getLocalToday()
     };
 
     onSaveLider(newLider);
     setCuadrillaLider(liderNombre.trim());
     setCuadrillaLiderDni(liderDni.trim());
-    setCuadrillaGrupo(liderGrupo);
-    onToast(`👑 Líder ${liderNombre} registrado y asignado a la cuadrilla`);
+    onToast(`👑 Líder "${liderNombre.trim()}" registrado (disponible para todos los grupos)`);
     setLiderNombre('');
     setLiderDni('');
     setShowLeaderForm(false);
@@ -784,7 +765,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     <option value="">Seleccionar líder...</option>
                     {availableLideres.map((l) => (
                       <option key={`${l.nombre}_${l.dni}`} value={l.nombre}>
-                        👑 {l.nombre} {l.grupo ? `(${l.grupo})` : ''}
+                        👑 {l.nombre}
                       </option>
                     ))}
                   </select>
@@ -910,34 +891,19 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       Registrar Nuevo Líder de Cuadrilla
                     </h3>
                   </div>
-                  <span className="text-[11px] text-[#757575]">Se vinculará a la cuadrilla actual</span>
+                  <span className="text-[11px] text-[#ff8f00] font-semibold bg-[#fff3e0] px-2 py-0.5 rounded border border-[#ffe082]">
+                    ✨ Disponible para liderar cualquier grupo o cuadrilla
+                  </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[11px] font-semibold text-[#40493d] mb-1">
-                      Grupo Asignado *
-                    </label>
-                    <select
-                      value={liderGrupo}
-                      onChange={(e) => setLiderGrupo(e.target.value)}
-                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white"
-                    >
-                      {allGrupos.map((g) => (
-                        <option key={g} value={g}>
-                          {g}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-semibold text-[#40493d] mb-1">
-                      Nombre del Líder *
+                      Nombre Completo del Líder *
                     </label>
                     <input
                       type="text"
-                      placeholder="Ej: Antony Cerron"
+                      placeholder="Ej: Antony Cerron, Ana Rosa Jave..."
                       value={liderNombre}
                       onChange={(e) => setLiderNombre(e.target.value)}
                       required
@@ -957,7 +923,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                         value={liderDni}
                         onChange={(e) => setLiderDni(e.target.value.replace(/\D/g, ''))}
                         required
-                        className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white"
+                        className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white font-mono"
                       />
                       <button
                         type="button"
@@ -965,7 +931,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                           setScannerMode('leader');
                           setScannerOpen(true);
                         }}
-                        className="bg-white border border-[#bfcaba] px-2.5 rounded-lg text-[#ff8f00] hover:bg-gray-50"
+                        className="bg-white border border-[#bfcaba] px-2.5 rounded-lg text-[#ff8f00] hover:bg-gray-50 flex items-center justify-center cursor-pointer"
                         title="Escanear DNI"
                       >
                         <Camera className="w-4 h-4" />
@@ -978,7 +944,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowLeaderForm(false)}
-                    className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded-lg"
+                    className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
                   >
                     Cancelar
                   </button>

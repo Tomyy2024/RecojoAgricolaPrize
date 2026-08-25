@@ -505,21 +505,30 @@ export default function App() {
   };
 
   const handleSaveLider = (newLider: Lider) => {
-    const updated = [newLider, ...lideres.filter((l) => !(l.dni === newLider.dni && l.grupo === newLider.grupo))];
+    const updated = [
+      newLider,
+      ...lideres.filter(
+        (l) =>
+          !(
+            (newLider.dni && l.dni && l.dni === newLider.dni) ||
+            (l.lider && newLider.lider && l.lider.toLowerCase() === newLider.lider.toLowerCase())
+          )
+      )
+    ];
     setLideresState(updated);
     saveLideres(updated);
 
     // Update worker role/leader tag if exists
     const updatedWorkers = trabajadores.map((t) => {
       if (t.dni === newLider.dni) {
-        return { ...t, lider: newLider.lider, grupo: newLider.grupo, tipo: 'Líder' };
+        return { ...t, lider: newLider.lider, tipo: 'Líder' };
       }
       return t;
     });
     setTrabajadoresState(updatedWorkers);
     saveTrabajadores(updatedWorkers);
 
-    addLog(`👑 Líder registrado: ${newLider.lider} en ${newLider.grupo}`, 'ok');
+    addLog(`👑 Líder registrado: ${newLider.lider} (habilitado para todos los grupos)`, 'ok');
     triggerAutoSync('Registro Líder', { lideres: updated, trabajadores: updatedWorkers });
   };
 
