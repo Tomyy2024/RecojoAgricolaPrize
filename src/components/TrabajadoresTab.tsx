@@ -21,7 +21,8 @@ import {
   Plus,
   Minus,
   Info,
-  Calendar
+  Calendar,
+  Trash2
 } from 'lucide-react';
 
 interface TrabajadoresTabProps {
@@ -31,6 +32,7 @@ interface TrabajadoresTabProps {
   lideres: Lider[];
   usuarios?: Usuario[];
   onSaveLider: (lider: Lider) => void;
+  onDeleteLider?: (liderNameOrDni: string) => void;
   onSaveSupervisor?: (supervisorName: string) => void;
   onSaveGrupo?: (grupo: string) => void;
   onSaveAvance: (avanceMap: Record<string, number>, detalleList: DetalleJaba[]) => void;
@@ -44,6 +46,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   lideres,
   usuarios = [],
   onSaveLider,
+  onDeleteLider,
   onSaveSupervisor,
   onSaveGrupo,
   onSaveAvance,
@@ -159,24 +162,31 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return Array.from(set).sort();
   }, [grupos, trabajadores, lideres]);
 
-  // Combined leaders list (from state + real records) - independent of any group
+  // Combined leaders list (from state + real records) - strictly deduplicated
   const availableLideres = useMemo(() => {
     const map = new Map<string, { nombre: string; dni: string }>();
 
-    lideres.forEach((l) => {
-      if (l.lider && l.lider.trim()) {
-        const key = l.dni ? l.dni.trim() : l.lider.trim().toLowerCase();
-        map.set(key, { nombre: l.lider.trim(), dni: l.dni ? l.dni.trim() : '' });
+    const addLeader = (rawName?: string, rawDni?: string) => {
+      if (!rawName || !rawName.trim()) return;
+      const cleanName = rawName.trim();
+      const normKey = cleanName
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+
+      if (!map.has(normKey)) {
+        map.set(normKey, { nombre: cleanName, dni: rawDni ? rawDni.trim() : '' });
+      } else if (rawDni && !map.get(normKey)?.dni) {
+        map.get(normKey)!.dni = rawDni.trim();
       }
+    };
+
+    lideres.forEach((l) => {
+      addLeader(l.lider || l.nombres, l.dni);
     });
 
     trabajadores.forEach((t) => {
-      if (t.lider && t.lider.trim()) {
-        const key = t.dni ? t.dni.trim() : t.lider.trim().toLowerCase();
-        if (!map.has(key)) {
-          map.set(key, { nombre: t.lider.trim(), dni: t.dni ? t.dni.trim() : '' });
-        }
-      }
+      addLeader(t.lider, t.tipo === 'Líder' ? t.dni : '');
     });
 
     return Array.from(map.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
@@ -740,17 +750,19 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     <Crown className="w-3.5 h-3.5" />
                     <span>5. Líder</span>
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowLeaderForm(!showLeaderForm);
-                      setShowSupervisorForm(false);
-                      setShowGrupoForm(false);
-                    }}
-                    className="text-[10px] text-[#2e7d32] hover:underline font-normal cursor-pointer"
-                  >
-                    {showLeaderForm ? 'Cerrar' : '+ Registrar'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowLeaderForm(!showLeaderForm);
+                        setShowSupervisorForm(false);
+                        setShowGrupoForm(false);
+                      }}
+                      className="text-[10px] text-[#2e7d32] hover:underline font-normal cursor-pointer"
+                    >
+                      {showLeaderForm ? 'Cerrar' : '+ Registrar / Gestionar'}
+                    </button>
+                  </div>
                 </label>
                 <div className="relative">
                   <select
@@ -878,85 +890,146 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               </form>
             )}
 
-            {/* Sub-Panel Opcional: Registro de Nuevo Líder */}
+            {/* Sub-Panel Opcional: Registro y Gestión de Líderes */}
             {showLeaderForm && (
-              <form
-                onSubmit={handleRegisterLider}
-                className="mb-5 p-4 bg-[#fff8e1]/70 rounded-xl border border-[#ffe082] space-y-3 animate-in fade-in"
-              >
-                <div className="flex items-center justify-between pb-2 border-b border-[#ffe082]">
-                  <div className="flex items-center gap-2">
-                    <Crown className="w-4 h-4 text-[#ff8f00]" />
-                    <h3 className="text-xs font-bold text-[#1b5e20] uppercase tracking-wide">
-                      Registrar Nuevo Líder de Cuadrilla
-                    </h3>
-                  </div>
-                  <span className="text-[11px] text-[#ff8f00] font-semibold bg-[#fff3e0] px-2 py-0.5 rounded border border-[#ffe082]">
-                    ✨ Disponible para liderar cualquier grupo o cuadrilla
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-[#40493d] mb-1">
-                      Nombre Completo del Líder *
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ej: Antony Cerron, Ana Rosa Jave..."
-                      value={liderNombre}
-                      onChange={(e) => setLiderNombre(e.target.value)}
-                      required
-                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white"
-                    />
+              <div className="mb-5 p-4 bg-[#fff8e1]/80 rounded-xl border border-[#ffe082] space-y-4 animate-in fade-in">
+                <form onSubmit={handleRegisterLider} className="space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-[#ffe082]">
+                    <div className="flex items-center gap-2">
+                      <Crown className="w-4 h-4 text-[#ff8f00]" />
+                      <h3 className="text-xs font-bold text-[#1b5e20] uppercase tracking-wide">
+                        Registrar Nuevo Líder de Cuadrilla
+                      </h3>
+                    </div>
+                    <span className="text-[11px] text-[#ff8f00] font-semibold bg-[#fff3e0] px-2 py-0.5 rounded border border-[#ffe082]">
+                      ✨ Disponible para liderar cualquier grupo o cuadrilla
+                    </span>
                   </div>
 
-                  <div>
-                    <label className="block text-[11px] font-semibold text-[#40493d] mb-1">
-                      DNI (8 dígitos) *
-                    </label>
-                    <div className="flex gap-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#40493d] mb-1">
+                        Nombre Completo del Líder *
+                      </label>
                       <input
                         type="text"
-                        maxLength={8}
-                        placeholder="Ej: 71928374"
-                        value={liderDni}
-                        onChange={(e) => setLiderDni(e.target.value.replace(/\D/g, ''))}
+                        placeholder="Ej: Antony Cerron, Ana Rosa Jave..."
+                        value={liderNombre}
+                        onChange={(e) => setLiderNombre(e.target.value)}
                         required
-                        className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white font-mono"
+                        className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white"
                       />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setScannerMode('leader');
-                          setScannerOpen(true);
-                        }}
-                        className="bg-white border border-[#bfcaba] px-2.5 rounded-lg text-[#ff8f00] hover:bg-gray-50 flex items-center justify-center cursor-pointer"
-                        title="Escanear DNI"
-                      >
-                        <Camera className="w-4 h-4" />
-                      </button>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#40493d] mb-1">
+                        DNI (8 dígitos) *
+                      </label>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          maxLength={8}
+                          placeholder="Ej: 71928374"
+                          value={liderDni}
+                          onChange={(e) => setLiderDni(e.target.value.replace(/\D/g, ''))}
+                          required
+                          className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScannerMode('leader');
+                            setScannerOpen(true);
+                          }}
+                          className="bg-white border border-[#bfcaba] px-2.5 rounded-lg text-[#ff8f00] hover:bg-gray-50 flex items-center justify-center cursor-pointer"
+                          title="Escanear DNI"
+                        >
+                          <Camera className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="flex justify-end gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowLeaderForm(false)}
-                    className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Guardar Líder</span>
-                  </button>
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowLeaderForm(false)}
+                      className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
+                    >
+                      Cerrar
+                    </button>
+                    <button
+                      type="submit"
+                      className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Guardar Líder</span>
+                    </button>
+                  </div>
+                </form>
+
+                {/* Sección de Gestión / Eliminación de Líderes */}
+                <div className="pt-3 border-t border-[#ffe082]">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <Crown className="w-3.5 h-3.5 text-[#ff8f00]" />
+                      <span className="text-xs font-bold text-[#b26a00] uppercase">
+                        Líderes Registrados en el Sistema ({availableLideres.length})
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-gray-500">Puedes eliminar líderes obsoletos o duplicados</span>
+                  </div>
+
+                  {availableLideres.length === 0 ? (
+                    <div className="text-center py-3 text-xs text-gray-500 bg-white/60 rounded-lg border border-dashed border-[#ffe082]">
+                      No hay líderes registrados actualmente.
+                    </div>
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto space-y-1.5 bg-white/80 p-2 rounded-lg border border-[#ffe082]">
+                      {availableLideres.map((lead) => (
+                        <div
+                          key={lead.nombre}
+                          className="flex items-center justify-between px-3 py-1.5 bg-white rounded-md border border-gray-200 hover:border-[#ff8f00] text-xs transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm">👑</span>
+                            <div>
+                              <span className="font-bold text-gray-900">{lead.nombre}</span>
+                              {lead.dni && (
+                                <span className="ml-2 font-mono text-[11px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
+                                  DNI: {lead.dni}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(`¿Estás seguro de eliminar al líder "${lead.nombre}"?`)) {
+                                if (cuadrillaLider === lead.nombre) {
+                                  setCuadrillaLider('');
+                                  setCuadrillaLiderDni('');
+                                }
+                                if (onDeleteLider) {
+                                  onDeleteLider(lead.nombre);
+                                } else {
+                                  onToast(`🗑️ Líder "${lead.nombre}" eliminado`);
+                                }
+                              }
+                            }}
+                            className="text-red-600 hover:text-red-800 hover:bg-red-50 p-1.5 rounded-md flex items-center gap-1 transition-colors cursor-pointer"
+                            title={`Eliminar líder ${lead.nombre}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span className="text-[11px] font-semibold">Eliminar</span>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </form>
+              </div>
             )}
 
             {/* Listado y Selección de Personal */}

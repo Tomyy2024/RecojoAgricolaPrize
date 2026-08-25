@@ -179,8 +179,25 @@ export default function App() {
       saveUsuarios(d.usuarios);
     }
     if (Array.isArray(d.lideres)) {
-      setLideresState(d.lideres);
-      saveLideres(d.lideres);
+      const uniqueLideresMap = new Map<string, Lider>();
+      d.lideres.forEach((l) => {
+        const name = (l.lider || l.nombres || '').trim();
+        if (name) {
+          const key = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+          if (!uniqueLideresMap.has(key)) {
+            uniqueLideresMap.set(key, {
+              ...l,
+              lider: name,
+              nombres: l.nombres || name
+            });
+          } else if (l.dni && !uniqueLideresMap.get(key)!.dni) {
+            uniqueLideresMap.get(key)!.dni = l.dni;
+          }
+        }
+      });
+      const uniqueLideres = Array.from(uniqueLideresMap.values());
+      setLideresState(uniqueLideres);
+      saveLideres(uniqueLideres);
     }
     if (Array.isArray(d.grupos)) {
       setGruposState(d.grupos);
@@ -532,6 +549,41 @@ export default function App() {
     triggerAutoSync('Registro Líder', { lideres: updated, trabajadores: updatedWorkers });
   };
 
+  const handleDeleteLider = (liderNameOrDni: string) => {
+    const clean = (liderNameOrDni || '').trim();
+    if (!clean) return;
+    const cleanNorm = clean.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+    const updatedLideres = lideres.filter((l) => {
+      const name = (l.lider || l.nombres || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const dni = (l.dni || '').trim();
+      return name !== cleanNorm && dni !== clean;
+    });
+
+    setLideresState(updatedLideres);
+    saveLideres(updatedLideres);
+
+    // Also update workers who had this leader assigned
+    const updatedWorkers = trabajadores.map((t) => {
+      const tLeadNorm = (t.lider || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const isMatch = tLeadNorm === cleanNorm || (t.dni && t.dni === clean);
+      if (isMatch) {
+        return {
+          ...t,
+          lider: '',
+          tipo: t.tipo === 'Líder' ? 'Cosechero' : t.tipo
+        };
+      }
+      return t;
+    });
+    setTrabajadoresState(updatedWorkers);
+    saveTrabajadores(updatedWorkers);
+
+    addLog(`🗑️ Líder eliminado: ${clean}`, 'warn');
+    triggerAutoSync('Eliminar Líder', { lideres: updatedLideres, trabajadores: updatedWorkers });
+    addToast(`🗑️ Líder "${clean}" eliminado del sistema`);
+  };
+
   const handleSaveGrupo = (newGrupo: string) => {
     const clean = newGrupo.trim();
     if (!clean) return;
@@ -768,6 +820,7 @@ export default function App() {
             lideres={lideres}
             usuarios={usuarios}
             onSaveLider={handleSaveLider}
+            onDeleteLider={handleDeleteLider}
             onSaveSupervisor={handleSaveSupervisor}
             onSaveGrupo={handleSaveGrupo}
             onSaveAvance={handleSaveAvance}
@@ -785,6 +838,7 @@ export default function App() {
             validaciones={validaciones}
             grupos={grupos}
             onSaveValidacion={handleSaveValidacion}
+            onDeleteLider={handleDeleteLider}
             onToast={addToast}
           />
         )}

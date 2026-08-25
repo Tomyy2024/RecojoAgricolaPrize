@@ -290,22 +290,49 @@ export function saveGrupos(grupos: string[]) {
 export function getLideres(): Lider[] {
   try {
     const raw = localStorage.getItem(KEYS.LIDERES);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed: Lider[] = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        // Clean & deduplicate by normalized name
+        const map = new Map<string, Lider>();
+        parsed.forEach((l) => {
+          const name = (l.lider || l.nombres || '').trim();
+          if (name) {
+            const key = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+            if (!map.has(key)) {
+              map.set(key, {
+                lider: name,
+                dni: l.dni || '',
+                nombres: l.nombres || name,
+                fechaAlta: l.fechaAlta || getLocalToday()
+              });
+            } else if (l.dni && !map.get(key)!.dni) {
+              map.get(key)!.dni = l.dni;
+            }
+          }
+        });
+        return Array.from(map.values());
+      }
+    }
   } catch {}
   // Default derive from trabajadores
   const workers = getTrabajadores();
-  const liderList: Lider[] = [];
+  const liderMap = new Map<string, Lider>();
   workers.forEach(w => {
-    if (w.lider && !liderList.some(l => l.dni === w.dni || l.lider.toLowerCase() === w.lider!.toLowerCase())) {
-      liderList.push({
-        lider: w.lider,
-        dni: w.dni,
-        nombres: w.nombres,
-        fechaAlta: w.fecha ? w.fecha.slice(0, 10) : getLocalToday()
-      });
+    const name = (w.lider || '').trim();
+    if (name) {
+      const key = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      if (!liderMap.has(key)) {
+        liderMap.set(key, {
+          lider: name,
+          dni: w.tipo === 'Líder' ? w.dni : '',
+          nombres: name,
+          fechaAlta: w.fecha ? w.fecha.slice(0, 10) : getLocalToday()
+        });
+      }
     }
   });
-  return liderList;
+  return Array.from(liderMap.values());
 }
 
 export function saveLideres(lideres: Lider[]) {
