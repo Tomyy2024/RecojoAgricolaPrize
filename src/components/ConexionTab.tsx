@@ -37,7 +37,9 @@ interface ConexionTabProps {
   onManualSyncPush: () => void;
   onManualSyncPull: () => void;
   onToast: (msg: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
+  onResetData?: () => void;
 }
+
 
 const APPS_SCRIPT_CODE = `/**
  * RECOJO DE FRUTA - GOOGLE APPS SCRIPT WEB APP BACKEND
@@ -355,7 +357,8 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
   onAddLog,
   onManualSyncPush,
   onManualSyncPull,
-  onToast
+  onToast,
+  onResetData
 }) => {
   const [gsheetUrl, setGsheetUrl] = useState(getGsheetUrl());
   const [autoSync, setAutoSync] = useState(isAutoSyncEnabled());
@@ -569,6 +572,36 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
             <span>📥 Backup JSON</span>
           </button>
         </div>
+
+        {/* Action Button: Limpiar Datos de Prueba */}
+        {onResetData && (
+          <div className="bg-red-50/70 border border-red-200 p-3 sm:p-4 rounded-xl mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-xs sm:text-sm text-red-800">
+                  🧹 Limpiar Base de Datos (Sin Datos de Prueba)
+                </span>
+                <span className="text-[10px] bg-red-600 text-white px-2 py-0.2 rounded-full font-bold uppercase">
+                  Paso 2
+                </span>
+              </div>
+              <p className="text-xs text-red-600 mt-0.5 max-w-lg">
+                Elimina todos los registros y pruebas para iniciar operaciones en blanco en todas las computadoras y celulares.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                if (window.confirm('¿Estás seguro de limpiar todos los registros y datos de prueba? Esta acción dejará el sistema en blanco y sincronizado para todos los usuarios.')) {
+                  onResetData();
+                }
+              }}
+              className="bg-red-600 hover:bg-red-700 active:bg-red-800 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer whitespace-nowrap"
+            >
+              🧹 Limpiar Todo
+            </button>
+          </div>
+        )}
+
 
         {/* Auto-Sync Toggle Box */}
         <div className="bg-[#e8f5e9]/70 border border-[#a5d6a7] p-4 rounded-xl mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">

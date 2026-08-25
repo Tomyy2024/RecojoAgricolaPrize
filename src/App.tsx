@@ -19,6 +19,7 @@ import {
 } from './types';
 import { 
   initializeStorage, 
+  resetAllData,
   getSession, 
   saveSession, 
   clearSession, 
@@ -139,7 +140,99 @@ export default function App() {
     setLogs((prev) => [newLog, ...prev.slice(0, 49)]);
   }, []);
 
-  // Background Auto-fetch on startup from Google Sheets
+  // Centralized Server Data Fetcher (Synchronizes all PCs and Users in Real-Time)
+  const fetchCentralizedData = useCallback(async (silent = false) => {
+    try {
+      const res = await fetch('/api/data');
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json && json.status === 'ok' && json.data) {
+        const d = json.data;
+        if (Array.isArray(d.programas)) {
+          setProgramasState(d.programas);
+          saveProgramas(d.programas);
+        }
+        if (Array.isArray(d.programaGeneral)) {
+          setProgramaGeneralState(d.programaGeneral);
+          saveProgramaGeneral(d.programaGeneral);
+        }
+        if (Array.isArray(d.trabajadores)) {
+          const seenDni = new Set<string>();
+          const uniqueWorkers: Trabajador[] = [];
+          d.trabajadores.forEach((t: Trabajador) => {
+            const cleanDni = String(t.dni || '').trim();
+            if (cleanDni && !seenDni.has(cleanDni)) {
+              seenDni.add(cleanDni);
+              uniqueWorkers.push(t);
+            }
+          });
+          setTrabajadoresState(uniqueWorkers);
+          saveTrabajadores(uniqueWorkers);
+        }
+        if (Array.isArray(d.detalleJabas)) {
+          setDetalleJabasState(d.detalleJabas);
+          saveDetalleJabas(d.detalleJabas);
+        }
+        if (Array.isArray(d.validaciones)) {
+          setValidacionesState(d.validaciones);
+          saveValidaciones(d.validaciones);
+        }
+        if (Array.isArray(d.usuarios) && d.usuarios.length > 0) {
+          setUsuariosState(d.usuarios);
+          saveUsuarios(d.usuarios);
+        }
+        if (Array.isArray(d.lideres)) {
+          setLideresState(d.lideres);
+          saveLideres(d.lideres);
+        }
+        if (!silent) {
+          addLog('🟢 Datos sincronizados en vivo con el servidor central', 'ok');
+        }
+      }
+    } catch {
+      // Offline fallback to local state
+    }
+  }, [addLog]);
+
+  // Server Sync Mutation Trigger
+  const syncToServer = useCallback(async (payloadOverride?: any) => {
+    try {
+      const payload = payloadOverride || {
+        programas: getProgramas(),
+        programaGeneral: getProgramaGeneral(),
+        trabajadores: getTrabajadores(),
+        detalleJabas: getDetalleJabas(),
+        usuarios: getUsuarios(),
+        validaciones: getValidaciones(),
+        lideres: getLideres()
+      };
+      await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (e) {
+      console.warn('Server sync offline:', e);
+    }
+  }, []);
+
+  // Periodic Polling and Window Focus listener to keep all connected PCs up to date
+  useEffect(() => {
+    fetchCentralizedData(false);
+    const interval = setInterval(() => {
+      fetchCentralizedData(true);
+    }, 4000);
+
+    const onFocus = () => fetchCentralizedData(true);
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [fetchCentralizedData]);
+
+  // Background Auto-fetch from Google Sheets if configured
   useEffect(() => {
     const autoPullOnStart = async () => {
       const url = getGsheetUrl();
@@ -183,23 +276,27 @@ export default function App() {
           setLastSyncTime(nowIso);
           setLastSync(nowIso);
           addLog('☁️ Datos sincronizados automáticamente con Google Sheets', 'ok');
+          syncToServer();
         }
       } catch {
         // Silently use offline cache
       }
     };
     autoPullOnStart();
-  }, [addLog]);
+  }, [addLog, syncToServer]);
 
   // Background Auto-Sync Trigger
-  const triggerAutoSync = useCallback(async (actionName: string) => {
+  const triggerAutoSync = useCallback(async (actionName: string, updatedPayload?: any) => {
+    // 1. Always sync immediately to Central Server so other PCs see it instantly
+    syncToServer(updatedPayload);
+
+    // 2. Also sync to Google Sheets if configured
     if (!isAutoSyncEnabled()) return;
     const url = getGsheetUrl();
     if (!url) return;
 
     try {
       addLog(`⚡ Auto-guardado en curso (${actionName})...`, 'info');
-      // Execute post to Web App
       await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -223,7 +320,27 @@ export default function App() {
     } catch {
       addLog(`⏳ Sin conexión con Google Sheets: cambio guardado localmente en dispositivo.`, 'err');
     }
-  }, [addLog]);
+  }, [addLog, syncToServer]);
+
+  // Reset all test data (Clean start)
+  const handleResetAllData = useCallback(async () => {
+    resetAllData();
+    setTrabajadoresState([]);
+    setProgramasState([]);
+    setProgramaGeneralState([]);
+    setDetalleJabasState([]);
+    setValidacionesState([]);
+
+    try {
+      await fetch('/api/reset', { method: 'POST' });
+    } catch (e) {
+      console.warn('Reset server api error:', e);
+    }
+
+    addToast('🧹 Base de datos limpiada correctamente. Sin datos de prueba.', 'success');
+    addLog('🧹 Base de datos reiniciada a cero (sin registros de prueba)', 'ok');
+  }, [addToast, addLog]);
+
 
   // Handlers
   const handleLogin = (userSession: UserSession) => {
@@ -485,7 +602,7 @@ export default function App() {
         lastSync={lastSync}
         firebaseConnected={!!fbConfig}
         autoSyncActive={isAutoSyncEnabled()}
-        onRefresh={handleManualSyncPull}
+        onRefresh={() => fetchCentralizedData(false)}
         onOpenShareModal={() => setIsShareModalOpen(true)}
         deviceMode={deviceMode}
         onChangeDeviceMode={handleDeviceModeChange}
@@ -605,6 +722,7 @@ export default function App() {
             onManualSyncPush={handleManualSyncPush}
             onManualSyncPull={handleManualSyncPull}
             onToast={addToast}
+            onResetData={handleResetAllData}
           />
         )}
       </main>

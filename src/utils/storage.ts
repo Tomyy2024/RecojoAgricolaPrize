@@ -92,49 +92,29 @@ export function initializeStorage() {
       localStorage.setItem(KEYS.AVANCE, JSON.stringify({}));
     }
 
-    // Initialize DetalleJabas from initial programs
+    // Initialize DetalleJabas (clean start)
     if (!localStorage.getItem(KEYS.DETALLE_JABAS)) {
-      const initialDetalle: DetalleJaba[] = [
-        {
-          id: '2026-08-20_72345678_M01',
-          fecha: '2026-08-20',
-          dni: '72345678',
-          trabajador: 'JUAN PÉREZ ROJAS',
-          fundo: 'Arena Azul',
-          modulo: 'M01',
-          jabas: 45,
-          supervisor: 'Carlos Mendoza',
-          timestamp: '2026-08-20T10:30:00.000Z'
-        },
-        {
-          id: '2026-08-20_45892134_M01',
-          fecha: '2026-08-20',
-          dni: '45892134',
-          trabajador: 'MARÍA GONZÁLEZ VÁSQUEZ',
-          fundo: 'Arena Azul',
-          modulo: 'M01',
-          jabas: 52,
-          supervisor: 'Carlos Mendoza',
-          timestamp: '2026-08-20T10:35:00.000Z'
-        },
-        {
-          id: '2026-08-20_39482019_M01',
-          fecha: '2026-08-20',
-          dni: '39482019',
-          trabajador: 'LUIS TORRES CHÁVEZ',
-          fundo: 'Vivadis',
-          modulo: 'M01',
-          jabas: 55,
-          supervisor: 'María Quispe',
-          timestamp: '2026-08-20T11:40:00.000Z'
-        }
-      ];
-      localStorage.setItem(KEYS.DETALLE_JABAS, JSON.stringify(initialDetalle));
+      localStorage.setItem(KEYS.DETALLE_JABAS, JSON.stringify([]));
     }
   } catch (e) {
     console.warn('Storage init fallback:', e);
   }
 }
+
+// Reset all test records to a completely clean state
+export function resetAllData() {
+  try {
+    localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify([]));
+    localStorage.setItem(KEYS.PROGRAMAS, JSON.stringify([]));
+    localStorage.setItem(KEYS.PROGRAMA_GENERAL, JSON.stringify([]));
+    localStorage.setItem(KEYS.DETALLE_JABAS, JSON.stringify([]));
+    localStorage.setItem(KEYS.AVANCE, JSON.stringify({}));
+    localStorage.setItem(KEYS.VALIDACIONES, JSON.stringify([]));
+  } catch (e) {
+    console.error('Reset all data error:', e);
+  }
+}
+
 
 // Session Management
 export function getSession(): UserSession | null {

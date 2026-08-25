@@ -133,93 +133,9 @@ export const INITIAL_USUARIOS: Usuario[] = [
   { user: 'trabajador1', pass: 'campo123', nombre: 'Juan Pérez', rol: 'Trabajador', creado: '2026-08-20' }
 ];
 
-export const INITIAL_TRABAJADORES: Trabajador[] = [
-  { id: 'T000A', fecha: '2026-08-21 00:00:00', dni: '73829104', nombres: 'JULIA CRUZ MEJÍA', fundo: 'Santa Teresa', modulo: 'M01', supervisor: 'Carlos Solar', grupo: 'Grupo01', lider: 'Antony Cerron', tipo: 'Cosechador', jabas: 48 },
-  { id: 'T000B', fecha: '2026-08-21 00:00:00', dni: '71928374', nombres: 'ANTONY CERRON PAUCAR', fundo: 'Santa Teresa', modulo: 'M01', supervisor: 'Carlos Solar', grupo: 'Grupo01', lider: 'Antony Cerron', tipo: 'Líder', jabas: 55 },
-  { id: 'T000C', fecha: '2026-08-21 00:00:00', dni: '74839201', nombres: 'ROBERTO SÁNCHEZ VEGA', fundo: 'Santa Teresa', modulo: 'M01', supervisor: 'Carlos Solar', grupo: 'Grupo01', lider: 'Antony Cerron', tipo: 'Cosechador', jabas: 42 },
-  { id: 'T001', fecha: '2026-08-20 00:00:00', dni: '72345678', nombres: 'JUAN PÉREZ ROJAS', fundo: 'Arena Azul', modulo: 'M01', supervisor: 'Carlos Mendoza', grupo: 'Grupo 01', lider: 'Carlos Mendoza', tipo: 'Cosechador', jabas: 45 },
-  { id: 'T002', fecha: '2026-08-20 00:00:00', dni: '45892134', nombres: 'MARÍA GONZÁLEZ VÁSQUEZ', fundo: 'Arena Azul', modulo: 'M01', supervisor: 'Carlos Mendoza', grupo: 'Grupo 01', lider: 'Carlos Mendoza', tipo: 'Cosechador', jabas: 52 },
-  { id: 'T003', fecha: '2026-08-20 00:00:00', dni: '10293847', nombres: 'PEDRO CASTILLO FLORES', fundo: 'Arena Azul', modulo: 'M02', supervisor: 'Carlos Mendoza', grupo: 'Grupo 02', lider: 'Pedro Castillo Flores', tipo: 'Líder', jabas: 60 },
-  { id: 'T004', fecha: '2026-08-20 00:00:00', dni: '84729103', nombres: 'ROSA HUAMÁN MAMANI', fundo: 'Arena Azul', modulo: 'M02', supervisor: 'Carlos Mendoza', grupo: 'Grupo 02', lider: 'Pedro Castillo Flores', tipo: 'Cosechador', jabas: 48 },
-  { id: 'T005', fecha: '2026-08-20 00:00:00', dni: '39482019', nombres: 'LUIS TORRES CHÁVEZ', fundo: 'Vivadis', modulo: 'M01', supervisor: 'María Quispe', grupo: 'Grupo 03', lider: 'María Quispe', tipo: 'Cosechador', jabas: 55 },
-  { id: 'T006', fecha: '2026-08-20 00:00:00', dni: '56473829', nombres: 'ANA SILVA SALAS', fundo: 'Vivadis', modulo: 'M01', supervisor: 'María Quispe', grupo: 'Grupo 03', lider: 'María Quispe', tipo: 'Cosechador', jabas: 40 },
-  { id: 'T007', fecha: '2026-08-20 00:00:00', dni: '92837465', nombres: 'JOSÉ GUTIÉRREZ VARGAS', fundo: 'Santa Teresa', modulo: 'M06', supervisor: 'Carlos Mendoza', grupo: 'Grupo 04', lider: 'José Gutiérrez Vargas', tipo: 'Líder', jabas: 65 },
-  { id: 'T008', fecha: '2026-08-20 00:00:00', dni: '19283746', nombres: 'ELENA PAREDES SOTO', fundo: 'Santa Teresa', modulo: 'M06', supervisor: 'Carlos Mendoza', grupo: 'Grupo 04', lider: 'José Gutiérrez Vargas', tipo: 'Cosechador', jabas: 50 },
-  { id: 'T009', fecha: '2026-08-20 00:00:00', dni: '67584930', nombres: 'CARMEN LÓPEZ MORALES', fundo: 'Ayllu Allpa', modulo: 'M12', supervisor: 'María Quispe', grupo: 'Grupo 05', lider: 'María Quispe', tipo: 'Cosechador', jabas: 42 },
-  { id: 'T010', fecha: '2026-08-20 00:00:00', dni: '28394019', nombres: 'MANUEL DÍAZ RIVERA', fundo: 'Ampliacion', modulo: 'M16', supervisor: 'Carlos Mendoza', grupo: 'Grupo 06', lider: 'Carlos Mendoza', tipo: 'Cosechador', jabas: 58 }
-];
+export const INITIAL_TRABAJADORES: Trabajador[] = [];
 
-export const INITIAL_PROGRAMA_GENERAL: ProgramaGeneral[] = [
-  {
-    id: 'PG_001',
-    fundo: 'Arena Azul',
-    modulo: 'M01',
-    haTotal: '14.5',
-    numTrabajadores: '25',
-    observaciones: 'Cosecha de fruta para exportación. Primer pase en turnos altos.',
-    fechaRegistro: '2026-08-20T08:00:00.000Z',
-    createdAt: '2026-08-20T08:00:00.000Z',
-    supervisor: 'Carlos Mendoza'
-  },
-  {
-    id: 'PG_002',
-    fundo: 'Vivadis',
-    modulo: 'M01',
-    haTotal: '12.0',
-    numTrabajadores: '20',
-    observaciones: 'Recojo intensivo por maduración acelerada.',
-    fechaRegistro: '2026-08-20T09:30:00.000Z',
-    createdAt: '2026-08-20T09:30:00.000Z',
-    supervisor: 'María Quispe'
-  }
-];
+export const INITIAL_PROGRAMA_GENERAL: ProgramaGeneral[] = [];
 
-export const INITIAL_PROGRAMAS: Programa[] = [
-  {
-    id: 'PROG_001',
-    fecha: '2026-08-20',
-    fundo: 'Arena Azul',
-    modulo: 'M01',
-    haTotal: '14.5',
-    numTrab: '25',
-    tipo: 'Suelo',
-    jabas: 380,
-    ddc: 4.2,
-    lotes: [
-      { turno: 'T01', lote: 'L39' },
-      { turno: 'T02', lote: 'L57' },
-      { turno: 'T02', lote: 'L58' },
-      { turno: 'T03', lote: 'L51' }
-    ],
-    totalLotes: 4,
-    fechaRegistro: '2026-08-20T10:00:00.000Z',
-    supervisor: 'Carlos Mendoza',
-    avance: {
-      '72345678': 45,
-      '45892134': 52
-    }
-  },
-  {
-    id: 'PROG_002',
-    fecha: '2026-08-20',
-    fundo: 'Vivadis',
-    modulo: 'M01',
-    haTotal: '12.0',
-    numTrab: '20',
-    tipo: 'Maceta',
-    jabas: 310,
-    ddc: 3.8,
-    lotes: [
-      { turno: 'T01', lote: 'L1' },
-      { turno: 'T01', lote: 'L2' },
-      { turno: 'T02', lote: 'L5' }
-    ],
-    totalLotes: 3,
-    fechaRegistro: '2026-08-20T11:15:00.000Z',
-    supervisor: 'María Quispe',
-    avance: {
-      '39482019': 55,
-      '56473829': 40
-    }
-  }
-];
+export const INITIAL_PROGRAMAS: Programa[] = [];
+
