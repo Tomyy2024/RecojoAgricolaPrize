@@ -350,7 +350,7 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-[#40493d] mb-1">
-                  Jabas Proyectadas
+                  Jabas Ejecutadas
                 </label>
                 <input
                   type="number"
@@ -534,7 +534,7 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
               <span className="font-bold text-xs sm:text-sm text-gray-800">{numTrabajadores || '0'}</span>
             </div>
             <div>
-              <span className="block text-[11px] text-[#757575] font-medium">Jabas</span>
+              <span className="block text-[11px] text-[#757575] font-medium">Jabas Ejecutadas</span>
               <span className="font-bold text-xs sm:text-sm text-[#ff8f00]">{jabas || '0'}</span>
             </div>
             <div>

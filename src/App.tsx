@@ -722,17 +722,23 @@ export default function App() {
         {activeTab === 'dashboard' && (
           <DashboardTab
             programas={programas}
+            programaGeneral={programaGeneral}
             detalleJabas={detalleJabas}
             trabajadores={trabajadores}
             validaciones={validaciones}
+            onRefresh={() => fetchCentralizedData(false)}
+            onToast={addToast}
           />
         )}
 
         {activeTab === 'reportes' && (
           <ReportesTab
             programas={programas}
+            programaGeneral={programaGeneral}
             detalleJabas={detalleJabas}
             trabajadores={trabajadores}
+            validaciones={validaciones}
+            onRefresh={() => fetchCentralizedData(false)}
             onToast={addToast}
           />
         )}

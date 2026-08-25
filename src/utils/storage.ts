@@ -49,6 +49,16 @@ export function getLocalISO(): string {
   return new Date().toISOString();
 }
 
+export function normalizeDateString(d?: string): string {
+  if (!d) return '';
+  const trimmed = d.split('T')[0].split(' ')[0].trim();
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(trimmed)) {
+    const [day, month, year] = trimmed.split('/');
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+  return trimmed;
+}
+
 // Auto-repair & sanity check
 export function initializeStorage() {
   try {
