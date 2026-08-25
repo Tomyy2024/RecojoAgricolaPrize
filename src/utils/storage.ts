@@ -148,7 +148,17 @@ export function clearSession() {
 export function getUsuarios(): Usuario[] {
   try {
     const raw = localStorage.getItem(KEYS.USUARIOS);
-    return raw ? JSON.parse(raw) : INITIAL_USUARIOS;
+    const parsed: Usuario[] = raw ? JSON.parse(raw) : [];
+    const map = new Map<string, Usuario>();
+    
+    // Seed defaults first
+    INITIAL_USUARIOS.forEach((u) => map.set(u.user.toLowerCase(), u));
+    // Overwrite with stored custom/edited users
+    parsed.forEach((u) => {
+      if (u && u.user) map.set(u.user.toLowerCase(), u);
+    });
+
+    return Array.from(map.values());
   } catch {
     return INITIAL_USUARIOS;
   }

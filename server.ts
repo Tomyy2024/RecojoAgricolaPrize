@@ -7,7 +7,10 @@ const DB_FILE = path.join(process.cwd(), 'data_store.json');
 
 // Master default users & catalogs
 const DEFAULT_USUARIOS = [
-  { user: 'admin', pass: 'admin123', nombre: 'Administrador General', rol: 'Administrador', creado: '2026-08-18' }
+  { user: 'admin', pass: 'admin123', nombre: 'Administrador General', rol: 'Administrador', creado: '2026-08-18' },
+  { user: 'supervisor1', pass: 'super123', nombre: 'Supervisor de Campo', rol: 'Supervisor', creado: '2026-08-18' },
+  { user: 'trabajador1', pass: 'campo123', nombre: 'Trabajador de Campo', rol: 'Trabajador', creado: '2026-08-18' },
+  { user: 'trabajador', pass: 'campo123', nombre: 'Trabajador General', rol: 'Trabajador', creado: '2026-08-18' }
 ];
 
 const DEFAULT_FUNDOS = [
@@ -30,6 +33,7 @@ const DEFAULT_GRUPOS: string[] = [];
 
 function getInitialData() {
   return {
+    version: 1,
     usuarios: DEFAULT_USUARIOS,
     fundos: DEFAULT_FUNDOS,
     modulos: DEFAULT_MODULOS,
@@ -49,9 +53,22 @@ function loadDatabase() {
     if (fs.existsSync(DB_FILE)) {
       const content = fs.readFileSync(DB_FILE, 'utf-8');
       const parsed = JSON.parse(content);
+      
+      // Ensure default users are merged if missing
+      const existingUsers = Array.isArray(parsed.usuarios) ? parsed.usuarios : [];
+      const userMap = new Map<string, any>();
+      
+      // Add defaults first
+      DEFAULT_USUARIOS.forEach(u => userMap.set(u.user.toLowerCase(), u));
+      // Overwrite/add custom users
+      existingUsers.forEach((u: any) => {
+        if (u && u.user) userMap.set(u.user.toLowerCase(), u);
+      });
+
       return {
         ...getInitialData(),
-        ...parsed
+        ...parsed,
+        usuarios: Array.from(userMap.values())
       };
     }
   } catch (err) {
@@ -70,6 +87,20 @@ function saveDatabase(data: any) {
   }
 }
 
+// Active SSE client connections for instant push synchronization
+const sseClients = new Set<express.Response>();
+
+function notifyClients(payload: any) {
+  const dataString = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(dataString);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -82,7 +113,24 @@ async function startServer() {
 
   // API Routes
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.json({ status: 'ok', timestamp: new Date().toISOString(), version: db.version || 1 });
+  });
+
+  // Server-Sent Events endpoint for instant real-time broadcasts
+  app.get('/api/stream', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    // Send current state version on connect
+    res.write(`data: ${JSON.stringify({ type: 'init', version: db.version || 1, lastUpdated: db.lastUpdated })}\n\n`);
+
+    sseClients.add(res);
+
+    req.on('close', () => {
+      sseClients.delete(res);
+    });
   });
 
   // Get centralized data for all users/PCs
@@ -91,6 +139,60 @@ async function startServer() {
       status: 'ok',
       data: db
     });
+  });
+
+  // Get all users specifically
+  app.get('/api/usuarios', (req, res) => {
+    res.json({
+      status: 'ok',
+      usuarios: db.usuarios || []
+    });
+  });
+
+  // Direct login verification against server database
+  app.post('/api/login', (req, res) => {
+    const { user, pass } = req.body || {};
+    const uTrim = String(user || '').trim().toLowerCase();
+    const pTrim = String(pass || '').trim();
+
+    if (!uTrim || !pTrim) {
+      return res.status(400).json({ status: 'error', message: 'Usuario y contraseña requeridos' });
+    }
+
+    const found = (db.usuarios || []).find(
+      (u: any) => (u.user?.toLowerCase() === uTrim || u.nombre?.toLowerCase() === uTrim) && u.pass === pTrim
+    );
+
+    if (!found) {
+      return res.status(401).json({ status: 'error', message: 'Usuario o contraseña incorrectos' });
+    }
+
+    res.json({
+      status: 'ok',
+      user: {
+        user: found.user,
+        nombre: found.nombre,
+        rol: found.rol
+      }
+    });
+  });
+
+  // Update users specifically
+  app.post('/api/usuarios', (req, res) => {
+    try {
+      const { usuarios } = req.body || {};
+      if (Array.isArray(usuarios)) {
+        db.usuarios = usuarios;
+        db.version = (db.version || 1) + 1;
+        db.lastUpdated = new Date().toISOString();
+        saveDatabase(db);
+        notifyClients({ type: 'sync', version: db.version, data: db });
+        return res.json({ status: 'ok', data: db.usuarios });
+      }
+      res.status(400).json({ status: 'error', message: 'Formato de usuarios no válido' });
+    } catch (err: any) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
   });
 
   // Sync data from any client
@@ -103,14 +205,18 @@ async function startServer() {
         if (Array.isArray(incoming.trabajadores)) db.trabajadores = incoming.trabajadores;
         if (Array.isArray(incoming.detalleJabas)) db.detalleJabas = incoming.detalleJabas;
         if (Array.isArray(incoming.validaciones)) db.validaciones = incoming.validaciones;
-        if (Array.isArray(incoming.usuarios)) db.usuarios = incoming.usuarios;
+        if (Array.isArray(incoming.usuarios) && incoming.usuarios.length > 0) db.usuarios = incoming.usuarios;
         if (Array.isArray(incoming.lideres)) db.lideres = incoming.lideres;
         if (Array.isArray(incoming.grupos)) db.grupos = incoming.grupos;
 
+        db.version = (db.version || 1) + 1;
         db.lastUpdated = new Date().toISOString();
         saveDatabase(db);
+
+        // Push updates to all connected devices immediately
+        notifyClients({ type: 'sync', version: db.version, data: db });
       }
-      res.json({ status: 'ok', data: db });
+      res.json({ status: 'ok', data: db, version: db.version });
     } catch (err: any) {
       res.status(500).json({ status: 'error', message: err.message });
     }
@@ -119,8 +225,15 @@ async function startServer() {
   // Clean all test/mock data
   app.post('/api/reset', (req, res) => {
     try {
-      db = getInitialData();
+      const preservedUsers = db.usuarios || DEFAULT_USUARIOS;
+      db = {
+        ...getInitialData(),
+        usuarios: preservedUsers,
+        version: (db.version || 1) + 1,
+        lastUpdated: new Date().toISOString()
+      };
       saveDatabase(db);
+      notifyClients({ type: 'sync', version: db.version, data: db });
       res.json({ status: 'ok', message: 'Datos limpiados correctamente', data: db });
     } catch (err: any) {
       res.status(500).json({ status: 'error', message: err.message });

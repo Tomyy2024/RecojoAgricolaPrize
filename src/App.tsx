@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   UserSession, 
   TabId, 
@@ -13,7 +13,7 @@ import {
   DetalleJaba, 
   Usuario, 
   Lider, 
-  SyncLogEntry,
+  SyncLogEntry, 
   ValidacionSupervisor,
   DeviceViewMode
 } from './types';
@@ -116,7 +116,7 @@ export default function App() {
     {
       id: 'log_0',
       timestamp: new Date().toLocaleTimeString(),
-      mensaje: 'Sistema iniciado correctamente en modo almacenamiento local offline.',
+      mensaje: 'Sistema iniciado correctamente. Sincronización en tiempo real activa.',
       tipo: 'info'
     }
   ]);
@@ -141,6 +141,60 @@ export default function App() {
     setLogs((prev) => [newLog, ...prev.slice(0, 49)]);
   }, []);
 
+  // Universal Data Applier from Server/Broadcast
+  const applyServerData = useCallback((d: any, silent = true) => {
+    if (!d || typeof d !== 'object') return;
+
+    if (Array.isArray(d.programas)) {
+      setProgramasState(d.programas);
+      saveProgramas(d.programas);
+    }
+    if (Array.isArray(d.programaGeneral)) {
+      setProgramaGeneralState(d.programaGeneral);
+      saveProgramaGeneral(d.programaGeneral);
+    }
+    if (Array.isArray(d.trabajadores)) {
+      const seenDni = new Set<string>();
+      const uniqueWorkers: Trabajador[] = [];
+      d.trabajadores.forEach((t: Trabajador) => {
+        const cleanDni = String(t.dni || '').trim();
+        if (cleanDni && !seenDni.has(cleanDni)) {
+          seenDni.add(cleanDni);
+          uniqueWorkers.push(t);
+        }
+      });
+      setTrabajadoresState(uniqueWorkers);
+      saveTrabajadores(uniqueWorkers);
+    }
+    if (Array.isArray(d.detalleJabas)) {
+      setDetalleJabasState(d.detalleJabas);
+      saveDetalleJabas(d.detalleJabas);
+    }
+    if (Array.isArray(d.validaciones)) {
+      setValidacionesState(d.validaciones);
+      saveValidaciones(d.validaciones);
+    }
+    if (Array.isArray(d.usuarios) && d.usuarios.length > 0) {
+      setUsuariosState(d.usuarios);
+      saveUsuarios(d.usuarios);
+    }
+    if (Array.isArray(d.lideres)) {
+      setLideresState(d.lideres);
+      saveLideres(d.lideres);
+    }
+    if (Array.isArray(d.grupos)) {
+      setGruposState(d.grupos);
+      saveGrupos(d.grupos);
+    }
+    const nowIso = new Date().toISOString();
+    setLastSyncTime(nowIso);
+    setLastSync(nowIso);
+
+    if (!silent) {
+      addLog('🟢 Datos sincronizados en vivo con el servidor central', 'ok');
+    }
+  }, [addLog]);
+
   // Centralized Server Data Fetcher (Synchronizes all PCs and Users in Real-Time)
   const fetchCentralizedData = useCallback(async (silent = false) => {
     try {
@@ -148,52 +202,15 @@ export default function App() {
       if (!res.ok) return;
       const json = await res.json();
       if (json && json.status === 'ok' && json.data) {
-        const d = json.data;
-        if (Array.isArray(d.programas)) {
-          setProgramasState(d.programas);
-          saveProgramas(d.programas);
-        }
-        if (Array.isArray(d.programaGeneral)) {
-          setProgramaGeneralState(d.programaGeneral);
-          saveProgramaGeneral(d.programaGeneral);
-        }
-        if (Array.isArray(d.trabajadores)) {
-          const seenDni = new Set<string>();
-          const uniqueWorkers: Trabajador[] = [];
-          d.trabajadores.forEach((t: Trabajador) => {
-            const cleanDni = String(t.dni || '').trim();
-            if (cleanDni && !seenDni.has(cleanDni)) {
-              seenDni.add(cleanDni);
-              uniqueWorkers.push(t);
-            }
-          });
-          setTrabajadoresState(uniqueWorkers);
-          saveTrabajadores(uniqueWorkers);
-        }
-        if (Array.isArray(d.detalleJabas)) {
-          setDetalleJabasState(d.detalleJabas);
-          saveDetalleJabas(d.detalleJabas);
-        }
-        if (Array.isArray(d.validaciones)) {
-          setValidacionesState(d.validaciones);
-          saveValidaciones(d.validaciones);
-        }
-        if (Array.isArray(d.usuarios) && d.usuarios.length > 0) {
-          setUsuariosState(d.usuarios);
-          saveUsuarios(d.usuarios);
-        }
-        if (Array.isArray(d.lideres)) {
-          setLideresState(d.lideres);
-          saveLideres(d.lideres);
-        }
-        if (!silent) {
-          addLog('🟢 Datos sincronizados en vivo con el servidor central', 'ok');
-        }
+        applyServerData(json.data, silent);
       }
     } catch {
       // Offline fallback to local state
     }
-  }, [addLog]);
+  }, [applyServerData]);
+
+  // Broadcast Channel reference for instant cross-tab sync
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
 
   // Server Sync Mutation Trigger
   const syncToServer = useCallback(async (payloadOverride?: any) => {
@@ -205,33 +222,86 @@ export default function App() {
         detalleJabas: getDetalleJabas(),
         usuarios: getUsuarios(),
         validaciones: getValidaciones(),
-        lideres: getLideres()
+        lideres: getLideres(),
+        grupos: getGrupos()
       };
-      await fetch('/api/sync', {
+
+      // Broadcast to all tabs on this machine instantly
+      try {
+        broadcastChannelRef.current?.postMessage({ type: 'sync', data: payload });
+      } catch {}
+
+      const res = await fetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.data) {
+          applyServerData(json.data, true);
+        }
+      }
     } catch (e) {
       console.warn('Server sync offline:', e);
     }
-  }, []);
+  }, [applyServerData]);
 
-  // Periodic Polling and Window Focus listener to keep all connected PCs up to date
+  // Live Real-Time Polling + SSE + BroadcastChannel + Window Focus
   useEffect(() => {
+    // 1. Initial immediate pull
     fetchCentralizedData(false);
+
+    // 2. Broadcast Channel for instant multi-tab sync
+    try {
+      const bc = new BroadcastChannel('recojo_fruta_sync_channel');
+      broadcastChannelRef.current = bc;
+      bc.onmessage = (e) => {
+        if (e.data && e.data.type === 'sync' && e.data.data) {
+          applyServerData(e.data.data, true);
+        }
+      };
+    } catch {}
+
+    // 3. Server-Sent Events (SSE) for instant cross-device updates
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource('/api/stream');
+      es.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data);
+          if (parsed && (parsed.type === 'sync' || parsed.type === 'usuarios_updated')) {
+            if (parsed.data) {
+              applyServerData(parsed.data, true);
+            } else {
+              fetchCentralizedData(true);
+            }
+          }
+        } catch {}
+      };
+    } catch {}
+
+    // 4. Fast polling fallback (every 2.5s) to guarantee zero desync
     const interval = setInterval(() => {
       fetchCentralizedData(true);
-    }, 4000);
+    }, 2500);
 
-    const onFocus = () => fetchCentralizedData(true);
-    window.addEventListener('focus', onFocus);
+    const onFocusOrVisible = () => {
+      fetchCentralizedData(true);
+    };
+
+    window.addEventListener('focus', onFocusOrVisible);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
 
     return () => {
+      broadcastChannelRef.current?.close();
+      es?.close();
       clearInterval(interval);
-      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('focus', onFocusOrVisible);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
     };
-  }, [fetchCentralizedData]);
+  }, [fetchCentralizedData, applyServerData]);
 
   // Background Auto-fetch from Google Sheets if configured
   useEffect(() => {
@@ -244,47 +314,16 @@ export default function App() {
         const json = await res.json();
         if (json && json.status === 'ok' && json.data) {
           const d = json.data;
-          if (Array.isArray(d.programas) && d.programas.length > 0) {
-            setProgramasState(d.programas);
-            saveProgramas(d.programas);
-          }
-          if (Array.isArray(d.programaGeneral) && d.programaGeneral.length > 0) {
-            setProgramaGeneralState(d.programaGeneral);
-            saveProgramaGeneral(d.programaGeneral);
-          }
-          if (Array.isArray(d.trabajadores) && d.trabajadores.length > 0) {
-            const seenDni = new Set<string>();
-            const uniqueWorkers: Trabajador[] = [];
-            d.trabajadores.forEach((t: Trabajador) => {
-              const cleanDni = String(t.dni || '').trim();
-              if (cleanDni && !seenDni.has(cleanDni)) {
-                seenDni.add(cleanDni);
-                uniqueWorkers.push(t);
-              }
-            });
-            setTrabajadoresState(uniqueWorkers);
-            saveTrabajadores(uniqueWorkers);
-          }
-          if (Array.isArray(d.detalleJabas) && d.detalleJabas.length > 0) {
-            setDetalleJabasState(d.detalleJabas);
-            saveDetalleJabas(d.detalleJabas);
-          }
-          if (Array.isArray(d.validaciones) && d.validaciones.length > 0) {
-            setValidacionesState(d.validaciones);
-            saveValidaciones(d.validaciones);
-          }
-          const nowIso = new Date().toISOString();
-          setLastSyncTime(nowIso);
-          setLastSync(nowIso);
+          applyServerData(d, true);
           addLog('☁️ Datos sincronizados automáticamente con Google Sheets', 'ok');
-          syncToServer();
+          syncToServer(d);
         }
       } catch {
         // Silently use offline cache
       }
     };
     autoPullOnStart();
-  }, [addLog, syncToServer]);
+  }, [addLog, syncToServer, applyServerData]);
 
   // Background Auto-Sync Trigger
   const triggerAutoSync = useCallback(async (actionName: string, updatedPayload?: any) => {
@@ -309,7 +348,9 @@ export default function App() {
             trabajadores: getTrabajadores(),
             detalleJabas: getDetalleJabas(),
             usuarios: getUsuarios(),
-            validaciones: getValidaciones()
+            validaciones: getValidaciones(),
+            lideres: getLideres(),
+            grupos: getGrupos()
           }
         })
       });
@@ -319,7 +360,7 @@ export default function App() {
       setLastSync(nowIso);
       addLog(`✅ Auto-guardado completado en Google Sheets (${actionName})`, 'ok');
     } catch {
-      addLog(`⏳ Sin conexión con Google Sheets: cambio guardado localmente en dispositivo.`, 'err');
+      addLog(`⏳ Sin conexión con Google Sheets: cambio guardado localmente en servidor y dispositivo.`, 'err');
     }
   }, [addLog, syncToServer]);
 
@@ -353,6 +394,7 @@ export default function App() {
       setActiveTab('programaGeneral');
     }
     addLog(`👤 Sesión iniciada: ${userSession.nombre} (${userSession.rol})`, 'ok');
+    fetchCentralizedData(false);
   };
 
   const handleLogout = () => {
@@ -366,14 +408,14 @@ export default function App() {
     setProgramasState(updated);
     saveProgramas(updated);
     addLog(`📋 Nuevo Programa registrado: ${newPrograma.id} (${newPrograma.fundo} - ${newPrograma.modulo})`, 'ok');
-    triggerAutoSync('Nuevo Programa');
+    triggerAutoSync('Nuevo Programa', { programas: updated });
   };
 
   const handleSaveProgramaGeneral = (list: ProgramaGeneral[]) => {
     setProgramaGeneralState(list);
     saveProgramaGeneral(list);
     addLog(`🌾 Programa General actualizado (${list.length} registros)`, 'ok');
-    triggerAutoSync('Programa General');
+    triggerAutoSync('Programa General', { programaGeneral: list });
   };
 
   const handleSaveAvance = (avanceMap: Record<string, number>, newDetalleList: DetalleJaba[]) => {
@@ -389,8 +431,9 @@ export default function App() {
       }
     });
 
+    let updatedWorkers = trabajadores;
     if (Object.keys(groupUpdates).length > 0) {
-      const updatedWorkers = trabajadores.map((t) => {
+      updatedWorkers = trabajadores.map((t) => {
         if (groupUpdates[t.dni]) {
           return { ...t, grupo: groupUpdates[t.dni] };
         }
@@ -400,9 +443,9 @@ export default function App() {
       saveTrabajadores(updatedWorkers);
     }
 
-    // Also update in latest programa if available
+    let updatedProg = programas;
     if (programas.length > 0) {
-      const updatedProg = [...programas];
+      updatedProg = [...programas];
       updatedProg[0] = {
         ...updatedProg[0],
         avance: { ...(updatedProg[0].avance || {}), ...avanceMap }
@@ -412,14 +455,30 @@ export default function App() {
     }
 
     addLog(`📊 Avance de jabas registrado (${newDetalleList.length} registros)`, 'ok');
-    triggerAutoSync('Avance Jabas');
+    triggerAutoSync('Avance Jabas', { 
+      detalleJabas: mergedDetalle, 
+      trabajadores: updatedWorkers,
+      programas: updatedProg
+    });
   };
 
-  const handleSaveUsuarios = (updatedUsuarios: Usuario[]) => {
+  const handleSaveUsuarios = async (updatedUsuarios: Usuario[]) => {
     setUsuariosState(updatedUsuarios);
     saveUsuarios(updatedUsuarios);
     addLog(`🔐 Nómina de usuarios actualizada (${updatedUsuarios.length} usuarios)`, 'ok');
-    triggerAutoSync('Gestión Usuarios');
+    
+    // Direct push to server user registry
+    try {
+      await fetch('/api/usuarios', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usuarios: updatedUsuarios })
+      });
+    } catch (e) {
+      console.warn('Direct usuarios POST error:', e);
+    }
+
+    triggerAutoSync('Gestión Usuarios', { usuarios: updatedUsuarios });
   };
 
   const handleSaveLider = (newLider: Lider) => {
@@ -438,7 +497,7 @@ export default function App() {
     saveTrabajadores(updatedWorkers);
 
     addLog(`👑 Líder registrado: ${newLider.lider} en ${newLider.grupo}`, 'ok');
-    triggerAutoSync('Registro Líder');
+    triggerAutoSync('Registro Líder', { lideres: updated, trabajadores: updatedWorkers });
   };
 
   const handleSaveGrupo = (newGrupo: string) => {
@@ -479,7 +538,7 @@ export default function App() {
     const updated = saveSingleValidacion(newValidacion);
     setValidacionesState(updated);
     addLog(`📋 Validación oficial registrada: ${newValidacion.supervisor} - ${newValidacion.fundo} ${newValidacion.modulo} (${newValidacion.trabajadoresConformes} conformes / ${newValidacion.jabasConformes} jabas)`, 'ok');
-    triggerAutoSync('Validación por Supervisor');
+    triggerAutoSync('Validación por Supervisor', { validaciones: updated });
   };
 
   const handleImportTrabajadores = (newWorkers: Trabajador[]) => {
@@ -496,7 +555,7 @@ export default function App() {
     setTrabajadoresState(uniqueWorkers);
     saveTrabajadores(uniqueWorkers);
     addLog(`📥 Importados ${newWorkers.length} trabajadores a la nómina`, 'ok');
-    triggerAutoSync('Importar Trabajadores');
+    triggerAutoSync('Importar Trabajadores', { trabajadores: uniqueWorkers });
   };
 
   const handleManualSyncPush = async () => {
@@ -516,7 +575,9 @@ export default function App() {
           trabajadores,
           detalleJabas,
           usuarios,
-          validaciones
+          validaciones,
+          lideres,
+          grupos
         }
       };
 
@@ -578,31 +639,8 @@ export default function App() {
 
       if (json && json.status === 'ok' && json.data) {
         const d = json.data;
-        if (Array.isArray(d.programas) && d.programas.length > 0) {
-          setProgramasState(d.programas);
-          saveProgramas(d.programas);
-        }
-        if (Array.isArray(d.programaGeneral) && d.programaGeneral.length > 0) {
-          setProgramaGeneralState(d.programaGeneral);
-          saveProgramaGeneral(d.programaGeneral);
-        }
-        if (Array.isArray(d.trabajadores) && d.trabajadores.length > 0) {
-          setTrabajadoresState(d.trabajadores);
-          saveTrabajadores(d.trabajadores);
-        }
-        if (Array.isArray(d.detalleJabas) && d.detalleJabas.length > 0) {
-          setDetalleJabasState(d.detalleJabas);
-          saveDetalleJabas(d.detalleJabas);
-        }
-        if (Array.isArray(d.validaciones) && d.validaciones.length > 0) {
-          setValidacionesState(d.validaciones);
-          saveValidaciones(d.validaciones);
-        }
-
-        const nowIso = new Date().toISOString();
-        setLastSyncTime(nowIso);
-        setLastSync(nowIso);
-        addLog('✅ Datos sincronizados y actualizados en este dispositivo', 'ok');
+        applyServerData(d, false);
+        syncToServer(d);
         addToast('✅ Descarga desde Google Sheets completada');
       } else {
         throw new Error('Respuesta no válida');
