@@ -14,11 +14,12 @@ import {
   Zap,
   Volume2,
   VolumeX,
-  Download,
   Image as ImageIcon,
   Check,
   Search,
-  Sun
+  Sun,
+  ShieldAlert,
+  Info
 } from 'lucide-react';
 import { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
@@ -42,7 +43,7 @@ const playSuccessBeep = () => {
     const gain = ctx.createGain();
     
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(880, ctx.currentTime); // A5 note
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
     gain.gain.setValueAtTime(0.15, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.12);
     
@@ -63,18 +64,18 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
   trabajadores = [],
   mode = 'worker'
 }) => {
-  const [activeTab, setActiveTab] = useState<'live' | 'native_photo' | 'manual'>('live');
+  // Default to native_photo on mobile devices if live camera has hardware restrictions
+  const [activeTab, setActiveTab] = useState<'native_photo' | 'live' | 'manual'>('native_photo');
   const [cameraActive, setCameraActive] = useState(false);
   const [isStartingCamera, setIsStartingCamera] = useState(false);
-  const [statusMsg, setStatusMsg] = useState<string>('Listo para escanear.');
+  const [statusMsg, setStatusMsg] = useState<string>('Listo para escanear DNI / Fotocheck.');
   const [statusType, setStatusType] = useState<'info' | 'ok' | 'err' | 'warn'>('info');
   const [manualDni, setManualDni] = useState('');
   const [manualSearchFilter, setManualSearchFilter] = useState('');
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string>('');
   const [isProcessingFile, setIsProcessingFile] = useState(false);
-  const [showPermHelp, setShowPermHelp] = useState(false);
-  const [showPwaHelp, setShowPwaHelp] = useState(false);
+  const [showConfigHelp, setShowConfigHelp] = useState(true);
   const [torchOn, setTorchOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -84,7 +85,6 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
   // Diagnostics
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [diagnosticLog, setDiagnosticLog] = useState<string[]>([]);
-  const [isInIframe, setIsInIframe] = useState(false);
   const [cameraTestPassed, setCameraTestPassed] = useState<boolean | null>(null);
   const [videoDimensions, setVideoDimensions] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
 
@@ -102,18 +102,9 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
     setDiagnosticLog((prev) => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev.slice(0, 30)]);
   };
 
-  // Check iframe context
-  useEffect(() => {
-    try {
-      setIsInIframe(window.self !== window.top);
-    } catch {
-      setIsInIframe(true);
-    }
-  }, []);
-
   // Smart DNI Parser (Peruvian DNI PDF417, Barcodes, QR, MRZ)
   const handleDecodedContent = useCallback((rawCode: string) => {
-    if (!rawCode || !isScanningRef.current) return;
+    if (!rawCode) return;
     const clean = rawCode.trim();
     addLog(`Código leído (${clean.length} chars): ${clean.slice(0, 25)}...`);
 
@@ -203,17 +194,17 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
     setActiveEngine('none');
   }, []);
 
-  // Continuous Scan Loop with Hardware Acceleration + Canvas Blit
+  // Continuous Scan Loop
   const startScanningLoop = useCallback(async (videoElem: HTMLVideoElement) => {
     isScanningRef.current = true;
 
-    // Check if Native BarcodeDetector is available (Hardware accelerated in Android Chrome)
+    // Check BarcodeDetector
     const hasBarcodeDetector = typeof window !== 'undefined' && 'BarcodeDetector' in window;
     
     if (hasBarcodeDetector) {
       try {
-        addLog('Iniciando decodificador nativo BarcodeDetector (Hardware Acelerado)...');
-        // @ts-expect-error - BarcodeDetector standard web API
+        addLog('Iniciando BarcodeDetector nativo...');
+        // @ts-expect-error - BarcodeDetector
         const detector = new window.BarcodeDetector({
           formats: [
             'pdf417',
@@ -222,11 +213,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
             'code_39',
             'ean_13',
             'ean_8',
-            'upc_a',
-            'upc_e',
-            'data_matrix',
-            'aztec',
-            'itf'
+            'data_matrix'
           ]
         });
 
@@ -237,27 +224,17 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
 
           if (videoElem.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
             try {
-              // Draw to mirror canvas for reliable display & brightness check
-              if (canvasRef.current) {
-                const ctx = canvasRef.current.getContext('2d');
-                if (ctx && videoElem.videoWidth > 0 && videoElem.videoHeight > 0) {
-                  canvasRef.current.width = videoElem.videoWidth;
-                  canvasRef.current.height = videoElem.videoHeight;
-                  ctx.drawImage(videoElem, 0, 0);
-                }
-              }
-
               const barcodes = await detector.detect(videoElem);
               if (barcodes && barcodes.length > 0) {
                 const first = barcodes[0];
                 if (first.rawValue) {
-                  addLog(`BarcodeDetector detectó [${first.format}]: ${first.rawValue}`);
+                  addLog(`BarcodeDetector leyó [${first.format}]: ${first.rawValue}`);
                   handleDecodedContent(first.rawValue);
                   return;
                 }
               }
             } catch {
-              // Frame decoding error, continue loop
+              // Frame decoding error
             }
           }
 
@@ -269,13 +246,13 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
         detectFrame();
         return;
       } catch (e) {
-        addLog(`Aviso BarcodeDetector: ${e instanceof Error ? e.message : String(e)}. Usando ZXing...`);
+        addLog(`BarcodeDetector fallback: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
 
-    // ZXing Universal Engine Fallback
+    // ZXing Fallback
     try {
-      addLog('Iniciando decodificador ZXing Multi-Format (PDF417 / 128 / 39 / QR)...');
+      addLog('Iniciando motor ZXing...');
       setActiveEngine('zxing');
 
       const hints = new Map();
@@ -286,8 +263,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
         BarcodeFormat.CODE_39,
         BarcodeFormat.EAN_13,
         BarcodeFormat.EAN_8,
-        BarcodeFormat.DATA_MATRIX,
-        BarcodeFormat.ITF
+        BarcodeFormat.DATA_MATRIX
       ];
       hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
       hints.set(DecodeHintType.TRY_HARDER, true);
@@ -313,43 +289,37 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
         }
       });
     } catch (zxErr) {
-      addLog(`Error al iniciar ZXing: ${zxErr instanceof Error ? zxErr.message : String(zxErr)}`);
+      addLog(`Error ZXing: ${zxErr instanceof Error ? zxErr.message : String(zxErr)}`);
     }
   }, [handleDecodedContent]);
 
-  // Main Camera Starter with Smart Android Multi-Lens Selection
+  // Main Camera Starter
   const startCamera = async (targetDeviceId?: string) => {
     try {
       setIsStartingCamera(true);
-      setShowPermHelp(false);
       stopCamera();
 
-      addLog('Solicitando sensor de cámara al dispositivo...');
-      setStatusMsg('Iniciando cámara en vivo...');
+      addLog('Solicitando cámara...');
+      setStatusMsg('Conectando con el sensor...');
       setStatusType('info');
 
       if (!navigator?.mediaDevices?.getUserMedia) {
-        throw new Error('La API getUserMedia no está disponible en este navegador.');
+        throw new Error('getUserMedia no disponible.');
       }
 
-      // 1. Enumerate available devices first to find genuine rear color cameras
+      // Enumerate devices
       let videoDevices: MediaDeviceInfo[] = [];
       try {
         const devices = await navigator.mediaDevices.enumerateDevices();
         videoDevices = devices.filter((d) => d.kind === 'videoinput');
         setAvailableCameras(videoDevices);
-        addLog(`Dispositivos de video encontrados: ${videoDevices.length}`);
-      } catch (enumErr) {
-        addLog(`Aviso enumerateDevices: ${enumErr}`);
-      }
+      } catch {}
 
       let stream: MediaStream | null = null;
       const camIdToUse = targetDeviceId || selectedCameraId;
 
-      // Strategy A: Specific Camera ID selected by user
       if (camIdToUse) {
         try {
-          addLog(`Conectando a cámara ID: ${camIdToUse.slice(0, 12)}...`);
           stream = await navigator.mediaDevices.getUserMedia({
             video: {
               deviceId: { exact: camIdToUse },
@@ -359,14 +329,12 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
             audio: false
           });
         } catch (eId) {
-          addLog(`Fallo específico ID: ${eId instanceof Error ? eId.message : String(eId)}`);
+          addLog(`Fallo DeviceId: ${eId}`);
         }
       }
 
-      // Strategy B: FacingMode Environment (Primary Back Camera)
       if (!stream) {
         try {
-          addLog('Conectando a sensor principal trasero (environment)...');
           stream = await navigator.mediaDevices.getUserMedia({
             video: {
               facingMode: { ideal: 'environment' }
@@ -374,58 +342,40 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
             audio: false
           });
         } catch (eEnv) {
-          addLog(`Fallo environment: ${eEnv instanceof Error ? eEnv.message : String(eEnv)}`);
-        }
-      }
-
-      // Strategy C: Generic Video constraint
-      if (!stream) {
-        try {
-          addLog('Conectando con restricción genérica de video...');
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: false
-          });
-        } catch (eGen) {
-          addLog(`Fallo genérico: ${eGen instanceof Error ? eGen.message : String(eGen)}`);
-          throw eGen;
+          addLog(`Fallo environment: ${eEnv}`);
         }
       }
 
       if (!stream) {
-        throw new Error('No se pudo inicializar ningún sensor de cámara.');
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false
+        });
+      }
+
+      if (!stream) {
+        throw new Error('No se pudo iniciar el sensor de video.');
       }
 
       mediaStreamRef.current = stream;
 
-      // Update current selected camera ID
       const activeTrack = stream.getVideoTracks()[0];
       if (activeTrack) {
         const settings = activeTrack.getSettings();
         if (settings.deviceId) {
           setSelectedCameraId(settings.deviceId);
         }
-        addLog(`Sensor activo: ${activeTrack.label || 'Cámara Principal'}`);
+        addLog(`Pista activa: ${activeTrack.label || 'Cámara'}`);
 
-        // Check Torch capability
         try {
           const trackAny = activeTrack as unknown as { getCapabilities?: () => { torch?: boolean } };
           const caps = trackAny.getCapabilities ? trackAny.getCapabilities() : {};
           if (caps && caps.torch) {
             setHasTorch(true);
-            addLog('Linterna / Flash disponible.');
           }
         } catch {}
       }
 
-      // Re-enumerate to get full labels after permission granted
-      try {
-        const freshDevices = await navigator.mediaDevices.enumerateDevices();
-        const freshVideo = freshDevices.filter((d) => d.kind === 'videoinput');
-        setAvailableCameras(freshVideo);
-      } catch {}
-
-      // Attach stream to video element
       if (videoRef.current) {
         const v = videoRef.current;
         v.srcObject = stream;
@@ -434,52 +384,31 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
         v.setAttribute('muted', 'true');
         v.muted = true;
 
-        await v.play().catch((playErr) => {
-          addLog(`Aviso play: ${playErr.message}`);
-        });
+        await v.play().catch((e) => addLog(`Aviso play: ${e.message}`));
 
-        const vw = v.videoWidth || 1280;
-        const vh = v.videoHeight || 720;
-        setVideoDimensions({ width: vw, height: vh });
-        addLog(`Resolución obtenida: ${vw}x${vh}`);
+        setVideoDimensions({
+          width: v.videoWidth || 1280,
+          height: v.videoHeight || 720
+        });
 
         setCameraActive(true);
         setIsStartingCamera(false);
         setCameraTestPassed(true);
-        setStatusMsg('📷 Cámara activa. Enfoque el DNI, Fotocheck o código.');
+        setStatusMsg('📷 Cámara en vivo activa.');
         setStatusType('info');
 
-        // Start scan loop
         startScanningLoop(v);
-      } else {
-        throw new Error('Elemento de video no disponible en la interfaz.');
       }
-
     } catch (err: unknown) {
-      console.error('Camera startup error:', err);
+      console.error('Camera error:', err);
       stopCamera();
       setCameraTestPassed(false);
-
-      let msg = 'No se pudo abrir la cámara en vivo.';
-      if (err instanceof Error) {
-        addLog(`Error cámara: ${err.name} - ${err.message}`);
-        if (err.name === 'NotAllowedError' || err.message.toLowerCase().includes('permission') || err.message.toLowerCase().includes('denied')) {
-          msg = 'Permiso de cámara denegado. Toca "Tomar Foto (Nativo)" para disparar la cámara del celular.';
-          setShowPermHelp(true);
-        } else if (err.name === 'NotFoundError' || err.message.toLowerCase().includes('not found')) {
-          msg = 'No se encontró una cámara disponible.';
-        } else if (err.name === 'NotReadableError' || err.message.toLowerCase().includes('in use')) {
-          msg = 'La cámara está ocupada por otra app. Ciérrala y reintenta.';
-        } else {
-          msg = `Aviso: ${err.message}`;
-        }
-      }
-      setStatusMsg(msg);
+      setStatusMsg('No se pudo abrir el stream en vivo. Utiliza "📸 Tomar Foto (Nativo)" para disparar la cámara oficial.');
       setStatusType('err');
     }
   };
 
-  // Toggle Torch/Flashlight
+  // Toggle Torch
   const toggleTorch = async () => {
     if (!mediaStreamRef.current) return;
     const track = mediaStreamRef.current.getVideoTracks()[0];
@@ -494,14 +423,13 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
         });
       }
       setTorchOn(nextTorch);
-      addLog(`Linterna: ${nextTorch ? 'Encendida' : 'Apagada'}`);
+      addLog(`Linterna: ${nextTorch ? 'ON' : 'OFF'}`);
     } catch (e) {
       console.warn('Torch error:', e);
-      addLog('Error al conmutar linterna.');
     }
   };
 
-  // Switch to next available camera lens (Fixes black/depth sensor issue in Xiaomi/Samsung)
+  // Switch to next lens
   const handleSwitchToNextCamera = async () => {
     if (availableCameras.length === 0) {
       startCamera();
@@ -511,11 +439,11 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
     const nextIdx = (curIdx + 1) % availableCameras.length;
     const nextDev = availableCameras[nextIdx];
     setSelectedCameraId(nextDev.deviceId);
-    addLog(`Cambiando a sensor: ${nextDev.label || `Lente ${nextIdx + 1}`}`);
+    addLog(`Cambiando a: ${nextDev.label || `Lente ${nextIdx + 1}`}`);
     await startCamera(nextDev.deviceId);
   };
 
-  // Native Mobile Photo Trigger (Dispatches Android / iOS Native Camera App - 100% Guaranteed)
+  // Trigger Native Camera App
   const handleNativePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -558,36 +486,6 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
     }
   };
 
-  // Run diagnostics
-  const handleRunDiagnostics = async () => {
-    addLog('--- TEST DE DIAGNÓSTICO DE SENSORES ---');
-    addLog(`Navegador: ${navigator.userAgent.slice(0, 60)}...`);
-    addLog(`Protocolo HTTPS: ${window.location.protocol === 'https:' ? 'SÍ' : 'NO'}`);
-    addLog(`En iFrame: ${isInIframe ? 'SÍ' : 'NO'}`);
-    
-    if (navigator?.mediaDevices?.getUserMedia) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        const tracks = stream.getVideoTracks();
-        addLog(`✅ Sensor accesible. Pistas activas: ${tracks.length}`);
-        if (tracks[0]) {
-          addLog(`Pista 0: ${tracks[0].label || 'Cámara'} (Estado: ${tracks[0].readyState})`);
-        }
-        tracks.forEach((t) => t.stop());
-        setCameraTestPassed(true);
-        setStatusMsg('✅ Prueba de cámara exitosa.');
-        setStatusType('ok');
-        startCamera();
-      } catch (e: unknown) {
-        addLog(`❌ Error en test: ${e instanceof Error ? e.message : String(e)}`);
-        setCameraTestPassed(false);
-      }
-    } else {
-      addLog('❌ getUserMedia no disponible.');
-      setCameraTestPassed(false);
-    }
-  };
-
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualDni.trim()) return;
@@ -595,48 +493,14 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
     setManualDni('');
   };
 
-  // Auto-init on open
   useEffect(() => {
-    let isMounted = true;
-
-    if (isOpen) {
-      setStatusMsg(
-        mode === 'leader'
-          ? '👑 Modo Líder: Apunte la cámara al fotocheck o DNI del líder.'
-          : '📷 Apunte la cámara al código de barras, DNI o QR.'
-      );
-      setStatusType('info');
-      setShowPermHelp(false);
-      setShowPwaHelp(false);
-      setIsStartingCamera(false);
-      setManualDni('');
-      setManualSearchFilter('');
-      setCameraTestPassed(null);
-      setDiagnosticLog([]);
-      setActiveTab('live');
-
-      addLog('Lector de escaneo abierto.');
-
-      const timer = setTimeout(() => {
-        if (isMounted) {
-          startCamera();
-        }
-      }, 250);
-
-      return () => {
-        clearTimeout(timer);
-        isMounted = false;
-        stopCamera();
-      };
-    } else {
+    if (!isOpen) {
       stopCamera();
     }
-
     return () => {
-      isMounted = false;
       stopCamera();
     };
-  }, [isOpen, mode]);
+  }, [isOpen, stopCamera]);
 
   if (!isOpen) return null;
 
@@ -665,7 +529,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                   {mode === 'leader' ? '👑 Escanear Líder' : '📷 Escanear DNI / Fotocheck'}
                 </h3>
                 <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
-                  PDF417 · QR · 128
+                  PDF417 · Barcode · QR
                 </span>
               </div>
               <p className="text-[11px] text-[#757575]">Compatible con DNI Azul, DNIe y Fotochecks</p>
@@ -697,38 +561,38 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
           </div>
         </div>
 
-        {/* Navigation Tabs (Cámara en Vivo / Foto Celular / Manual) */}
+        {/* Navigation Tabs */}
         <div className="flex items-center gap-1.5 pt-2.5 pb-1 shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('live');
-              if (!cameraActive) startCamera();
-            }}
-            className={`flex-1 py-1.5 px-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
-              activeTab === 'live'
-                ? 'bg-[#2e7d32] text-white shadow-xs'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            <Camera className="w-3.5 h-3.5" />
-            <span>Cámara en Vivo</span>
-          </button>
-
           <button
             type="button"
             onClick={() => {
               setActiveTab('native_photo');
               stopCamera();
             }}
-            className={`flex-1 py-1.5 px-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+            className={`flex-1 py-2 px-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
               activeTab === 'native_photo'
                 ? 'bg-[#2e7d32] text-white shadow-xs'
                 : 'bg-emerald-50 text-[#1b5e20] border border-[#a5d6a7] hover:bg-emerald-100'
             }`}
           >
             <Smartphone className="w-3.5 h-3.5" />
-            <span>Foto de Celular</span>
+            <span>📸 Foto de Celular (Recomendado)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('live');
+              startCamera();
+            }}
+            className={`py-2 px-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+              activeTab === 'live'
+                ? 'bg-[#2e7d32] text-white shadow-xs'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            <Camera className="w-3.5 h-3.5" />
+            <span>En Vivo</span>
           </button>
 
           <button
@@ -737,28 +601,121 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
               setActiveTab('manual');
               stopCamera();
             }}
-            className={`flex-1 py-1.5 px-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+            className={`py-2 px-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
               activeTab === 'manual'
                 ? 'bg-[#2e7d32] text-white shadow-xs'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
             <Search className="w-3.5 h-3.5" />
-            <span>Buscar DNI</span>
+            <span>Buscar</span>
           </button>
         </div>
 
         {/* Body Content */}
         <div className="overflow-y-auto flex-1 py-2 space-y-2.5">
 
-          {/* TAB 1: CÁMARA EN VIVO */}
+          {/* TAB 1: TOMAR FOTO NATIVA (MÉTODO 100% EFECTIVO Y CLARO) */}
+          {activeTab === 'native_photo' && (
+            <div className="space-y-3">
+              
+              {/* Explicación de Permisos / Hardware Android */}
+              {showConfigHelp && (
+                <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl text-xs text-amber-900 space-y-2 shadow-2xs">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                      <Info className="w-4 h-4 text-amber-700 shrink-0" />
+                      <span>¿Por qué la linterna enciende pero la cámara se ve oscura?</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowConfigHelp(false)}
+                      className="text-amber-600 hover:text-amber-800 font-bold text-[11px]"
+                    >
+                      Entendido
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    Muchos teléfonos Android (Xiaomi, Redmi, Samsung) tienen <strong>sensores de profundidad ToF o lentes macro</strong> que la web toma por error. 
+                    Al usar <strong>"Tomar Foto (Nativo)"</strong>, se dispara directamente la <strong>cámara oficial de tu celular</strong> con autoenfoque, flash y luz completa.
+                  </p>
+                </div>
+              )}
+
+              {/* Botón Principal Disparador de Cámara Nativa */}
+              <div className="p-4 bg-gradient-to-b from-[#e8f5e9] to-[#f1f8e9] border-2 border-[#a5d6a7] rounded-2xl text-center space-y-3 shadow-xs">
+                <div className="w-14 h-14 bg-white rounded-2xl shadow-sm border border-[#81c784] mx-auto flex items-center justify-center text-[#2e7d32]">
+                  <Camera className="w-8 h-8" />
+                </div>
+                
+                <div className="space-y-1">
+                  <h4 className="font-extrabold text-base text-[#1b5e20]">
+                    Disparar Cámara Oficial del Celular
+                  </h4>
+                  <p className="text-xs text-[#2e7d32] font-medium max-w-xs mx-auto">
+                    Toca el botón verde para abrir la cámara de tu teléfono, enfoca el código de barras o DNI y tómale la foto.
+                  </p>
+                </div>
+
+                <div className="space-y-2 pt-1">
+                  <label className="w-full bg-[#2e7d32] hover:bg-[#1b5e20] active:bg-[#1b5e20] text-white py-3.5 px-4 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 shadow-md cursor-pointer active:scale-95 transition-all text-center">
+                    {isProcessingFile ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 animate-spin" />
+                        <span>Decodificando DNI...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Camera className="w-5 h-5" />
+                        <span>📸 Tomar Foto al DNI / Fotocheck</span>
+                      </>
+                    )}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handleNativePhotoCapture}
+                      disabled={isProcessingFile}
+                      className="hidden"
+                    />
+                  </label>
+
+                  <label className="w-full bg-white hover:bg-emerald-50 text-[#1b5e20] border border-[#a5d6a7] py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer active:scale-95 transition-all text-center">
+                    <ImageIcon className="w-4 h-4" />
+                    <span>Seleccionar Foto de la Galería</span>
+                    <input
+                      ref={galleryInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleNativePhotoCapture}
+                      disabled={isProcessingFile}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Guía de Enfoque */}
+              <div className="bg-white p-3 rounded-xl border border-gray-200 text-[11px] text-gray-700 space-y-1.5">
+                <div className="font-bold text-[#1b5e20] flex items-center gap-1">
+                  <Check className="w-3.5 h-3.5 text-[#2e7d32]" />
+                  <span>Consejos para una lectura al 100%:</span>
+                </div>
+                <ul className="list-disc pl-4 space-y-0.5 text-gray-600">
+                  <li><strong>DNI Azul o DNIe</strong>: Enfoca el código de barras <strong>PDF417</strong> que está al reverso.</li>
+                  <li><strong>Fotocheck de campo</strong>: Enfoca el código de barras o código QR.</li>
+                </ul>
+              </div>
+
+            </div>
+          )}
+
+          {/* TAB 2: CÁMARA EN VIVO WEBRTC */}
           {activeTab === 'live' && (
             <div className="space-y-2.5">
               
-              {/* Visor de Cámara */}
-              <div className="relative rounded-2xl overflow-hidden bg-neutral-900 border-2 border-emerald-600/40 shadow-inner flex items-center justify-center min-h-[220px] max-h-[300px] aspect-4/3 w-full mx-auto">
-                
-                {/* Elemento de Video Directo */}
+              <div className="relative rounded-2xl overflow-hidden bg-neutral-900 border-2 border-emerald-600/40 shadow-inner flex items-center justify-center min-h-[220px] max-h-[280px] aspect-4/3 w-full mx-auto">
                 <video
                   ref={videoRef}
                   playsInline
@@ -768,10 +725,8 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                   style={{ display: cameraActive ? 'block' : 'none' }}
                 />
 
-                {/* Canvas de Respaldo */}
                 <canvas ref={canvasRef} className="hidden" />
 
-                {/* Guía Visual con Escáner */}
                 {cameraActive && (
                   <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-4">
                     <div className="w-[85%] h-[60%] border-2 border-emerald-400/90 rounded-2xl relative shadow-[0_0_15px_rgba(46,125,50,0.5)]">
@@ -788,7 +743,6 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                   </div>
                 )}
 
-                {/* Estado Inactivo */}
                 {!cameraActive && (
                   <div className="p-6 text-center text-white space-y-2">
                     <div className="w-12 h-12 rounded-full bg-emerald-950/80 border border-emerald-500/30 mx-auto flex items-center justify-center text-emerald-400">
@@ -804,7 +758,6 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                   </div>
                 )}
 
-                {/* Controles Flotantes en el Visor */}
                 {cameraActive && (
                   <div className="absolute top-2 right-2 flex items-center gap-1.5 z-20 bg-black/70 backdrop-blur-md px-2 py-1 rounded-full border border-white/20">
                     <button
@@ -813,7 +766,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                       className={`p-1.5 rounded-full text-xs cursor-pointer transition-all ${
                         boostBrightness ? 'bg-amber-400 text-black shadow-xs' : 'text-white hover:bg-white/20'
                       }`}
-                      title={boostBrightness ? 'Brillo aumentado' : 'Aumentar brillo'}
+                      title="Aumentar brillo"
                     >
                       <Sun className="w-4 h-4" />
                     </button>
@@ -825,7 +778,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                         className={`p-1.5 rounded-full text-xs cursor-pointer transition-all ${
                           torchOn ? 'bg-amber-400 text-black shadow-xs' : 'text-white hover:bg-white/20'
                         }`}
-                        title="Encender Linterna / Flash"
+                        title="Linterna"
                       >
                         <Flashlight className="w-4 h-4" />
                       </button>
@@ -835,7 +788,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                       type="button"
                       onClick={handleSwitchToNextCamera}
                       className="p-1.5 rounded-full text-white hover:bg-white/20 text-xs cursor-pointer transition-all"
-                      title="Cambiar de Lente / Sensor"
+                      title="Cambiar Lente"
                     >
                       <SwitchCamera className="w-4 h-4" />
                     </button>
@@ -843,134 +796,21 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                 )}
               </div>
 
-              {/* Botón de Solución Si la Pantalla Sale Oscura */}
-              <div className="bg-amber-50 border border-amber-200 p-2 rounded-xl text-xs flex items-center justify-between gap-2 shadow-2xs">
-                <div className="text-[11px] text-amber-900 leading-tight">
-                  <span className="font-bold">¿La cámara se ve oscura o en negro?</span>
-                  <p className="text-[10px] text-amber-800">
-                    Tu celular tiene múltiples lentes. Toca aquí para conmutar al lente principal con luz:
-                  </p>
-                </div>
+              {/* Botón de Alternancia de Lente */}
+              <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={handleSwitchToNextCamera}
-                  className="shrink-0 bg-[#ff8f00] hover:bg-[#e65100] text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-all active:scale-95 shadow-xs"
+                  className="flex-1 bg-[#ff8f00] hover:bg-[#e65100] text-white py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95 transition-all"
                 >
-                  <SwitchCamera className="w-3.5 h-3.5" />
-                  <span>Probar Otro Lente</span>
-                </button>
-              </div>
-
-              {/* Controles de Acción de Cámara */}
-              <div className="grid grid-cols-2 gap-2">
-                {!cameraActive ? (
-                  <button
-                    type="button"
-                    onClick={() => startCamera()}
-                    disabled={isStartingCamera}
-                    className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95 disabled:opacity-60"
-                  >
-                    {isStartingCamera ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
-                        <span>Conectando...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Camera className="w-4 h-4 shrink-0" />
-                        <span>Iniciar Cámara</span>
-                      </>
-                    )}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={stopCamera}
-                    className="bg-[#d32f2f] hover:bg-[#b71c1c] text-white py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
-                  >
-                    <X className="w-4 h-4 shrink-0" />
-                    <span>Pausar Cámara</span>
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={handleSwitchToNextCamera}
-                  className="bg-gray-100 hover:bg-gray-200 text-gray-800 py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border border-gray-300 cursor-pointer active:scale-95 transition-all"
-                >
-                  <SwitchCamera className="w-4 h-4 text-emerald-700" />
-                  <span>Cambiar Lente ({availableCameras.length || 1})</span>
+                  <SwitchCamera className="w-4 h-4" />
+                  <span>Probar Otro Lente ({availableCameras.length || 1})</span>
                 </button>
               </div>
             </div>
           )}
 
-          {/* TAB 2: TOMAR FOTO CON CÁMARA NATIVA DE CELULAR (100% Infalible) */}
-          {activeTab === 'native_photo' && (
-            <div className="space-y-3 p-3 bg-emerald-50/70 border border-emerald-200 rounded-2xl">
-              <div className="text-center space-y-1">
-                <div className="w-12 h-12 bg-white rounded-2xl shadow-xs border border-emerald-300 mx-auto flex items-center justify-center text-[#2e7d32]">
-                  <Smartphone className="w-6 h-6" />
-                </div>
-                <h4 className="font-bold text-sm text-[#1b5e20]">Cámara Nativa del Celular</h4>
-                <p className="text-xs text-gray-600 max-w-xs mx-auto">
-                  Abre directamente la aplicación de cámara de tu teléfono con autoenfoque de alta resolución y flash.
-                </p>
-              </div>
-
-              <div className="space-y-2 pt-1">
-                <label className="w-full bg-[#2e7d32] hover:bg-[#1b5e20] text-white py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md cursor-pointer active:scale-95 transition-all text-center">
-                  {isProcessingFile ? (
-                    <>
-                      <RefreshCw className="w-5 h-5 animate-spin" />
-                      <span>Analizando fotografía...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Camera className="w-5 h-5" />
-                      <span>📸 Tomar Foto al DNI / Fotocheck</span>
-                    </>
-                  )}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handleNativePhotoCapture}
-                    disabled={isProcessingFile}
-                    className="hidden"
-                  />
-                </label>
-
-                <label className="w-full bg-white hover:bg-emerald-50 text-[#1b5e20] border border-emerald-400 py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-2xs cursor-pointer active:scale-95 transition-all text-center">
-                  <ImageIcon className="w-4 h-4" />
-                  <span>Subir Foto desde la Galería</span>
-                  <input
-                    ref={galleryInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleNativePhotoCapture}
-                    disabled={isProcessingFile}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-
-              <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-200 text-[11px] text-[#1b5e20] space-y-1">
-                <div className="font-bold flex items-center gap-1">
-                  <Check className="w-3.5 h-3.5 text-[#2e7d32]" />
-                  <span>Ventajas de este modo:</span>
-                </div>
-                <ul className="list-disc pl-4 space-y-0.5 text-gray-700">
-                  <li>No sufre problemas de permisos ni pantallas oscuras.</li>
-                  <li>Permite enfocar el código de barras con zoom y flash.</li>
-                  <li>Reconoce instantáneamente el DNI de 8 dígitos.</li>
-                </ul>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: BÚSQUEDA Y SELECCIÓN MANUAL */}
+          {/* TAB 3: BÚSQUEDA Y ASIGNACIÓN MANUAL */}
           {activeTab === 'manual' && (
             <div className="space-y-2.5">
               <div>
@@ -997,11 +837,6 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
               </div>
 
               <div className="border-t border-gray-200 pt-2">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs font-bold text-gray-700">
-                    O busca en la nómina registrada ({filteredTrabajadores.length}):
-                  </span>
-                </div>
                 <input
                   type="text"
                   placeholder="Filtrar por nombre o DNI..."
@@ -1065,55 +900,6 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                 </span>
               )}
             </div>
-          </div>
-
-          {/* Herramienta de Diagnóstico */}
-          <div className="bg-gray-50 rounded-xl border border-gray-200 p-2.5">
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setShowDiagnostics(!showDiagnostics)}
-                className="text-[11px] font-bold text-gray-700 hover:text-[#1b5e20] flex items-center gap-1.5 cursor-pointer"
-              >
-                <Wrench className="w-3.5 h-3.5 text-[#2e7d32]" />
-                <span>{showDiagnostics ? 'Ocultar Diagnóstico' : '🛠️ Probar Sensores de Cámara'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleRunDiagnostics}
-                className="text-[10px] font-bold bg-white hover:bg-emerald-50 text-[#1b5e20] px-2.5 py-1 rounded-lg border border-[#a5d6a7] flex items-center gap-1 cursor-pointer transition-all active:scale-95 shadow-2xs"
-              >
-                <Zap className="w-3 h-3 text-[#ff8f00]" />
-                <span>Ejecutar Test</span>
-              </button>
-            </div>
-
-            {showDiagnostics && (
-              <div className="mt-2.5 pt-2 border-t border-gray-200 space-y-2 text-[11px] animate-in fade-in">
-                <div className="flex flex-wrap gap-1.5 items-center text-[10px]">
-                  <span className={`px-2 py-0.5 rounded font-bold ${cameraTestPassed ? 'bg-emerald-100 text-emerald-800' : cameraTestPassed === false ? 'bg-red-100 text-red-800' : 'bg-gray-200 text-gray-700'}`}>
-                    Test: {cameraTestPassed ? '✅ Aprobado' : cameraTestPassed === false ? '❌ Error' : 'Sin Ejecutar'}
-                  </span>
-                  <span className="px-2 py-0.5 bg-blue-50 text-blue-800 rounded font-medium">
-                    Sensores detectados: {availableCameras.length}
-                  </span>
-                  <span className="px-2 py-0.5 bg-purple-50 text-purple-800 rounded font-medium">
-                    Res: {videoDimensions.width}x{videoDimensions.height}
-                  </span>
-                </div>
-
-                <div className="bg-black/90 text-emerald-400 font-mono p-2 rounded-lg text-[10px] max-h-28 overflow-y-auto space-y-0.5 leading-tight">
-                  {diagnosticLog.length === 0 ? (
-                    <div className="text-gray-500">Toca "Ejecutar Test" para inspeccionar los sensores de tu dispositivo.</div>
-                  ) : (
-                    diagnosticLog.map((l, i) => (
-                      <div key={i}>{l}</div>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
         </div>
