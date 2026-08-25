@@ -16,10 +16,7 @@ export const INITIAL_MODULOS_POR_FUNDO: Record<string, string[]> = {
   "Vivadis": ["M01", "M02", "M03", "M04", "M05"]
 };
 
-export const INITIAL_GRUPOS: string[] = [
-  "Grupo01", "Grupo 01", "Grupo 02", "Grupo 03", "Grupo 04", "Grupo 05",
-  "Grupo 06", "Grupo 07", "Grupo 08", "Grupo 09", "Grupo 10"
-];
+export const INITIAL_GRUPOS: string[] = [];
 
 export const INITIAL_LOTES: LoteItem[] = [
   // Arena Azul M01
@@ -126,11 +123,7 @@ export const INITIAL_LOTES: LoteItem[] = [
 ];
 
 export const INITIAL_USUARIOS: Usuario[] = [
-  { user: 'admin', pass: 'admin123', nombre: 'Administrador General', rol: 'Administrador', creado: '2026-08-18' },
-  { user: 'csolar', pass: 'solar123', nombre: 'Carlos Solar', rol: 'Supervisor', creado: '2026-08-19' },
-  { user: 'supervisor1', pass: 'super123', nombre: 'Carlos Mendoza', rol: 'Supervisor', creado: '2026-08-19' },
-  { user: 'supervisor2', pass: 'super123', nombre: 'María Quispe', rol: 'Supervisor', creado: '2026-08-19' },
-  { user: 'trabajador1', pass: 'campo123', nombre: 'Juan Pérez', rol: 'Trabajador', creado: '2026-08-20' }
+  { user: 'admin', pass: 'admin123', nombre: 'Administrador General', rol: 'Administrador', creado: '2026-08-18' }
 ];
 
 export const INITIAL_TRABAJADORES: Trabajador[] = [];

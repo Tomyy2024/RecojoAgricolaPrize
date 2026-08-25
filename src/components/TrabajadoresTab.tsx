@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Trabajador, Lider, UserSession, DetalleJaba } from '../types';
+import { Trabajador, Lider, UserSession, DetalleJaba, Usuario } from '../types';
 import { ScannerModal } from './ScannerModal';
 import { getLocalToday, getLocalISO } from '../utils/storage';
 import { 
@@ -29,7 +29,10 @@ interface TrabajadoresTabProps {
   trabajadores: Trabajador[];
   grupos: string[];
   lideres: Lider[];
+  usuarios?: Usuario[];
   onSaveLider: (lider: Lider) => void;
+  onSaveSupervisor?: (supervisorName: string) => void;
+  onSaveGrupo?: (grupo: string) => void;
   onSaveAvance: (avanceMap: Record<string, number>, detalleList: DetalleJaba[]) => void;
   onToast: (msg: string) => void;
 }
@@ -39,7 +42,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   trabajadores,
   grupos,
   lideres,
+  usuarios = [],
   onSaveLider,
+  onSaveSupervisor,
+  onSaveGrupo,
   onSaveAvance,
   onToast
 }) => {
@@ -49,15 +55,15 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const isSupervisorUser = session.rol === 'Supervisor';
   const sessionSupervisorName = session.nombre;
 
-  // Paso 1: Configuración de Cuadrilla Secuencial
+  // Paso 1: Configuración de Cuadrilla Secuencial (Limpio sin datos de prueba)
   const [cuadrillaSupervisor, setCuadrillaSupervisor] = useState(
-    isSupervisorUser ? sessionSupervisorName : 'Carlos Solar'
+    isSupervisorUser ? sessionSupervisorName : ''
   );
-  const [cuadrillaFundo, setCuadrillaFundo] = useState('Santa Teresa');
-  const [cuadrillaModulo, setCuadrillaModulo] = useState('M01');
-  const [cuadrillaGrupo, setCuadrillaGrupo] = useState('Grupo01');
-  const [cuadrillaLider, setCuadrillaLider] = useState('Antony Cerron');
-  const [cuadrillaLiderDni, setCuadrillaLiderDni] = useState('71928374');
+  const [cuadrillaFundo, setCuadrillaFundo] = useState('');
+  const [cuadrillaModulo, setCuadrillaModulo] = useState('');
+  const [cuadrillaGrupo, setCuadrillaGrupo] = useState('');
+  const [cuadrillaLider, setCuadrillaLider] = useState('');
+  const [cuadrillaLiderDni, setCuadrillaLiderDni] = useState('');
 
   // Search filter
   const [searchTerm, setSearchTerm] = useState('');
@@ -71,9 +77,17 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   // Avance values: { [dni]: jabasCount }
   const [avanceValues, setAvanceValues] = useState<Record<string, number>>({});
 
+  // Supervisor registration state
+  const [showSupervisorForm, setShowSupervisorForm] = useState(false);
+  const [newSupervisorNombre, setNewSupervisorNombre] = useState('');
+
+  // Grupo registration state
+  const [showGrupoForm, setShowGrupoForm] = useState(false);
+  const [newGrupoNombre, setNewGrupoNombre] = useState('');
+
   // Leader registration state (Sub-module)
   const [showLeaderForm, setShowLeaderForm] = useState(false);
-  const [liderGrupo, setLiderGrupo] = useState('Grupo01');
+  const [liderGrupo, setLiderGrupo] = useState('');
   const [liderNombre, setLiderNombre] = useState('');
   const [liderDni, setLiderDni] = useState('');
   const [filtroGrupoLideres, setFiltroGrupoLideres] = useState('');
@@ -88,14 +102,16 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     if (isSupervisorUser && sessionSupervisorName) {
       set.add(sessionSupervisorName);
     }
-    set.add('Carlos Solar');
-    set.add('Carlos Mendoza');
-    set.add('María Quispe');
+    if (usuarios && Array.isArray(usuarios)) {
+      usuarios.filter((u) => u.rol === 'Supervisor').forEach((u) => {
+        if (u.nombre) set.add(u.nombre);
+      });
+    }
     trabajadores.forEach((t) => {
-      if (t.supervisor) set.add(t.supervisor);
+      if (t.supervisor && t.supervisor.trim()) set.add(t.supervisor.trim());
     });
     return Array.from(set).sort();
-  }, [trabajadores, isSupervisorUser, sessionSupervisorName]);
+  }, [trabajadores, isSupervisorUser, sessionSupervisorName, usuarios]);
 
   const fundosList = useMemo(() => {
     const set = new Set<string>();
@@ -133,34 +149,31 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
   const allGrupos = useMemo(() => {
     const set = new Set<string>();
-    set.add('Grupo01');
-    set.add('Grupo 01');
-    grupos.forEach((g) => set.add(g));
+    grupos.forEach((g) => {
+      if (g && g.trim()) set.add(g.trim());
+    });
     trabajadores.forEach((t) => {
-      if (t.grupo) set.add(t.grupo);
+      if (t.grupo && t.grupo.trim()) set.add(t.grupo.trim());
     });
     lideres.forEach((l) => {
-      if (l.grupo) set.add(l.grupo);
+      if (l.grupo && l.grupo.trim()) set.add(l.grupo.trim());
     });
-    return Array.from(set);
+    return Array.from(set).sort();
   }, [grupos, trabajadores, lideres]);
 
-  // Combined leaders list (from state + defaults)
+  // Combined leaders list (from state + real records)
   const availableLideres = useMemo(() => {
     const list: { nombre: string; dni: string; grupo: string }[] = [];
-    
-    // Add default Antony Cerron
-    list.push({ nombre: 'Antony Cerron', dni: '71928374', grupo: 'Grupo01' });
 
     lideres.forEach((l) => {
-      if (!list.some((item) => item.nombre.toLowerCase() === l.lider.toLowerCase())) {
+      if (l.lider && !list.some((item) => item.nombre.toLowerCase() === l.lider.toLowerCase() && item.grupo.toLowerCase() === l.grupo.toLowerCase())) {
         list.push({ nombre: l.lider, dni: l.dni, grupo: l.grupo });
       }
     });
 
     trabajadores.forEach((t) => {
       if (t.lider && !list.some((item) => item.nombre.toLowerCase() === t.lider!.toLowerCase())) {
-        list.push({ nombre: t.lider, dni: t.dni, grupo: t.grupo || 'Grupo01' });
+        list.push({ nombre: t.lider, dni: t.dni, grupo: t.grupo || '' });
       }
     });
 
@@ -169,6 +182,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
   // Auto update leader when group changes if match exists
   useEffect(() => {
+    if (!cuadrillaGrupo) return;
     const matched = availableLideres.find(
       (l) => l.grupo.toLowerCase() === cuadrillaGrupo.toLowerCase()
     );
@@ -328,6 +342,43 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       setScannerOpen(false);
       onToast(`👷 ${nombre} asignado/a exitosamente al ${cuadrillaGrupo}`);
     }
+  };
+
+  // Register new Supervisor
+  const handleRegisterSupervisor = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = newSupervisorNombre.trim();
+    if (!clean) {
+      onToast('⚠️ Ingresa el nombre del supervisor');
+      return;
+    }
+    if (onSaveSupervisor) {
+      onSaveSupervisor(clean);
+    }
+    setCuadrillaSupervisor(clean);
+    setNewSupervisorNombre('');
+    setShowSupervisorForm(false);
+    onToast(`✅ Supervisor "${clean}" registrado y seleccionado`);
+  };
+
+  // Register new Grupo
+  const handleRegisterGrupo = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = newGrupoNombre.trim();
+    if (!clean) {
+      onToast('⚠️ Ingresa el nombre del grupo');
+      return;
+    }
+    if (onSaveGrupo) {
+      onSaveGrupo(clean);
+    }
+    setCuadrillaGrupo(clean);
+    if (!liderGrupo) {
+      setLiderGrupo(clean);
+    }
+    setNewGrupoNombre('');
+    setShowGrupoForm(false);
+    onToast(`✅ Grupo "${clean}" registrado y seleccionado`);
   };
 
   // Register new Leader
@@ -568,9 +619,22 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3.5 bg-[#fcf9f8] p-4 rounded-xl border border-[#e0e0e0] mb-5">
               {/* 1. Supervisor */}
               <div className="space-y-1">
-                <label className="flex items-center gap-1.5 text-xs font-bold text-[#2e7d32]">
-                  <UserCheck className="w-3.5 h-3.5" />
-                  <span>1. Supervisor</span>
+                <label className="flex items-center justify-between text-xs font-bold text-[#2e7d32]">
+                  <span className="flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>1. Supervisor</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSupervisorForm(!showSupervisorForm);
+                      setShowGrupoForm(false);
+                      setShowLeaderForm(false);
+                    }}
+                    className="text-[10px] text-[#2e7d32] hover:underline font-normal cursor-pointer"
+                  >
+                    {showSupervisorForm ? 'Cerrar' : '+ Registrar'}
+                  </button>
                 </label>
                 <div className="relative">
                   <select
@@ -652,9 +716,22 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
               {/* 4. Grupo */}
               <div className="space-y-1">
-                <label className="flex items-center gap-1.5 text-xs font-bold text-[#2e7d32]">
-                  <Users className="w-3.5 h-3.5" />
-                  <span>4. Grupo</span>
+                <label className="flex items-center justify-between text-xs font-bold text-[#2e7d32]">
+                  <span className="flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5" />
+                    <span>4. Grupo</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowGrupoForm(!showGrupoForm);
+                      setShowSupervisorForm(false);
+                      setShowLeaderForm(false);
+                    }}
+                    className="text-[10px] text-[#2e7d32] hover:underline font-normal cursor-pointer"
+                  >
+                    {showGrupoForm ? 'Cerrar' : '+ Registrar'}
+                  </button>
                 </label>
                 <div className="relative">
                   <select
@@ -671,7 +748,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   </select>
                 </div>
                 <div className="text-[10px] text-gray-500 flex items-center gap-1">
-                  <span className="font-semibold text-[#1b5e20]">Ejemplo:</span> Grupo01
+                  <span className="font-semibold text-[#1b5e20]">Ejemplo:</span> Grupo 01
                 </div>
               </div>
 
@@ -684,7 +761,11 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   </span>
                   <button
                     type="button"
-                    onClick={() => setShowLeaderForm(!showLeaderForm)}
+                    onClick={() => {
+                      setShowLeaderForm(!showLeaderForm);
+                      setShowSupervisorForm(false);
+                      setShowGrupoForm(false);
+                    }}
                     className="text-[10px] text-[#2e7d32] hover:underline font-normal cursor-pointer"
                   >
                     {showLeaderForm ? 'Cerrar' : '+ Registrar'}
@@ -703,7 +784,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     <option value="">Seleccionar líder...</option>
                     {availableLideres.map((l) => (
                       <option key={`${l.nombre}_${l.dni}`} value={l.nombre}>
-                        👑 {l.nombre} ({l.grupo})
+                        👑 {l.nombre} {l.grupo ? `(${l.grupo})` : ''}
                       </option>
                     ))}
                   </select>
@@ -713,6 +794,108 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Sub-Panel Opcional: Registro de Nuevo Supervisor */}
+            {showSupervisorForm && (
+              <form
+                onSubmit={handleRegisterSupervisor}
+                className="mb-5 p-4 bg-[#e8f5e9]/80 rounded-xl border border-[#a5d6a7] space-y-3 animate-in fade-in"
+              >
+                <div className="flex items-center justify-between pb-2 border-b border-[#a5d6a7]">
+                  <div className="flex items-center gap-2">
+                    <UserCheck className="w-4 h-4 text-[#2e7d32]" />
+                    <h3 className="text-xs font-bold text-[#1b5e20] uppercase tracking-wide">
+                      Registrar Nuevo Supervisor
+                    </h3>
+                  </div>
+                  <span className="text-[11px] text-[#757575]">Se registrará y seleccionará automáticamente</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#40493d] mb-1">
+                      Nombre Completo del Supervisor *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Carlos Solar, Maria Quispe..."
+                      value={newSupervisorNombre}
+                      onChange={(e) => setNewSupervisorNombre(e.target.value)}
+                      required
+                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white text-gray-900 focus:outline-none focus:border-[#2e7d32]"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowSupervisorForm(false)}
+                    className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Guardar Supervisor</span>
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Sub-Panel Opcional: Registro de Nuevo Grupo */}
+            {showGrupoForm && (
+              <form
+                onSubmit={handleRegisterGrupo}
+                className="mb-5 p-4 bg-[#e8f5e9]/80 rounded-xl border border-[#a5d6a7] space-y-3 animate-in fade-in"
+              >
+                <div className="flex items-center justify-between pb-2 border-b border-[#a5d6a7]">
+                  <div className="flex items-center gap-2">
+                    <Users className="w-4 h-4 text-[#2e7d32]" />
+                    <h3 className="text-xs font-bold text-[#1b5e20] uppercase tracking-wide">
+                      Registrar Nuevo Grupo
+                    </h3>
+                  </div>
+                  <span className="text-[11px] text-[#757575]">Se registrará y agregará a las opciones de grupos</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#40493d] mb-1">
+                      Nombre o Identificador del Grupo *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Grupo 01, Grupo 02, Cuadrilla Norte..."
+                      value={newGrupoNombre}
+                      onChange={(e) => setNewGrupoNombre(e.target.value)}
+                      required
+                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white text-gray-900 focus:outline-none focus:border-[#2e7d32]"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowGrupoForm(false)}
+                    className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Guardar Grupo</span>
+                  </button>
+                </div>
+              </form>
+            )}
 
             {/* Sub-Panel Opcional: Registro de Nuevo Líder */}
             {showLeaderForm && (

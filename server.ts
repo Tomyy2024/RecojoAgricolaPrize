@@ -7,11 +7,7 @@ const DB_FILE = path.join(process.cwd(), 'data_store.json');
 
 // Master default users & catalogs
 const DEFAULT_USUARIOS = [
-  { user: 'admin', pass: 'admin123', nombre: 'Administrador General', rol: 'Administrador', creado: '2026-08-18' },
-  { user: 'csolar', pass: 'solar123', nombre: 'Carlos Solar', rol: 'Supervisor', creado: '2026-08-19' },
-  { user: 'supervisor1', pass: 'super123', nombre: 'Carlos Mendoza', rol: 'Supervisor', creado: '2026-08-19' },
-  { user: 'supervisor2', pass: 'super123', nombre: 'María Quispe', rol: 'Supervisor', creado: '2026-08-19' },
-  { user: 'trabajador1', pass: 'campo123', nombre: 'Juan Pérez', rol: 'Trabajador', creado: '2026-08-20' }
+  { user: 'admin', pass: 'admin123', nombre: 'Administrador General', rol: 'Administrador', creado: '2026-08-18' }
 ];
 
 const DEFAULT_FUNDOS = [
@@ -30,10 +26,7 @@ const DEFAULT_MODULOS = {
   "Vivadis": ["M01", "M02", "M03", "M04", "M05"]
 };
 
-const DEFAULT_GRUPOS = [
-  "Grupo01", "Grupo 01", "Grupo 02", "Grupo 03", "Grupo 04", "Grupo 05",
-  "Grupo 06", "Grupo 07", "Grupo 08", "Grupo 09", "Grupo 10"
-];
+const DEFAULT_GRUPOS: string[] = [];
 
 function getInitialData() {
   return {

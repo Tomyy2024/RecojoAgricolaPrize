@@ -34,6 +34,7 @@ import {
   getUsuarios, 
   saveUsuarios, 
   getGrupos, 
+  saveGrupos,
   getLideres, 
   saveLideres,
   getValidaciones,
@@ -105,7 +106,7 @@ export default function App() {
   const [trabajadores, setTrabajadoresState] = useState<Trabajador[]>(() => getTrabajadores());
   const [detalleJabas, setDetalleJabasState] = useState<DetalleJaba[]>(() => getDetalleJabas());
   const [usuarios, setUsuariosState] = useState<Usuario[]>(() => getUsuarios());
-  const [grupos] = useState<string[]>(() => getGrupos());
+  const [grupos, setGruposState] = useState<string[]>(() => getGrupos());
   const [lideres, setLideresState] = useState<Lider[]>(() => getLideres());
   const [validaciones, setValidacionesState] = useState<ValidacionSupervisor[]>(() => getValidaciones());
 
@@ -440,6 +441,40 @@ export default function App() {
     triggerAutoSync('Registro Líder');
   };
 
+  const handleSaveGrupo = (newGrupo: string) => {
+    const clean = newGrupo.trim();
+    if (!clean) return;
+    if (!grupos.includes(clean)) {
+      const updated = [...grupos, clean];
+      setGruposState(updated);
+      saveGrupos(updated);
+      addLog(`👥 Nuevo Grupo registrado: ${clean}`, 'ok');
+      triggerAutoSync('Registro Grupo', { grupos: updated });
+    }
+  };
+
+  const handleSaveSupervisor = (supervisorName: string) => {
+    const cleanName = supervisorName.trim();
+    if (!cleanName) return;
+    const exists = usuarios.some((u) => u.nombre.toLowerCase() === cleanName.toLowerCase());
+    let updatedUsuarios = usuarios;
+    if (!exists) {
+      const generatedUser = cleanName.toLowerCase().replace(/\s+/g, '.').slice(0, 15);
+      const newUser: Usuario = {
+        user: generatedUser || `sup.${Date.now().toString().slice(-4)}`,
+        pass: 'super123',
+        nombre: cleanName,
+        rol: 'Supervisor',
+        creado: new Date().toISOString().slice(0, 10)
+      };
+      updatedUsuarios = [newUser, ...usuarios];
+      setUsuariosState(updatedUsuarios);
+      saveUsuarios(updatedUsuarios);
+    }
+    addLog(`👤 Nuevo Supervisor registrado: ${cleanName}`, 'ok');
+    triggerAutoSync('Registro Supervisor', { usuarios: updatedUsuarios });
+  };
+
   const handleSaveValidacion = (newValidacion: ValidacionSupervisor) => {
     const updated = saveSingleValidacion(newValidacion);
     setValidacionesState(updated);
@@ -661,7 +696,10 @@ export default function App() {
             trabajadores={trabajadores}
             grupos={grupos}
             lideres={lideres}
+            usuarios={usuarios}
             onSaveLider={handleSaveLider}
+            onSaveSupervisor={handleSaveSupervisor}
+            onSaveGrupo={handleSaveGrupo}
             onSaveAvance={handleSaveAvance}
             onToast={addToast}
           />

@@ -70,15 +70,15 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
   // Active sub-tab: 'nueva' (Formulario 4 Pasos), 'monitor' (Verificación de Estado) o 'historial'
   const [activeSubTab, setActiveSubTab] = useState<'nueva' | 'monitor' | 'historial'>('nueva');
 
-  // Paso 1: Filtros de Validación
+  // Paso 1: Filtros de Validación (Limpio sin datos de prueba)
   const [filtroFecha, setFiltroFecha] = useState<string>(getLocalToday());
   const [filtroSupervisor, setFiltroSupervisor] = useState<string>(
-    isSupervisor ? sessionSupervisorName : 'Carlos Solar'
+    isSupervisor ? sessionSupervisorName : ''
   );
-  const [filtroFundo, setFiltroFundo] = useState<string>('Santa Teresa');
-  const [filtroModulo, setFiltroModulo] = useState<string>('M01');
-  const [filtroGrupo, setFiltroGrupo] = useState<string>('Grupo 01');
-  const [filtroLider, setFiltroLider] = useState<string>('Antony Cerron');
+  const [filtroFundo, setFiltroFundo] = useState<string>('');
+  const [filtroModulo, setFiltroModulo] = useState<string>('');
+  const [filtroGrupo, setFiltroGrupo] = useState<string>('');
+  const [filtroLider, setFiltroLider] = useState<string>('');
 
   // Normalization Helpers
   const normalizeStr = (text?: string) =>
@@ -119,29 +119,25 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     return false;
   };
 
-  // Combined leaders list (from state + defaults + records)
+  // Combined leaders list (from state + real records)
   const availableLideres = useMemo(() => {
     const list: { nombre: string; dni: string; grupo: string }[] = [];
-    
-    // Add default leaders
-    list.push({ nombre: 'Antony Cerron', dni: '71928374', grupo: 'Grupo 01' });
-    list.push({ nombre: 'Carlos Mendoza', dni: '45892134', grupo: 'Grupo 01' });
 
     lideres.forEach((l) => {
-      if (!list.some((item) => item.nombre.toLowerCase() === l.lider.toLowerCase())) {
+      if (l.lider && !list.some((item) => item.nombre.toLowerCase() === l.lider.toLowerCase() && item.grupo.toLowerCase() === l.grupo.toLowerCase())) {
         list.push({ nombre: l.lider, dni: l.dni, grupo: l.grupo });
       }
     });
 
     trabajadores.forEach((t) => {
       if (t.lider && !list.some((item) => item.nombre.toLowerCase() === t.lider!.toLowerCase())) {
-        list.push({ nombre: t.lider, dni: t.dni, grupo: t.grupo || 'Grupo 01' });
+        list.push({ nombre: t.lider, dni: t.dni, grupo: t.grupo || '' });
       }
     });
 
     detalleJabas.forEach((dj) => {
       if (dj.lider && !list.some((item) => item.nombre.toLowerCase() === dj.lider!.toLowerCase())) {
-        list.push({ nombre: dj.lider, dni: dj.dni, grupo: dj.grupo || 'Grupo 01' });
+        list.push({ nombre: dj.lider, dni: dj.dni, grupo: dj.grupo || '' });
       }
     });
 
@@ -187,14 +183,11 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     if (isSupervisor && sessionSupervisorName) {
       set.add(sessionSupervisorName);
     }
-    set.add('Carlos Solar');
-    set.add('Carlos Mendoza');
-    set.add('María Quispe');
     trabajadores.forEach((t) => {
-      if (t.supervisor) set.add(t.supervisor);
+      if (t.supervisor && t.supervisor.trim()) set.add(t.supervisor.trim());
     });
     detalleJabas.forEach((dj) => {
-      if (dj.supervisor) set.add(dj.supervisor);
+      if (dj.supervisor && dj.supervisor.trim()) set.add(dj.supervisor.trim());
     });
     return Array.from(set).sort();
   }, [trabajadores, detalleJabas, isSupervisor, sessionSupervisorName]);
@@ -246,18 +239,14 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
   // List of groups
   const allGrupos = useMemo(() => {
     const set = new Set<string>();
-    set.add('Grupo 01');
-    set.add('Grupo 02');
-    set.add('Grupo 03');
-    set.add('Grupo 04');
-    set.add('Grupo 05');
-    set.add('Grupo 06');
-    grupos.forEach((g) => set.add(g));
+    grupos.forEach((g) => {
+      if (g && g.trim()) set.add(g.trim());
+    });
     trabajadores.forEach((t) => {
-      if (t.grupo) set.add(t.grupo);
+      if (t.grupo && t.grupo.trim()) set.add(t.grupo.trim());
     });
     detalleJabas.forEach((dj) => {
-      if (dj.grupo) set.add(dj.grupo);
+      if (dj.grupo && dj.grupo.trim()) set.add(dj.grupo.trim());
     });
     return Array.from(set).sort();
   }, [grupos, trabajadores, detalleJabas]);
