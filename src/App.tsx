@@ -625,6 +625,15 @@ export default function App() {
     triggerAutoSync('Validación por Supervisor', { validaciones: updated });
   };
 
+  const handleDeleteValidacion = (valId: string) => {
+    const updated = validaciones.filter((v) => v.id !== valId);
+    setValidacionesState(updated);
+    saveValidaciones(updated);
+    addLog(`🗑️ Validación eliminada del historial: ${valId}`, 'warn');
+    triggerAutoSync('Eliminar Validación', { validaciones: updated });
+    addToast(`🗑️ Validación eliminada del historial`);
+  };
+
   const handleImportTrabajadores = (newWorkers: Trabajador[]) => {
     const combined = [...newWorkers, ...trabajadores];
     const seenDni = new Set<string>();
@@ -838,6 +847,7 @@ export default function App() {
             validaciones={validaciones}
             grupos={grupos}
             onSaveValidacion={handleSaveValidacion}
+            onDeleteValidacion={handleDeleteValidacion}
             onDeleteLider={handleDeleteLider}
             onToast={addToast}
           />

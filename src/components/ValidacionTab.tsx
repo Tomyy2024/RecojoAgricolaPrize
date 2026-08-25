@@ -8,7 +8,7 @@ import {
   Programa,
   Lider
 } from '../types';
-import { getLocalToday, getLocalISO, formatDateDDMMAAAA } from '../utils/storage';
+import { getLocalToday, getLocalISO, formatDateDDMMAAAA, normalizeDateString } from '../utils/storage';
 import { RegistroStatusMonitor } from './RegistroStatusMonitor';
 import { ScannerModal } from './ScannerModal';
 import { 
@@ -41,7 +41,9 @@ import {
   Trash2,
   ShieldCheck,
   CheckCircle2,
-  Clock
+  Clock,
+  Zap,
+  Lock
 } from 'lucide-react';
 
 interface ValidacionTabProps {
@@ -53,6 +55,7 @@ interface ValidacionTabProps {
   validaciones: ValidacionSupervisor[];
   grupos: string[];
   onSaveValidacion: (validacion: ValidacionSupervisor) => void;
+  onDeleteValidacion?: (valId: string) => void;
   onDeleteLider?: (liderNameOrDni: string) => void;
   onToast: (msg: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
 }
@@ -66,6 +69,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
   validaciones,
   grupos,
   onSaveValidacion,
+  onDeleteValidacion,
   onDeleteLider,
   onToast
 }) => {
@@ -104,8 +108,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
   };
 
   const normalizeDate = (d?: string) => {
-    if (!d) return '';
-    return d.split('T')[0].split(' ')[0].trim();
+    return normalizeDateString(d);
   };
 
   const normalizeGrupo = (g?: string) => {
@@ -262,24 +265,44 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     return Array.from(set).sort();
   }, [grupos, trabajadores, detalleJabas]);
 
-  // Map of already validated workers for the selected date: DNI -> Validation Info
+  // Map of already validated workers for the selected date: clean DNI -> Validation Info
   const alreadyValidatedMap = useMemo(() => {
-    const map = new Map<string, { validacionId: string; supervisor: string; conforme: boolean; jabas: number; fechaRegistro: string }>();
+    const map = new Map<
+      string,
+      {
+        validacionId: string;
+        supervisor: string;
+        conforme: boolean;
+        jabas: number;
+        fechaRegistro: string;
+        fecha: string;
+        modulo?: string;
+        fundo?: string;
+      }
+    >();
+
+    const targetDate = normalizeDate(filtroFecha);
+
     validaciones.forEach((val) => {
-      if (normalizeDate(val.fecha) === normalizeDate(filtroFecha)) {
-        if (val.items && Array.isArray(val.items)) {
-          val.items.forEach((it) => {
-            if (it.dni) {
-              map.set(it.dni, {
-                validacionId: val.id,
-                supervisor: val.supervisor,
-                conforme: it.conforme !== false,
-                jabas: it.jabas,
-                fechaRegistro: val.fechaRegistro
-              });
-            }
-          });
-        }
+      const valDate = normalizeDate(val.fecha);
+      if (!valDate || valDate !== targetDate) return;
+
+      if (val.items && Array.isArray(val.items)) {
+        val.items.forEach((it) => {
+          const dniClean = String(it.dni || '').trim();
+          if (dniClean) {
+            map.set(dniClean, {
+              validacionId: val.id,
+              supervisor: val.supervisor,
+              conforme: it.conforme !== false,
+              jabas: it.jabas,
+              fechaRegistro: val.fechaRegistro,
+              fecha: val.fecha,
+              modulo: val.modulo,
+              fundo: val.fundo
+            });
+          }
+        });
       }
     });
     return map;
@@ -287,7 +310,24 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
 
   // Derive candidate workers based on selected filters (STRICTLY ONLY WORKERS WITH JABAS > 0)
   const allCandidateWorkers = useMemo(() => {
-    const map = new Map<string, { worker: Trabajador; jabas: number; isValidated: boolean; validationInfo?: { validacionId: string; supervisor: string; conforme: boolean; jabas: number; fechaRegistro: string } }>();
+    const map = new Map<
+      string,
+      {
+        worker: Trabajador;
+        jabas: number;
+        isValidated: boolean;
+        validationInfo?: {
+          validacionId: string;
+          supervisor: string;
+          conforme: boolean;
+          jabas: number;
+          fechaRegistro: string;
+          fecha: string;
+          modulo?: string;
+          fundo?: string;
+        };
+      }
+    >();
 
     // 1. Calculate and accumulate jabas from DetalleJabas matching the filters
     const matchingDetalle = detalleJabas.filter((dj) => {
@@ -328,9 +368,10 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     const metaByDni: Record<string, DetalleJaba> = {};
     matchingDetalle.forEach((dj) => {
       const num = Number(dj.jabas) || 0;
-      if (num > 0) {
-        jabasByDni[dj.dni] = (jabasByDni[dj.dni] || 0) + num;
-        metaByDni[dj.dni] = dj;
+      const cleanDni = String(dj.dni || '').trim();
+      if (num > 0 && cleanDni) {
+        jabasByDni[cleanDni] = (jabasByDni[cleanDni] || 0) + num;
+        metaByDni[cleanDni] = dj;
       }
     });
 
@@ -344,9 +385,10 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
 
         if (p.avance) {
           Object.entries(p.avance).forEach(([dni, jVal]) => {
+            const cleanDni = String(dni || '').trim();
             const num = Number(jVal) || 0;
-            if (num > 0 && !jabasByDni[dni]) {
-              jabasByDni[dni] = num;
+            if (num > 0 && cleanDni && !jabasByDni[cleanDni]) {
+              jabasByDni[cleanDni] = num;
             }
           });
         }
@@ -356,8 +398,10 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     // 3. For workers in master list, attach their calculated jabas ONLY IF > 0
     trabajadores.forEach((t) => {
       if (!t.dni) return;
+      const cleanDni = String(t.dni || '').trim();
+      if (!cleanDni) return;
 
-      let jCount = jabasByDni[t.dni] || 0;
+      let jCount = jabasByDni[cleanDni] || 0;
 
       // If no advance in detalleJabas, check if worker had jabas in master record matching current filter
       if (jCount === 0 && t.jabas && t.jabas > 0) {
@@ -375,16 +419,17 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
       // STRICT CHECK: Only include workers who have jabas > 0!
       if (jCount > 0) {
         const assignedLider =
-          metaByDni[t.dni]?.lider ||
+          metaByDni[cleanDni]?.lider ||
           t.lider ||
           filtroLider ||
           (availableLideres.length > 0 ? availableLideres[0].nombre : 'Antony Cerron');
 
-        const vInfo = alreadyValidatedMap.get(t.dni);
+        const vInfo = alreadyValidatedMap.get(cleanDni);
 
-        map.set(t.dni, {
+        map.set(cleanDni, {
           worker: {
             ...t,
+            dni: cleanDni,
             grupo: t.grupo || filtroGrupo,
             supervisor: t.supervisor || filtroSupervisor,
             lider: assignedLider
@@ -398,11 +443,12 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
 
     // 4. Also include any workers that have DetalleJabas registered under these filters even if not in master list
     matchingDetalle.forEach((dj) => {
-      if (!map.has(dj.dni)) {
+      const cleanDni = String(dj.dni || '').trim();
+      if (cleanDni && !map.has(cleanDni)) {
         const syntheticWorker: Trabajador = {
-          id: `T_DET_${dj.dni}`,
+          id: `T_DET_${cleanDni}`,
           fecha: dj.fecha,
-          dni: dj.dni,
+          dni: cleanDni,
           nombres: dj.trabajador,
           fundo: dj.fundo,
           modulo: dj.modulo,
@@ -410,12 +456,12 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
           grupo: dj.grupo || filtroGrupo,
           lider: dj.lider || filtroLider || 'Antony Cerron',
           tipo: 'Cosechador',
-          jabas: jabasByDni[dj.dni] || dj.jabas
+          jabas: jabasByDni[cleanDni] || dj.jabas
         };
-        const vInfo = alreadyValidatedMap.get(dj.dni);
-        map.set(dj.dni, { 
+        const vInfo = alreadyValidatedMap.get(cleanDni);
+        map.set(cleanDni, { 
           worker: syntheticWorker, 
-          jabas: jabasByDni[dj.dni] || dj.jabas,
+          jabas: jabasByDni[cleanDni] || dj.jabas,
           isValidated: !!vInfo,
           validationInfo: vInfo
         });
@@ -572,41 +618,101 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
 
   const jabasAnuladas = totalJabas - jabasConformes;
 
-  // Paso 4: Guardar y Enviar Validación
+  // Quick instant validation of an individual worker
+  const handleValidateSingleWorker = (worker: Trabajador, jabas: number) => {
+    const cleanDni = String(worker.dni || '').trim();
+    if (alreadyValidatedMap.has(cleanDni)) {
+      onToast(`⚠️ El trabajador ${worker.nombres} ya fue validado anteriormente para esta fecha`, 'warning');
+      return;
+    }
+
+    const state = workerValidationState[worker.dni] || { conforme: true, observacion: '', jabas };
+    const item: ValidacionTrabajadorItem = {
+      dni: cleanDni,
+      nombres: worker.nombres,
+      tipo: worker.tipo || 'Cosechador',
+      jabas: state.jabas !== undefined ? state.jabas : jabas,
+      conforme: state.conforme !== false,
+      observacion: state.observacion
+    };
+
+    const singleVal: ValidacionSupervisor = {
+      id: `VAL_${filtroFecha}_${filtroModulo || 'GEN'}_${cleanDni}_${Date.now().toString().slice(-4)}`,
+      fecha: filtroFecha,
+      supervisor: filtroSupervisor || sessionSupervisorName,
+      fundo: filtroFundo || worker.fundo || 'Fundo General',
+      modulo: filtroModulo || worker.modulo || 'M01',
+      grupo: filtroGrupo || worker.grupo || 'Grupo 01',
+      lider: worker.lider || filtroLider || 'Antony Cerron',
+      totalTrabajadores: 1,
+      trabajadoresConformes: item.conforme ? 1 : 0,
+      trabajadoresAnulados: item.conforme ? 0 : 1,
+      totalJabas: item.jabas,
+      jabasConformes: item.conforme ? item.jabas : 0,
+      items: [item],
+      estado: 'Validado',
+      fechaRegistro: getLocalISO(),
+      observacionesGenerales: `Validación individual rápida para ${worker.nombres}`,
+      creadoPor: session.nombre
+    };
+
+    onSaveValidacion(singleVal);
+    onToast(`✅ Trabajador ${worker.nombres} validado con éxito (${item.jabas} jabas). Trasladado a Validados.`, 'success');
+  };
+
+  // Paso 4: Guardar y Enviar Validación de Cuadrilla / Selección
   const handleSubmitValidacion = () => {
-    if (candidateWorkers.length === 0) {
-      onToast('⚠️ No hay trabajadores en los filtros seleccionados para validar', 'warning');
+    // STRICT FILTER: Only include workers that are NOT already validated!
+    const pendingToSubmit = candidateWorkers.filter((c) => !c.isValidated);
+
+    if (pendingToSubmit.length === 0) {
+      onToast('⚠️ Todos los trabajadores seleccionados ya fueron validados previamente. No se permiten registros duplicados.', 'warning');
+      return;
+    }
+
+    const conformesToSubmit = pendingToSubmit.filter(
+      (c) => workerValidationState[c.worker.dni]?.conforme !== false
+    );
+
+    if (conformesToSubmit.length === 0) {
+      onToast('⚠️ No hay trabajadores conformes pendientes para validar en esta cuadrilla.', 'warning');
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      const items: ValidacionTrabajadorItem[] = candidateWorkers.map(({ worker, jabas }) => {
+      const items: ValidacionTrabajadorItem[] = pendingToSubmit.map(({ worker, jabas }) => {
         const state = workerValidationState[worker.dni] || { conforme: true, observacion: '', jabas };
         return {
-          dni: worker.dni,
+          dni: String(worker.dni || '').trim(),
           nombres: worker.nombres,
           tipo: worker.tipo || 'Cosechador',
-          jabas: state.jabas,
-          conforme: state.conforme,
+          jabas: state.jabas !== undefined ? state.jabas : jabas,
+          conforme: state.conforme !== false,
           observacion: state.observacion
         };
       });
 
+      const totalT = items.length;
+      const confT = items.filter((i) => i.conforme !== false).length;
+      const anulT = totalT - confT;
+      const totJ = items.reduce((acc, i) => acc + (i.jabas || 0), 0);
+      const confJ = items.reduce((acc, i) => acc + (i.conforme !== false ? (i.jabas || 0) : 0), 0);
+
       const nuevaValidacion: ValidacionSupervisor = {
         id: `VAL_${filtroFecha}_${filtroModulo || 'GEN'}_${Date.now().toString().slice(-6)}`,
         fecha: filtroFecha,
-        supervisor: filtroSupervisor,
-        fundo: filtroFundo,
-        modulo: filtroModulo,
-        grupo: filtroGrupo,
-        lider: candidateWorkers[0]?.worker.lider || filtroLider || 'Antony Cerron',
-        totalTrabajadores,
-        trabajadoresConformes,
-        trabajadoresAnulados,
-        totalJabas,
-        jabasConformes,
+        supervisor: filtroSupervisor || sessionSupervisorName,
+        fundo: filtroFundo || 'Fundo General',
+        modulo: filtroModulo || 'M01',
+        grupo: filtroGrupo || 'Grupo 01',
+        lider: pendingToSubmit[0]?.worker.lider || filtroLider || 'Antony Cerron',
+        totalTrabajadores: totalT,
+        trabajadoresConformes: confT,
+        trabajadoresAnulados: anulT,
+        totalJabas: totJ,
+        jabasConformes: confJ,
         items,
         estado: 'Validado',
         fechaRegistro: getLocalISO(),
@@ -616,13 +722,13 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
 
       onSaveValidacion(nuevaValidacion);
       onToast(
-        `✅ Validación guardada y enviada con éxito (${trabajadoresConformes} conformes, ${jabasConformes} jabas validadas)`,
+        `✅ Validación oficial guardada con éxito (${confT} conformes, ${confJ} jabas validadas). El personal validado ya no aparecerá como pendiente.`,
         'success'
       );
 
-      // Reset input observations & switch to historial
+      // Reset observations and ensure view is on pendientes
       setObservacionesGenerales('');
-      setActiveSubTab('historial');
+      setEstadoFiltro('pendientes');
     } catch (err) {
       console.error(err);
       onToast('❌ Error al guardar la validación', 'error');
@@ -1049,14 +1155,19 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                             <span className="text-[10px] bg-[#f5f5f5] text-gray-700 px-2 py-0.5 rounded-full font-semibold border border-gray-200">
                               DNI: {worker.dni}
                             </span>
-                            {isValidated && (
+                            {isValidated ? (
                               <span className="text-[10px] bg-[#e8f5e9] text-[#1b5e20] px-2 py-0.5 rounded-full font-bold border border-[#a5d6a7] flex items-center gap-1">
                                 <ShieldCheck className="w-3 h-3 text-[#2e7d32]" />
-                                <span>Ya Validado ({validationInfo?.supervisor})</span>
+                                <span>Ya Validado ({validationInfo?.supervisor || 'Supervisor'})</span>
+                              </span>
+                            ) : (
+                              <span className="text-[10px] bg-[#fff8e1] text-[#b26a00] px-2 py-0.5 rounded-full font-semibold border border-[#ffe082] flex items-center gap-1">
+                                <Clock className="w-3 h-3 text-[#ff8f00]" />
+                                <span>Pendiente</span>
                               </span>
                             )}
                             {worker.tipo && (
-                              <span className="text-[10px] bg-[#e8f5e9] text-[#1b5e20] px-2 py-0.5 rounded-full font-semibold">
+                              <span className="text-[10px] bg-[#f5f5f5] text-gray-600 px-2 py-0.5 rounded-full font-semibold">
                                 {worker.tipo}
                               </span>
                             )}
@@ -1079,48 +1190,76 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                           </div>
                         </div>
 
-                        {/* Controles: Jabas y Botón Toggle Conforme / Anular */}
-                        <div className="flex items-center gap-3 self-end sm:self-auto">
+                        {/* Controles: Jabas y Botones de Validación */}
+                        <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
                           {/* Input de Jabas */}
                           <div className="flex items-center gap-1.5 bg-gray-50 px-2 py-1 rounded-lg border border-gray-200">
                             <span className="text-[10px] font-bold text-gray-500 uppercase">Jabas:</span>
-                            <input
-                              type="number"
-                              min="0"
-                              value={currentJabas}
-                              onChange={(e) => handleWorkerJabasChange(worker.dni, e.target.value)}
-                              className="w-14 text-center font-extrabold text-xs text-[#1b5e20] bg-white border border-gray-200 rounded px-1 py-0.5 focus:outline-none focus:border-[#2e7d32]"
-                            />
+                            {isValidated ? (
+                              <span className="font-extrabold text-xs text-[#1b5e20] px-1.5 py-0.5">
+                                {currentJabas}
+                              </span>
+                            ) : (
+                              <input
+                                type="number"
+                                min="0"
+                                value={currentJabas}
+                                onChange={(e) => handleWorkerJabasChange(worker.dni, e.target.value)}
+                                className="w-14 text-center font-extrabold text-xs text-[#1b5e20] bg-white border border-gray-200 rounded px-1 py-0.5 focus:outline-none focus:border-[#2e7d32]"
+                              />
+                            )}
                           </div>
 
-                          {/* Botón de Conformidad / Anular Uno por Uno (Paso 3) */}
-                          <button
-                            type="button"
-                            onClick={() => toggleWorkerConforme(worker.dni)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-2xs ${
-                              isConforme
-                                ? 'bg-[#e8f5e9] hover:bg-[#c8e6c9] text-[#1b5e20] border border-[#a5d6a7]'
-                                : 'bg-[#d32f2f] hover:bg-[#b71c1c] text-white border border-[#b71c1c]'
-                            }`}
-                            title={isConforme ? 'Click para anular o marcar no conforme' : 'Click para validar conforme'}
-                          >
-                            {isConforme ? (
-                              <>
-                                <Check className="w-3.5 h-3.5" />
-                                <span>Conforme</span>
-                              </>
-                            ) : (
-                              <>
-                                <X className="w-3.5 h-3.5" />
-                                <span>Anulado</span>
-                              </>
-                            )}
-                          </button>
+                          {isValidated ? (
+                            /* Si ya está validado, botón bloqueado en verde */
+                            <div className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#e8f5e9] text-[#1b5e20] border border-[#a5d6a7] flex items-center gap-1 shadow-2xs">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-[#2e7d32]" />
+                              <span>Validado</span>
+                            </div>
+                          ) : (
+                            /* Si está pendiente, controles de Toggle y Validación Inmediata */
+                            <div className="flex items-center gap-1.5">
+                              {/* Botón Toggle Conforme / Anular */}
+                              <button
+                                type="button"
+                                onClick={() => toggleWorkerConforme(worker.dni)}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition-all active:scale-95 shadow-2xs ${
+                                  isConforme
+                                    ? 'bg-[#e8f5e9] hover:bg-[#c8e6c9] text-[#1b5e20] border border-[#a5d6a7]'
+                                    : 'bg-[#d32f2f] hover:bg-[#b71c1c] text-white border border-[#b71c1c]'
+                                }`}
+                                title={isConforme ? 'Click para anular o marcar no conforme' : 'Click para validar conforme'}
+                              >
+                                {isConforme ? (
+                                  <>
+                                    <Check className="w-3.5 h-3.5" />
+                                    <span>Conforme</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <X className="w-3.5 h-3.5" />
+                                    <span>Anulado</span>
+                                  </>
+                                )}
+                              </button>
+
+                              {/* Botón de Validación Rápida Individual (Desaparece de pendientes al instante) */}
+                              <button
+                                type="button"
+                                onClick={() => handleValidateSingleWorker(worker, currentJabas)}
+                                className="bg-[#1b5e20] hover:bg-[#2e7d32] text-white px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs transition-all"
+                                title="Validar inmediatamente a este trabajador individual"
+                              >
+                                <Zap className="w-3 h-3 text-[#ffeb3b]" />
+                                <span className="hidden xs:inline">Validar</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
 
                       {/* Si está no conforme / anulado, mostrar campo para observación */}
-                      {!isConforme && (
+                      {!isConforme && !isValidated && (
                         <div className="mt-2.5 pt-2 border-t border-[#ffcdd2] flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                           <div className="flex items-center gap-1 text-[11px] font-semibold text-[#c62828] whitespace-nowrap">
                             <AlertTriangle className="w-3.5 h-3.5" />
@@ -1155,7 +1294,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                   Paso 4: Resumen de Validación y Envío Oficial
                 </h2>
                 <p className="text-[11px] text-[#757575]">
-                  Revisa el consolidado y confirma el envío de la validación
+                  Revisa el consolidado y confirma el envío de la validación. Los trabajadores validados no se duplicarán.
                 </p>
               </div>
             </div>
@@ -1189,18 +1328,18 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
               {/* Bloque Balance de Personal */}
               <div className="bg-[#fafafa] p-3.5 rounded-xl border border-[#e0e0e0] space-y-2 text-xs">
                 <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wide block">
-                  Balance de Personal a Validar
+                  Balance de Personal Pendiente
                 </span>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Total Evaluados:</span>
+                  <span className="text-gray-600">Pendientes de Envío:</span>
                   <span className="font-bold text-gray-900">{totalTrabajadores} trabajadores</span>
                 </div>
                 <div className="flex justify-between items-center text-[#1b5e20]">
-                  <span className="font-semibold">Conformes (Aprobados):</span>
+                  <span className="font-semibold">Conformes a Validar:</span>
                   <span className="font-extrabold">{trabajadoresConformes}</span>
                 </div>
                 <div className="flex justify-between items-center text-[#c62828]">
-                  <span className="font-semibold">Anulados / Rechazados:</span>
+                  <span className="font-semibold">Anulados / Descartados:</span>
                   <span className="font-extrabold">{trabajadoresAnulados}</span>
                 </div>
               </div>
@@ -1208,7 +1347,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
               {/* Bloque Balance de Jabas */}
               <div className="bg-gradient-to-br from-[#e8f5e9] to-[#c8e6c9] p-3.5 rounded-xl border border-[#a5d6a7] flex flex-col justify-center text-center">
                 <span className="text-[10px] text-[#1b5e20] uppercase font-bold tracking-wider">
-                  Total Jabas Validadas
+                  Total Jabas a Validar
                 </span>
                 <div className="text-3xl font-black text-[#1b5e20] my-0.5">
                   {jabasConformes}
@@ -1218,6 +1357,19 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                 </span>
               </div>
             </div>
+
+            {/* Banner Informativo si la cuadrilla ya fue completamente validada */}
+            {pendingCount === 0 && validatedCount > 0 && (
+              <div className="bg-[#e8f5e9] border border-[#a5d6a7] p-3.5 rounded-xl flex items-center gap-3 text-xs text-[#1b5e20]">
+                <ShieldCheck className="w-5 h-5 text-[#2e7d32] shrink-0" />
+                <div>
+                  <div className="font-extrabold">Esta cuadrilla ya fue validada oficialmente</div>
+                  <div className="text-[11px] text-gray-600">
+                    Los {validatedCount} trabajadores de esta cuadrilla ya fueron registrados para esta fecha. Para evitar duplicados, el guardado masivo está bloqueado.
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Observaciones Generales del Supervisor */}
             <div className="space-y-1.5">
@@ -1233,20 +1385,45 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
               />
             </div>
 
-            {/* Botón Principal: Guardar Validación y Enviar */}
-            <button
-              type="button"
-              disabled={isSubmitting || candidateWorkers.length === 0}
-              onClick={handleSubmitValidacion}
-              className={`w-full py-3.5 rounded-xl font-bold text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99] ${
-                isSubmitting || candidateWorkers.length === 0
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  : 'bg-[#2e7d32] hover:bg-[#1b5e20] text-white'
-              }`}
-            >
-              <Send className="w-4 h-4" />
-              <span>Guardar Validación y Enviar ({trabajadoresConformes} conformes)</span>
-            </button>
+            {/* Botón Principal: Guardar Validación y Enviar con Bloqueo de Duplicados */}
+            {(() => {
+              const pendingToSubmit = candidateWorkers.filter((c) => !c.isValidated);
+              const pendingConformesCount = pendingToSubmit.filter(
+                (c) => workerValidationState[c.worker.dni]?.conforme !== false
+              ).length;
+              const isAlreadyFullyValidated = pendingCount === 0 && validatedCount > 0;
+              const canSubmit = !isSubmitting && pendingConformesCount > 0 && !isAlreadyFullyValidated;
+
+              return (
+                <button
+                  type="button"
+                  disabled={!canSubmit}
+                  onClick={handleSubmitValidacion}
+                  className={`w-full py-3.5 rounded-xl font-bold text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99] ${
+                    !canSubmit
+                      ? 'bg-gray-200 text-gray-500 border border-gray-300 cursor-not-allowed'
+                      : 'bg-[#2e7d32] hover:bg-[#1b5e20] text-white shadow-emerald-900/20'
+                  }`}
+                >
+                  {isAlreadyFullyValidated ? (
+                    <>
+                      <Lock className="w-4 h-4 text-gray-500" />
+                      <span>✅ Cuadrilla ya validada (Sin pendientes)</span>
+                    </>
+                  ) : pendingConformesCount === 0 ? (
+                    <>
+                      <AlertTriangle className="w-4 h-4 text-amber-600" />
+                      <span>⚠️ Sin trabajadores pendientes para validar</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      <span>Guardar Validación y Enviar ({pendingConformesCount} pendientes)</span>
+                    </>
+                  )}
+                </button>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -1340,6 +1517,27 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                               {val.trabajadoresConformes} / {val.totalTrabajadores} personal
                             </div>
                           </div>
+
+                          {/* Botón Eliminar Validación del Historial */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (window.confirm(`¿Estás seguro de eliminar la validación ${val.id}? Esta acción liberará a los trabajadores para volver a ser validados.`)) {
+                                if (onDeleteValidacion) {
+                                  onDeleteValidacion(val.id);
+                                } else {
+                                  onToast('Validación eliminada', 'info');
+                                }
+                              }
+                            }}
+                            className="p-1.5 text-red-600 hover:text-white hover:bg-red-600 rounded-lg border border-red-200 hover:border-red-600 transition-all font-semibold flex items-center gap-1 cursor-pointer text-xs"
+                            title="Eliminar validación duplicada o errónea"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Eliminar</span>
+                          </button>
+
                           {isExpanded ? (
                             <ChevronUp className="w-4 h-4 text-gray-400" />
                           ) : (
