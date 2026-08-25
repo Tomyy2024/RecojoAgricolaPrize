@@ -70,6 +70,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
   // Search filter
   const [searchTerm, setSearchTerm] = useState('');
+  const [step2SearchTerm, setStep2SearchTerm] = useState('');
 
   // Selected Workers (Set of DNI strings)
   const [selectedDnis, setSelectedDnis] = useState<Set<string>>(new Set());
@@ -334,13 +335,17 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       setSelectedDnis((prev) => new Set(prev).add(trimmedDni));
       setWorkerAssignedGrupos((prev) => ({
         ...prev,
-        [trimmedDni]: cuadrillaGrupo
+        [trimmedDni]: cuadrillaGrupo || 'Grupo 01'
       }));
+
+      if (step === 2) {
+        setStep2SearchTerm(trimmedDni);
+      }
 
       const found = trabajadores.find((t) => String(t.dni).trim() === trimmedDni);
       const nombre = found ? found.nombres : `Trabajador DNI ${trimmedDni}`;
       setScannerOpen(false);
-      onToast(`👷 ${nombre} asignado/a exitosamente al ${cuadrillaGrupo}`);
+      onToast(`👷 ${nombre} (${trimmedDni}) listo para registrar avance.`);
     }
   };
 
@@ -440,6 +445,16 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     });
     return list.sort((a, b) => a.nombres.localeCompare(b.nombres));
   }, [trabajadores, selectedDnis]);
+
+  const filteredStep2WorkersList = useMemo(() => {
+    if (!step2SearchTerm.trim()) return selectedWorkersList;
+    const q = step2SearchTerm.toLowerCase().trim();
+    return selectedWorkersList.filter(
+      (w) =>
+        w.nombres.toLowerCase().includes(q) ||
+        String(w.dni).toLowerCase().includes(q)
+    );
+  }, [selectedWorkersList, step2SearchTerm]);
 
   const totalJabasAvance = useMemo(() => {
     return (Object.values(avanceValues) as number[]).reduce(
@@ -1235,9 +1250,49 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             </div>
           </div>
 
+          {/* Barra de Búsqueda y Escáner en Paso 2 */}
+          <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2 bg-[#fcf9f8] p-3 rounded-xl border border-[#e0e0e0]">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Buscar por nombre o DNI en esta cuadrilla..."
+                value={step2SearchTerm}
+                onChange={(e) => setStep2SearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-1.5 text-xs border border-[#bfcaba] rounded-lg focus:outline-none focus:border-[#2e7d32] bg-white font-medium"
+              />
+              {step2SearchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setStep2SearchTerm('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs font-bold"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setScannerMode('worker');
+                setScannerOpen(true);
+              }}
+              className="bg-[#ff8f00] hover:bg-[#e65100] text-white py-1.5 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer active:scale-95 transition-all whitespace-nowrap"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>Escanear Fotocheck</span>
+            </button>
+          </div>
+
           {/* Listado de Trabajadores con Vinculación Contextual */}
           <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
-            {selectedWorkersList.map((t) => {
+            {filteredStep2WorkersList.length === 0 ? (
+              <div className="py-8 text-center bg-gray-50 rounded-xl border border-gray-200 text-xs text-gray-500">
+                No se encontraron trabajadores con el término "{step2SearchTerm}".
+              </div>
+            ) : (
+              filteredStep2WorkersList.map((t) => {
               const currentVal = avanceValues[t.dni] !== undefined ? avanceValues[t.dni] : '';
               const numVal = avanceValues[t.dni] || 0;
 
@@ -1320,7 +1375,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   </div>
                 </div>
               );
-            })}
+            })
+          )}
           </div>
 
           {/* Botones de Navegación */}
