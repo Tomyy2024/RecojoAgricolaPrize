@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Programa, ProgramaGeneral, DetalleJaba, Trabajador, ValidacionSupervisor } from '../types';
-import { getLocalToday, normalizeDateString } from '../utils/storage';
+import { getLocalToday, normalizeDateString, formatDateDDMMAAAA } from '../utils/storage';
 import { RegistroStatusMonitor } from './RegistroStatusMonitor';
 import { 
   LayoutDashboard, 
@@ -18,7 +18,13 @@ import {
   RefreshCw,
   Award,
   TreePine,
-  ShieldCheck
+  ShieldCheck,
+  Gift,
+  DollarSign,
+  Trophy,
+  Target,
+  Clock,
+  Search
 } from 'lucide-react';
 
 interface DashboardTabProps {
@@ -40,15 +46,22 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   onRefresh,
   onToast
 }) => {
-  const [viewMode, setViewMode] = useState<'metricas' | 'verificacion'>('metricas');
+  const [viewMode, setViewMode] = useState<'metricas' | 'bonificacion' | 'verificacion'>('metricas');
   const [periodo, setPeriodo] = useState<'todo' | 'hoy' | 'semana' | 'mes' | 'año'>('todo');
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Bonificación Diaria Settings & Filters
   const todayStr = getLocalToday();
+  const [bonoFecha, setBonoFecha] = useState<string>(todayStr);
+  const [metaBaseJabas, setMetaBaseJabas] = useState<number>(30);
+  const [tarifaBono, setTarifaBono] = useState<number>(2.0);
+  const [bonoSearch, setBonoSearch] = useState<string>('');
+  const [bonoFilterFundo, setBonoFilterFundo] = useState<string>('');
+  const [bonoFilterStatus, setBonoFilterStatus] = useState<'todos' | 'bonificados' | 'no_bonificados'>('todos');
 
-  // Helper date checker
+  // Helper date checker for general metrics
   const isDateInPeriod = (rawDate?: string) => {
     if (!rawDate) return periodo === 'todo' && !desde && !hasta;
     const itemDate = normalizeDateString(rawDate);
@@ -92,7 +105,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     return validaciones.filter((v) => isDateInPeriod(v.fecha || v.fechaRegistro));
   }, [validaciones, periodo, desde, hasta]);
 
-  // Comprehensive Aggregations
+  // Comprehensive General Metrics Aggregations
   const metrics = useMemo(() => {
     // 1. Programas & Lotes
     let totalProgs = filteredProgramas.length + filteredProgramaGeneral.length;
@@ -142,7 +155,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       }
 
       if (p.avance) {
-        Object.entries(p.avance).forEach(([dni, count]) => {
+        Object.entries(p.avance).forEach(([dni]) => {
           trabSet.add(dni);
         });
       }
@@ -154,7 +167,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       jabasValidadas += Number(v.jabasConformes) || Number(v.totalJabas) || 0;
     });
 
-    // Grand total: if tareo records exist use jabasTareo, otherwise use jabasEjecucionPartes, or their sum if distinct
+    // Grand total: if tareo records exist use jabasTareo, otherwise use jabasEjecucionPartes
     const totalJabas = jabasTareo > 0 ? jabasTareo : jabasEjecucionPartes;
 
     // Fundo list sorted
@@ -179,6 +192,171 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       jabasByGrupo: sortedGrupos
     };
   }, [filteredProgramas, filteredProgramaGeneral, filteredDetalleJabas, filteredValidaciones, trabajadores]);
+
+  // ----------------------------------------------------------------------------------
+  // PASO 2: CÁLCULO DE BONIFICACIÓN DIARIA DE TRABAJADORES (FILTRAR POR DÍA)
+  // ----------------------------------------------------------------------------------
+  const normBonoFecha = normalizeDateString(bonoFecha);
+
+  const bonificacionDiariaData = useMemo(() => {
+    // 1. Filter detalleJabas for the selected bonus day
+    const recordsDelDia = detalleJabas.filter(
+      (d) => normalizeDateString(d.fecha) === normBonoFecha
+    );
+
+    // Also check validaciones for this date
+    const valDelDia = validaciones.filter(
+      (v) => normalizeDateString(v.fecha) === normBonoFecha
+    );
+
+    // Map: DNI -> worker aggregated bonus record
+    const map = new Map<string, {
+      dni: string;
+      nombres: string;
+      fundo: string;
+      modulo: string;
+      grupo: string;
+      supervisor: string;
+      lider: string;
+      jabas: number;
+      isValidado: boolean;
+    }>();
+
+    // Attach from detalleJabas
+    recordsDelDia.forEach((d) => {
+      if (!d.dni) return;
+      const existing = map.get(d.dni);
+      const jCount = Number(d.jabas) || 0;
+      if (existing) {
+        existing.jabas += jCount;
+      } else {
+        map.set(d.dni, {
+          dni: d.dni,
+          nombres: d.trabajador || d.dni,
+          fundo: d.fundo || 'Santa Teresa',
+          modulo: d.modulo || 'M01',
+          grupo: d.grupo || 'Grupo 01',
+          supervisor: d.supervisor || 'Carlos Solar',
+          lider: d.lider || 'Antony Cerron',
+          jabas: jCount,
+          isValidado: false
+        });
+      }
+    });
+
+    // Check validaciones items to mark as validated or enrich jabas if missing
+    valDelDia.forEach((val) => {
+      if (val.items && Array.isArray(val.items)) {
+        val.items.forEach((it) => {
+          if (!it.dni) return;
+          const existing = map.get(it.dni);
+          if (existing) {
+            existing.isValidado = it.conforme !== false;
+            if (it.jabas !== undefined && it.jabas > 0) {
+              existing.jabas = it.jabas;
+            }
+          } else if (it.jabas > 0) {
+            map.set(it.dni, {
+              dni: it.dni,
+              nombres: it.nombres || it.dni,
+              fundo: val.fundo || 'Santa Teresa',
+              modulo: val.modulo || 'M01',
+              grupo: val.grupo || 'Grupo 01',
+              supervisor: val.supervisor || 'Carlos Solar',
+              lider: val.lider || 'Antony Cerron',
+              jabas: it.jabas,
+              isValidado: it.conforme !== false
+            });
+          }
+        });
+      }
+    });
+
+    // If master list workers matching date have jabas > 0 and not in map, add them
+    trabajadores.forEach((t) => {
+      if (!t.dni) return;
+      if (!map.has(t.dni) && t.fecha && normalizeDateString(t.fecha) === normBonoFecha && t.jabas && t.jabas > 0) {
+        map.set(t.dni, {
+          dni: t.dni,
+          nombres: t.nombres || t.dni,
+          fundo: t.fundo || 'Santa Teresa',
+          modulo: t.modulo || 'M01',
+          grupo: t.grupo || 'Grupo 01',
+          supervisor: t.supervisor || 'Carlos Solar',
+          lider: t.lider || 'Antony Cerron',
+          jabas: t.jabas,
+          isValidado: false
+        });
+      }
+    });
+
+    // Calculate bonus metrics for each worker
+    const list = Array.from(map.values()).map((w) => {
+      const jabas = w.jabas;
+      const jabasBonificadas = Math.max(0, jabas - metaBaseJabas);
+      const montoBono = Math.round(jabasBonificadas * tarifaBono * 100) / 100;
+      const isBonificado = jabas > metaBaseJabas;
+      const isEnMeta = jabas === metaBaseJabas;
+
+      return {
+        ...w,
+        metaBase: metaBaseJabas,
+        jabasBonificadas,
+        montoBono,
+        isBonificado,
+        isEnMeta,
+        porcentajeMeta: metaBaseJabas > 0 ? Math.round((jabas / metaBaseJabas) * 100) : 100
+      };
+    });
+
+    // Sort by jabas descending (Ranking)
+    list.sort((a, b) => b.jabas - a.jabas || a.nombres.localeCompare(b.nombres));
+
+    // Summary calculations
+    const totalPersonal = list.length;
+    const totalBonificados = list.filter((w) => w.isBonificado).length;
+    const totalJabasCosechadas = list.reduce((sum, w) => sum + w.jabas, 0);
+    const totalJabasBonificadas = list.reduce((sum, w) => sum + w.jabasBonificadas, 0);
+    const totalMontoBonos = list.reduce((sum, w) => sum + w.montoBono, 0);
+    const pctBonificados = totalPersonal > 0 ? Math.round((totalBonificados / totalPersonal) * 100) : 0;
+
+    return {
+      list,
+      totalPersonal,
+      totalBonificados,
+      totalJabasCosechadas,
+      totalJabasBonificadas,
+      totalMontoBonos,
+      pctBonificados
+    };
+  }, [detalleJabas, validaciones, trabajadores, normBonoFecha, metaBaseJabas, tarifaBono]);
+
+  // Filtered workers list for the bonus tab
+  const filteredBonoList = useMemo(() => {
+    return bonificacionDiariaData.list.filter((w) => {
+      if (bonoFilterFundo && w.fundo !== bonoFilterFundo) return false;
+      if (bonoFilterStatus === 'bonificados' && !w.isBonificado) return false;
+      if (bonoFilterStatus === 'no_bonificados' && w.isBonificado) return false;
+      if (bonoSearch) {
+        const s = bonoSearch.toLowerCase();
+        const mDni = w.dni.includes(s);
+        const mNom = w.nombres.toLowerCase().includes(s);
+        const mFundo = w.fundo.toLowerCase().includes(s);
+        const mSup = w.supervisor.toLowerCase().includes(s);
+        if (!mDni && !mNom && !mFundo && !mSup) return false;
+      }
+      return true;
+    });
+  }, [bonificacionDiariaData.list, bonoFilterFundo, bonoFilterStatus, bonoSearch]);
+
+  // Distinct Fundos for bonus filter
+  const bonusFundos = useMemo(() => {
+    const set = new Set<string>();
+    bonificacionDiariaData.list.forEach((w) => {
+      if (w.fundo) set.add(w.fundo);
+    });
+    return Array.from(set).sort();
+  }, [bonificacionDiariaData.list]);
 
   const maxFundoJabas = useMemo(() => {
     if (metrics.jabasByFundo.length === 0) return 1;
@@ -215,12 +393,12 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               </span>
             </div>
             <p className="text-xs text-[#757575]">
-              Métricas consolidadas de ejecución, personal tareado y validaciones de campo
+              Métricas consolidadas, bonificación diaria de cosecha y validaciones en campo
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
           <button
             type="button"
             onClick={handleManualRefresh}
@@ -231,11 +409,11 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             <span className="hidden sm:inline">Refrescar</span>
           </button>
 
-          <div className="flex items-center gap-1 bg-[#f5f5f5] p-1 rounded-xl border border-[#e0e0e0] flex-1 sm:flex-initial">
+          <div className="flex items-center gap-1 bg-[#f5f5f5] p-1 rounded-xl border border-[#e0e0e0] flex-1 sm:flex-initial flex-wrap">
             <button
               type="button"
               onClick={() => setViewMode('metricas')}
-              className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 viewMode === 'metricas'
                   ? 'bg-[#2e7d32] text-white shadow-xs'
                   : 'text-gray-600 hover:text-[#1b5e20]'
@@ -246,8 +424,20 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             </button>
             <button
               type="button"
+              onClick={() => setViewMode('bonificacion')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                viewMode === 'bonificacion'
+                  ? 'bg-[#e65100] text-white shadow-xs'
+                  : 'text-amber-700 hover:text-amber-900'
+              }`}
+            >
+              <Gift className="w-3.5 h-3.5" />
+              <span>Bonificación Diaria</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setViewMode('verificacion')}
-              className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 viewMode === 'verificacion'
                   ? 'bg-[#2e7d32] text-white shadow-xs'
                   : 'text-gray-600 hover:text-[#1b5e20]'
@@ -260,7 +450,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         </div>
       </div>
 
-      {viewMode === 'verificacion' ? (
+      {/* ========================================================================= */}
+      {/* VISTA 1: MONITOR EN VIVO */}
+      {/* ========================================================================= */}
+      {viewMode === 'verificacion' && (
         <div className="animate-in fade-in">
           <RegistroStatusMonitor
             trabajadores={trabajadores}
@@ -268,7 +461,313 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             validaciones={validaciones}
           />
         </div>
-      ) : (
+      )}
+
+      {/* ========================================================================= */}
+      {/* VISTA 2: BONIFICACIÓN DIARIA DE TRABAJADORES (PASO 2) */}
+      {/* ========================================================================= */}
+      {viewMode === 'bonificacion' && (
+        <div className="space-y-4 animate-in fade-in">
+          {/* Header & Controls Card */}
+          <div className="bg-gradient-to-br from-[#fff8e1] to-[#ffe082]/40 rounded-2xl p-4 sm:p-5 border border-[#ffe082] shadow-sm space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-[#ffe082]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-[#ff8f00] text-white flex items-center justify-center shadow-xs">
+                  <Trophy className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-[#b26a00] flex items-center gap-2">
+                    <span>Bonificación Diaria de Cosecha</span>
+                    <span className="text-xs bg-[#e65100] text-white px-2 py-0.5 rounded-full font-bold">
+                      {formatDateDDMMAAAA(bonoFecha)}
+                    </span>
+                  </h2>
+                  <p className="text-xs text-[#8d5300]">
+                    Identifica a los cosechadores que superaron la meta diaria y calcula el monto exacto de premio por jabas excedentes.
+                  </p>
+                </div>
+              </div>
+
+              {/* Selector de Fecha */}
+              <div className="flex items-center gap-2 bg-white/90 p-1.5 rounded-xl border border-[#ffe082] self-start md:self-auto shadow-2xs">
+                <Calendar className="w-4 h-4 text-[#ff8f00] ml-1" />
+                <input
+                  type="date"
+                  value={bonoFecha}
+                  onChange={(e) => setBonoFecha(e.target.value)}
+                  className="bg-transparent text-gray-900 text-xs font-bold focus:outline-none cursor-pointer"
+                />
+                <button
+                  type="button"
+                  onClick={() => setBonoFecha(todayStr)}
+                  className="text-[10px] bg-[#ff8f00] hover:bg-[#e65100] px-2 py-1 rounded-md font-bold text-white cursor-pointer transition-colors"
+                >
+                  Hoy
+                </button>
+              </div>
+            </div>
+
+            {/* Configuración de Meta y Tarifa */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-white p-3 rounded-xl border border-[#ffe082]">
+                <label className="block text-[10px] font-bold uppercase text-[#8d5300] mb-1">
+                  Meta Base Diaria (Jabas)
+                </label>
+                <div className="flex items-center gap-2">
+                  <Target className="w-4 h-4 text-[#ff8f00]" />
+                  <input
+                    type="number"
+                    min="1"
+                    value={metaBaseJabas}
+                    onChange={(e) => setMetaBaseJabas(Math.max(1, parseInt(e.target.value) || 0))}
+                    className="w-full font-black text-sm text-[#e65100] bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-[#ff8f00]"
+                  />
+                  <span className="text-xs text-gray-500 font-bold">jabas</span>
+                </div>
+              </div>
+
+              <div className="bg-white p-3 rounded-xl border border-[#ffe082]">
+                <label className="block text-[10px] font-bold uppercase text-[#8d5300] mb-1">
+                  Tarifa de Bono por Jaba Excedente
+                </label>
+                <div className="flex items-center gap-2">
+                  <DollarSign className="w-4 h-4 text-[#2e7d32]" />
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={tarifaBono}
+                    onChange={(e) => setTarifaBono(Math.max(0, parseFloat(e.target.value) || 0))}
+                    className="w-full font-black text-sm text-[#1b5e20] bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-[#2e7d32]"
+                  />
+                  <span className="text-xs text-gray-500 font-bold">S/ /jaba</span>
+                </div>
+              </div>
+
+              <div className="bg-white p-3 rounded-xl border border-[#ffe082]">
+                <label className="block text-[10px] font-bold uppercase text-[#8d5300] mb-1">
+                  Filtro por Fundo
+                </label>
+                <select
+                  value={bonoFilterFundo}
+                  onChange={(e) => setBonoFilterFundo(e.target.value)}
+                  className="w-full text-xs font-semibold text-gray-800 bg-gray-50 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:border-[#ff8f00]"
+                >
+                  <option value="">Todos los Fundos</option>
+                  {bonusFundos.map((f) => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="bg-white p-3 rounded-xl border border-[#ffe082]">
+                <label className="block text-[10px] font-bold uppercase text-[#8d5300] mb-1">
+                  Estado de Bonificación
+                </label>
+                <select
+                  value={bonoFilterStatus}
+                  onChange={(e) => setBonoFilterStatus(e.target.value as any)}
+                  className="w-full text-xs font-semibold text-gray-800 bg-gray-50 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:border-[#ff8f00]"
+                >
+                  <option value="todos">Todos ({bonificacionDiariaData.totalPersonal})</option>
+                  <option value="bonificados">Solo Bonificados ({bonificacionDiariaData.totalBonificados})</option>
+                  <option value="no_bonificados">No Bonificados ({bonificacionDiariaData.totalPersonal - bonificacionDiariaData.totalBonificados})</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* KPI Cards Grid de Bonificación Diaria */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="bg-gradient-to-br from-[#e65100] to-[#ff8f00] rounded-2xl p-4 text-white shadow-sm">
+              <div className="flex items-center justify-between opacity-85 text-xs mb-1">
+                <span className="font-bold uppercase tracking-wider">Cosechadores Bonificados</span>
+                <Trophy className="w-4 h-4" />
+              </div>
+              <div className="text-3xl sm:text-4xl font-black leading-none mb-1">
+                {bonificacionDiariaData.totalBonificados}
+              </div>
+              <div className="text-[11px] text-amber-100 flex items-center justify-between pt-1 border-t border-amber-600/50">
+                <span>De {bonificacionDiariaData.totalPersonal} activos</span>
+                <span className="font-black">{bonificacionDiariaData.pctBonificados}% del personal</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#e0e0e0]">
+              <div className="flex items-center justify-between text-gray-500 text-xs mb-1">
+                <span className="font-bold text-[#40493d] uppercase tracking-wider">Jabas Bonificadas (Extras)</span>
+                <Package className="w-4 h-4 text-[#ff8f00]" />
+              </div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-[#e65100] leading-none mb-1">
+                +{bonificacionDiariaData.totalJabasBonificadas}
+              </div>
+              <div className="text-[10px] text-[#757575] mt-1">
+                Sobre la meta de {metaBaseJabas} jabas/persona
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-[#1b5e20] to-[#2e7d32] rounded-2xl p-4 text-white shadow-sm">
+              <div className="flex items-center justify-between opacity-85 text-xs mb-1">
+                <span className="font-bold uppercase tracking-wider">Total Premios a Pagar</span>
+                <DollarSign className="w-4 h-4" />
+              </div>
+              <div className="text-3xl sm:text-4xl font-black leading-none mb-1">
+                S/ {bonificacionDiariaData.totalMontoBonos.toFixed(2)}
+              </div>
+              <div className="text-[11px] text-emerald-100 flex items-center justify-between pt-1 border-t border-emerald-700/50">
+                <span>Tarifa: S/ {tarifaBono.toFixed(2)}/jaba</span>
+                <span className="font-black">Día: {formatDateDDMMAAAA(bonoFecha)}</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#e0e0e0]">
+              <div className="flex items-center justify-between text-gray-500 text-xs mb-1">
+                <span className="font-bold text-[#40493d] uppercase tracking-wider">Total Cosechado Hoy</span>
+                <BarChart3 className="w-4 h-4 text-[#2e7d32]" />
+              </div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-[#1b5e20] leading-none mb-1">
+                {bonificacionDiariaData.totalJabasCosechadas} jabas
+              </div>
+              <div className="text-[10px] text-[#757575] mt-1">
+                {bonificacionDiariaData.totalPersonal > 0
+                  ? `Promedio: ${(bonificacionDiariaData.totalJabasCosechadas / bonificacionDiariaData.totalPersonal).toFixed(1)} jabas/persona`
+                  : 'Sin registros para esta fecha'}
+              </div>
+            </div>
+          </div>
+
+          {/* Tabla de Cosechadores y Detalle de Bonificación */}
+          <div className="bg-white rounded-2xl shadow-sm border border-[#e0e0e0] overflow-hidden">
+            <div className="p-4 bg-[#fafafa] border-b border-gray-200 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
+              <div>
+                <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                  <span>Ranking y Nómina de Bonificación ({filteredBonoList.length} trabajadores)</span>
+                </h3>
+                <p className="text-[11px] text-gray-500">
+                  Fecha: <strong>{formatDateDDMMAAAA(bonoFecha)}</strong> · Meta Base: <strong>{metaBaseJabas} jabas</strong> · Tarifa: <strong>S/ {tarifaBono.toFixed(2)}</strong>
+                </p>
+              </div>
+
+              {/* Buscador Rápido */}
+              <div className="relative w-full sm:w-64">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Buscar por DNI o Nombre..."
+                  value={bonoSearch}
+                  onChange={(e) => setBonoSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-gray-200 rounded-xl focus:outline-none focus:border-[#e65100]"
+                />
+              </div>
+            </div>
+
+            {filteredBonoList.length === 0 ? (
+              <div className="py-12 px-4 text-center text-gray-400 text-xs">
+                <Gift className="w-10 h-10 mx-auto text-gray-300 mb-2" />
+                <p className="font-bold text-gray-700">No hay registros de trabajadores para el día {formatDateDDMMAAAA(bonoFecha)}</p>
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Registra jabas en la pestaña de Personal o cambia la fecha seleccionada en los filtros superiores.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-gray-100/75 border-b border-gray-200 text-gray-700 font-bold text-[11px]">
+                      <th className="py-2.5 px-3 text-center">#</th>
+                      <th className="py-2.5 px-3">DNI</th>
+                      <th className="py-2.5 px-3">Trabajador</th>
+                      <th className="py-2.5 px-3">Ubicación</th>
+                      <th className="py-2.5 px-3">Grupo / Líder</th>
+                      <th className="py-2.5 px-3 text-right">Jabas Hoy</th>
+                      <th className="py-2.5 px-3 text-right">Meta</th>
+                      <th className="py-2.5 px-3 text-right">Jabas Extras</th>
+                      <th className="py-2.5 px-3 text-right">Bono (S/)</th>
+                      <th className="py-2.5 px-3 text-center">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredBonoList.map((w, idx) => {
+                      const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}`;
+                      return (
+                        <tr
+                          key={w.dni}
+                          className={`hover:bg-amber-50/40 transition-colors ${
+                            w.isBonificado ? 'bg-white' : 'bg-gray-50/30'
+                          }`}
+                        >
+                          <td className="py-2.5 px-3 text-center font-bold text-gray-700">
+                            <span className="text-xs">{medal}</span>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-bold text-gray-900">
+                            {w.dni}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="font-bold text-gray-900">{w.nombres}</div>
+                            <div className="text-[10px] text-gray-500">Sup: {w.supervisor}</div>
+                          </td>
+                          <td className="py-2.5 px-3 text-gray-700">
+                            <div>{w.fundo}</div>
+                            <div className="text-[10px] text-gray-500">Mód: {w.modulo}</div>
+                          </td>
+                          <td className="py-2.5 px-3 text-gray-700">
+                            <div className="font-semibold">{w.grupo}</div>
+                            <div className="text-[10px] text-[#e65100] font-medium">👑 {w.lider}</div>
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-black text-gray-900 text-sm">
+                            {w.jabas}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-semibold text-gray-500">
+                            {w.metaBase}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-black">
+                            {w.isBonificado ? (
+                              <span className="text-[#e65100] bg-[#fff8e1] px-2 py-0.5 rounded-full border border-[#ffe082]">
+                                +{w.jabasBonificadas} jabas
+                              </span>
+                            ) : (
+                              <span className="text-gray-400 text-[11px]">-</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-black">
+                            {w.isBonificado ? (
+                              <span className="text-[#1b5e20] text-sm bg-[#e8f5e9] px-2.5 py-0.5 rounded-full border border-[#a5d6a7]">
+                                S/ {w.montoBono.toFixed(2)}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400 text-[11px]">S/ 0.00</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            {w.isBonificado ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] bg-[#e65100] text-white px-2 py-0.5 rounded-full font-bold">
+                                🏅 Bonificado
+                              </span>
+                            ) : w.isEnMeta ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] bg-[#2e7d32] text-white px-2 py-0.5 rounded-full font-bold">
+                                🎯 En Meta
+                              </span>
+                            ) : (
+                              <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
+                                ⏳ Falta {w.metaBase - w.jabas} jabas
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* VISTA 3: MÉTRICAS GENERALES */}
+      {/* ========================================================================= */}
+      {viewMode === 'metricas' && (
         <>
           {/* Filters Card */}
           <div className="bg-white rounded-2xl shadow-sm border border-[#e0e0e0] p-4 sm:p-5">
@@ -282,7 +781,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               <div className="flex items-center gap-1 text-[11px] text-[#757575]">
                 <span>Mostrando:</span>
                 <strong className="text-[#1b5e20]">
-                  {periodo === 'todo' ? 'Todo el histórico' : periodo === 'hoy' ? 'Hoy' : periodo}
+                  {periodo === 'todo' ? 'Todo el histórico' : periodo === 'hoy' ? `Hoy (${formatDateDDMMAAAA(todayStr)})` : periodo}
                 </strong>
               </div>
             </div>
@@ -298,7 +797,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   className="w-full px-3 py-2 text-xs rounded-xl border border-[#bfcaba] bg-white focus:outline-none focus:border-[#2e7d32]"
                 >
                   <option value="todo">Todo el histórico</option>
-                  <option value="hoy">Hoy</option>
+                  <option value="hoy">Hoy ({formatDateDDMMAAAA(todayStr)})</option>
                   <option value="semana">Esta semana (Últimos 7 días)</option>
                   <option value="mes">Este mes</option>
                   <option value="año">Este año</option>
@@ -483,7 +982,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
-                {metrics.jabasByGrupo.map((g, idx) => (
+                {metrics.jabasByGrupo.map((g) => (
                   <div key={g.grupo} className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-3 text-center">
                     <span className="text-[11px] font-bold text-gray-700 block truncate">{g.grupo}</span>
                     <span className="text-xl font-extrabold text-[#1b5e20] block mt-0.5">{g.count}</span>
@@ -521,7 +1020,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                         {p.fundo} · Módulo {p.modulo}
                       </div>
                       <div className="text-[11px] text-[#757575]">
-                        Fecha: {p.fecha} · Supervisor: {p.supervisor || 'General'}
+                        Fecha: {formatDateDDMMAAAA(p.fecha)} · Supervisor: {p.supervisor || 'General'}
                       </div>
                     </div>
                     <div className="text-right">

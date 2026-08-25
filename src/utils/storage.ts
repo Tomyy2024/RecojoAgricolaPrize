@@ -59,6 +59,39 @@ export function normalizeDateString(d?: string): string {
   return trimmed;
 }
 
+/** Formats any date string (YYYY-MM-DD, ISO timestamp, DD/MM/YYYY) to DD/MM/YYYY (ej: 25/08/2026) */
+export function formatDateDDMMAAAA(d?: string): string {
+  if (!d) return '';
+  const trimmed = d.split('T')[0].split(' ')[0].trim();
+  if (!trimmed) return '';
+  
+  // If already DD/MM/YYYY
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(trimmed)) {
+    const [day, month, year] = trimmed.split('/');
+    return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
+  }
+  
+  // If YYYY-MM-DD or YYYY/MM/DD
+  if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(trimmed)) {
+    const parts = trimmed.split(/[-/]/);
+    const year = parts[0];
+    const month = parts[1].padStart(2, '0');
+    const day = parts[2].padStart(2, '0');
+    return `${day}/${month}/${year}`;
+  }
+  
+  // If Date object parsable
+  const parsed = new Date(d);
+  if (!isNaN(parsed.getTime())) {
+    const day = String(parsed.getDate()).padStart(2, '0');
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const year = parsed.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+  
+  return trimmed;
+}
+
 // Auto-repair & sanity check
 export function initializeStorage() {
   try {

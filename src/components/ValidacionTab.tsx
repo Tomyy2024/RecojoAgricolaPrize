@@ -8,7 +8,7 @@ import {
   Programa,
   Lider
 } from '../types';
-import { getLocalToday, getLocalISO } from '../utils/storage';
+import { getLocalToday, getLocalISO, formatDateDDMMAAAA } from '../utils/storage';
 import { RegistroStatusMonitor } from './RegistroStatusMonitor';
 import { ScannerModal } from './ScannerModal';
 import { 
@@ -38,7 +38,10 @@ import {
   Camera,
   Info,
   Crown,
-  Trash2
+  Trash2,
+  ShieldCheck,
+  CheckCircle2,
+  Clock
 } from 'lucide-react';
 
 interface ValidacionTabProps {
@@ -73,7 +76,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
   // Active sub-tab: 'nueva' (Formulario 4 Pasos), 'monitor' (Verificación de Estado) o 'historial'
   const [activeSubTab, setActiveSubTab] = useState<'nueva' | 'monitor' | 'historial'>('nueva');
 
-  // Paso 1: Filtros de Validación (Limpio sin datos de prueba)
+  // Paso 1: Filtros de Validación
   const [filtroFecha, setFiltroFecha] = useState<string>(getLocalToday());
   const [filtroSupervisor, setFiltroSupervisor] = useState<string>(
     isSupervisor ? sessionSupervisorName : ''
@@ -83,6 +86,9 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
   const [filtroGrupo, setFiltroGrupo] = useState<string>('');
   const [filtroLider, setFiltroLider] = useState<string>('');
   const [showManageLeadersModal, setShowManageLeadersModal] = useState<boolean>(false);
+
+  // Filtro de Estado de Validación en Paso 2: 'pendientes' (default), 'validados', 'todos'
+  const [estadoFiltro, setEstadoFiltro] = useState<'pendientes' | 'validados' | 'todos'>('pendientes');
 
   // Normalization Helpers
   const normalizeStr = (text?: string) =>
@@ -163,7 +169,6 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
   // Búsqueda rápida dentro de la lista de trabajadores
   const [searchWorker, setSearchWorker] = useState<string>('');
 
-  // Paso 2 y 3: Lista de trabajadores filtrados con estado de conformidad e items
   // Keyed by DNI: { conforme: boolean, observacion: string, jabas: number }
   const [workerValidationState, setWorkerValidationState] = useState<
     Record<string, { conforme: boolean; observacion: string; jabas: number }>
@@ -257,9 +262,32 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     return Array.from(set).sort();
   }, [grupos, trabajadores, detalleJabas]);
 
+  // Map of already validated workers for the selected date: DNI -> Validation Info
+  const alreadyValidatedMap = useMemo(() => {
+    const map = new Map<string, { validacionId: string; supervisor: string; conforme: boolean; jabas: number; fechaRegistro: string }>();
+    validaciones.forEach((val) => {
+      if (normalizeDate(val.fecha) === normalizeDate(filtroFecha)) {
+        if (val.items && Array.isArray(val.items)) {
+          val.items.forEach((it) => {
+            if (it.dni) {
+              map.set(it.dni, {
+                validacionId: val.id,
+                supervisor: val.supervisor,
+                conforme: it.conforme !== false,
+                jabas: it.jabas,
+                fechaRegistro: val.fechaRegistro
+              });
+            }
+          });
+        }
+      }
+    });
+    return map;
+  }, [validaciones, filtroFecha]);
+
   // Derive candidate workers based on selected filters (STRICTLY ONLY WORKERS WITH JABAS > 0)
-  const candidateWorkers = useMemo(() => {
-    const map = new Map<string, { worker: Trabajador; jabas: number }>();
+  const allCandidateWorkers = useMemo(() => {
+    const map = new Map<string, { worker: Trabajador; jabas: number; isValidated: boolean; validationInfo?: { validacionId: string; supervisor: string; conforme: boolean; jabas: number; fechaRegistro: string } }>();
 
     // 1. Calculate and accumulate jabas from DetalleJabas matching the filters
     const matchingDetalle = detalleJabas.filter((dj) => {
@@ -352,6 +380,8 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
           filtroLider ||
           (availableLideres.length > 0 ? availableLideres[0].nombre : 'Antony Cerron');
 
+        const vInfo = alreadyValidatedMap.get(t.dni);
+
         map.set(t.dni, {
           worker: {
             ...t,
@@ -359,7 +389,9 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
             supervisor: t.supervisor || filtroSupervisor,
             lider: assignedLider
           },
-          jabas: jCount
+          jabas: jCount,
+          isValidated: !!vInfo,
+          validationInfo: vInfo
         });
       }
     });
@@ -380,22 +412,50 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
           tipo: 'Cosechador',
           jabas: jabasByDni[dj.dni] || dj.jabas
         };
-        map.set(dj.dni, { worker: syntheticWorker, jabas: jabasByDni[dj.dni] || dj.jabas });
+        const vInfo = alreadyValidatedMap.get(dj.dni);
+        map.set(dj.dni, { 
+          worker: syntheticWorker, 
+          jabas: jabasByDni[dj.dni] || dj.jabas,
+          isValidated: !!vInfo,
+          validationInfo: vInfo
+        });
       }
     });
 
     return Array.from(map.values()).sort((a, b) => a.worker.nombres.localeCompare(b.worker.nombres));
-  }, [trabajadores, detalleJabas, programas, availableLideres, filtroFecha, filtroSupervisor, filtroFundo, filtroModulo, filtroGrupo, filtroLider]);
+  }, [trabajadores, detalleJabas, programas, availableLideres, alreadyValidatedMap, filtroFecha, filtroSupervisor, filtroFundo, filtroModulo, filtroGrupo, filtroLider]);
+
+  // Counts of pending vs validated candidates
+  const totalCandidateCount = allCandidateWorkers.length;
+  const validatedCount = allCandidateWorkers.filter((c) => c.isValidated).length;
+  const pendingCount = totalCandidateCount - validatedCount;
+
+  // Active candidates list according to estadoFiltro ('pendientes' excludes already validated)
+  const candidateWorkers = useMemo(() => {
+    if (estadoFiltro === 'pendientes') {
+      return allCandidateWorkers.filter((c) => !c.isValidated);
+    }
+    if (estadoFiltro === 'validados') {
+      return allCandidateWorkers.filter((c) => c.isValidated);
+    }
+    return allCandidateWorkers;
+  }, [allCandidateWorkers, estadoFiltro]);
 
   // Synchronize validation state when candidate workers list changes or filters change
   useEffect(() => {
     setWorkerValidationState((prev) => {
       const nextState: Record<string, { conforme: boolean; observacion: string; jabas: number }> = {};
-      candidateWorkers.forEach(({ worker, jabas }) => {
+      candidateWorkers.forEach(({ worker, jabas, validationInfo }) => {
         if (prev[worker.dni]) {
           nextState[worker.dni] = {
             ...prev[worker.dni],
             jabas: prev[worker.dni].jabas !== undefined ? prev[worker.dni].jabas : jabas
+          };
+        } else if (validationInfo) {
+          nextState[worker.dni] = {
+            conforme: validationInfo.conforme,
+            observacion: '',
+            jabas: validationInfo.jabas
           };
         } else {
           // Default all candidates to conforme = true
@@ -535,13 +595,13 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
       });
 
       const nuevaValidacion: ValidacionSupervisor = {
-        id: `VAL_${filtroFecha}_${filtroModulo}_${Date.now().toString().slice(-6)}`,
+        id: `VAL_${filtroFecha}_${filtroModulo || 'GEN'}_${Date.now().toString().slice(-6)}`,
         fecha: filtroFecha,
         supervisor: filtroSupervisor,
         fundo: filtroFundo,
         modulo: filtroModulo,
         grupo: filtroGrupo,
-        lider: candidateWorkers[0]?.worker.lider || 'Antony Cerron',
+        lider: candidateWorkers[0]?.worker.lider || filtroLider || 'Antony Cerron',
         totalTrabajadores,
         trabajadoresConformes,
         trabajadoresAnulados,
@@ -560,7 +620,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
         'success'
       );
 
-      // Switch to historial or reset
+      // Reset input observations & switch to historial
       setObservacionesGenerales('');
       setActiveSubTab('historial');
     } catch (err) {
@@ -617,7 +677,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
             }`}
           >
             <Radio className="w-3.5 h-3.5" />
-            <span>Verificar Registros (Hoy)</span>
+            <span>Verificar Registros ({formatDateDDMMAAAA(filtroFecha)})</span>
           </button>
           <button
             type="button"
@@ -650,14 +710,17 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                 </div>
                 <div>
                   <h2 className="text-sm sm:text-base font-bold text-[#1b5e20]">
-                    Paso 1: Filtros de Selección
+                    Paso 1: Filtros de Selección de Cuadrilla
                   </h2>
                   <p className="text-[11px] text-[#757575]">
-                    Especifica los criterios para cargar la cuadrilla y avance correspondiente
+                    Especifica los criterios para cargar el personal y las jabas cosechadas
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 font-medium">
+                  Fecha seleccionada: <strong className="text-[#1b5e20]">{formatDateDDMMAAAA(filtroFecha)}</strong>
+                </span>
                 <button
                   type="button"
                   onClick={() => setFiltroFecha(getLocalToday())}
@@ -814,40 +877,53 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                     Paso 2 y 3: Lista de Trabajadores y Validación Individual
                   </h2>
                   <p className="text-[11px] text-[#757575]">
-                    Verifica las jabas de cada personal. Haz check masivo o anula uno por uno si no es conforme.
+                    Verifica las jabas de cada personal. Los ya validados se ocultan automáticamente para evitar duplicados.
                   </p>
                 </div>
               </div>
 
-              {/* Métricas en Vivo */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="bg-[#fff8e1] px-2.5 py-1 rounded-lg border border-[#ffe082] flex items-center gap-1.5 text-center">
-                  <Crown className="w-3.5 h-3.5 text-[#ff8f00]" />
-                  <div>
-                    <span className="text-[9px] text-[#e65100] font-bold block uppercase leading-none">Líder</span>
-                    <span className="text-xs font-extrabold text-[#e65100] leading-tight">{filtroLider || 'Antony Cerron'}</span>
-                  </div>
-                </div>
-                <div className="bg-[#f5f5f5] px-2.5 py-1 rounded-lg border border-gray-200 text-center">
-                  <span className="text-[10px] text-gray-500 font-bold block">Personal</span>
-                  <span className="text-xs font-black text-gray-800">{totalTrabajadores}</span>
-                </div>
-                <div className="bg-[#e8f5e9] px-2.5 py-1 rounded-lg border border-[#a5d6a7] text-center">
-                  <span className="text-[10px] text-[#1b5e20] font-bold block">Conformes</span>
-                  <span className="text-xs font-black text-[#1b5e20]">{trabajadoresConformes}</span>
-                </div>
-                {trabajadoresAnulados > 0 && (
-                  <div className="bg-[#ffebee] px-2.5 py-1 rounded-lg border border-[#ffcdd2] text-center">
-                    <span className="text-[10px] text-[#c62828] font-bold block">Anulados</span>
-                    <span className="text-xs font-black text-[#c62828]">{trabajadoresAnulados}</span>
-                  </div>
-                )}
-                <div className="bg-[#fff8e1] px-3 py-1 rounded-lg border border-[#ffe082] text-center">
-                  <span className="text-[10px] text-[#e65100] font-bold block">Jabas Conformes</span>
-                  <span className="text-xs font-black text-[#e65100]">
-                    {jabasConformes} <span className="text-[10px] font-normal text-gray-500">/ {totalJabas}</span>
-                  </span>
-                </div>
+              {/* Filtro de Estado: Pendientes (Default) vs Validados vs Todos */}
+              <div className="flex bg-[#f5f5f5] p-1 rounded-xl border border-gray-200 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setEstadoFiltro('pendientes')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                    estadoFiltro === 'pendientes'
+                      ? 'bg-[#ff8f00] text-white shadow-2xs'
+                      : 'text-[#e65100] hover:bg-amber-50'
+                  }`}
+                  title="Mostrar solo trabajadores pendientes de validación"
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Pendientes ({pendingCount})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setEstadoFiltro('validados')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                    estadoFiltro === 'validados'
+                      ? 'bg-[#1b5e20] text-white shadow-2xs'
+                      : 'text-[#1b5e20] hover:bg-emerald-50'
+                  }`}
+                  title="Mostrar trabajadores que ya fueron validados hoy"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Ya Validados ({validatedCount})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setEstadoFiltro('todos')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    estadoFiltro === 'todos'
+                      ? 'bg-gray-800 text-white shadow-2xs'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                  title="Mostrar todo el personal (pendientes y validados)"
+                >
+                  Todos ({totalCandidateCount})
+                </button>
               </div>
             </div>
 
@@ -857,7 +933,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                 <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Buscar trabajador por nombre o DNI en esta cuadrilla..."
+                  placeholder="Buscar trabajador por nombre o DNI..."
                   value={searchWorker}
                   onChange={(e) => setSearchWorker(e.target.value)}
                   className="w-full pl-9 pr-3 py-1.5 text-xs border border-[#bfcaba] rounded-lg focus:outline-none focus:border-[#2e7d32] bg-white"
@@ -879,7 +955,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                   type="button"
                   onClick={handleCheckAll}
                   className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95 transition-all whitespace-nowrap"
-                  title="Marcar a todos los trabajadores como conformes"
+                  title="Marcar a todos los trabajadores mostrados como conformes"
                 >
                   <CheckSquare className="w-3.5 h-3.5" />
                   <span>Check a Todos</span>
@@ -898,23 +974,54 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
 
             {/* Listado de Trabajadores con Jabas y Botón Individual de Conformidad */}
             {filteredList.length === 0 ? (
-              <div className="py-12 px-4 text-center text-gray-500 text-xs bg-[#fafafa] rounded-xl border border-dashed border-gray-200">
-                <PackageCheck className="w-10 h-10 mx-auto text-[#2e7d32]/50 mb-2.5" />
-                <div className="font-bold text-gray-800 text-sm mb-1">
-                  No hay trabajadores con jabas registradas para validar
+              estadoFiltro === 'pendientes' && validatedCount > 0 ? (
+                /* Card especial cuando todos los trabajadores ya fueron validados */
+                <div className="py-8 px-4 text-center bg-[#f4fbf5] rounded-xl border border-[#a5d6a7] space-y-2">
+                  <div className="w-12 h-12 rounded-full bg-[#e8f5e9] text-[#1b5e20] flex items-center justify-center mx-auto mb-1">
+                    <ShieldCheck className="w-7 h-7 text-[#2e7d32]" />
+                  </div>
+                  <div className="font-extrabold text-gray-900 text-sm">
+                    ¡Cuadrilla ya validada con éxito!
+                  </div>
+                  <p className="text-xs text-gray-600 max-w-lg mx-auto">
+                    Los <strong className="text-[#1b5e20]">{validatedCount} trabajadores</strong> con jabas de esta cuadrilla ({filtroFundo || 'Fundo'}, {filtroModulo || 'Módulo'}, {filtroGrupo || 'Grupo'}) del día <strong className="text-gray-900">{formatDateDDMMAAAA(filtroFecha)}</strong> ya fueron validados oficialmente.
+                  </p>
+                  <div className="pt-2 flex items-center justify-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setEstadoFiltro('validados')}
+                      className="bg-[#2e7d32] text-white px-3.5 py-1.5 rounded-lg text-xs font-bold hover:bg-[#1b5e20] cursor-pointer shadow-2xs"
+                    >
+                      Ver Personal Validado ({validatedCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveSubTab('historial')}
+                      className="bg-white border border-[#2e7d32] text-[#2e7d32] px-3.5 py-1.5 rounded-lg text-xs font-bold hover:bg-emerald-50 cursor-pointer"
+                    >
+                      Ver en Historial Oficial
+                    </button>
+                  </div>
                 </div>
-                <div className="text-[11px] text-gray-500 max-w-md mx-auto">
-                  La lista de validación muestra exclusivamente a los trabajadores con jabas cosechadas asignadas ({filtroFundo}, {filtroModulo}, {filtroGrupo}).
+              ) : (
+                <div className="py-12 px-4 text-center text-gray-500 text-xs bg-[#fafafa] rounded-xl border border-dashed border-gray-200">
+                  <PackageCheck className="w-10 h-10 mx-auto text-[#2e7d32]/50 mb-2.5" />
+                  <div className="font-bold text-gray-800 text-sm mb-1">
+                    No hay trabajadores con jabas pendientes para los filtros seleccionados
+                  </div>
+                  <div className="text-[11px] text-gray-500 max-w-md mx-auto">
+                    La lista de validación muestra a los trabajadores con jabas cosechadas asignadas ({filtroFundo || 'Todos los fundos'}, {filtroModulo || 'Todos los módulos'}, {filtroGrupo || 'Todos los grupos'}) para la fecha {formatDateDDMMAAAA(filtroFecha)}.
+                  </div>
+                  <div className="text-[10px] text-gray-400 mt-2">
+                    💡 Registra primero el avance de jabas en la pestaña <strong className="text-gray-600">PERSONAL</strong> o cambia los filtros superiores.
+                  </div>
                 </div>
-                <div className="text-[10px] text-gray-400 mt-2">
-                  💡 Registra primero el avance de jabas en la pestaña <strong className="text-gray-600">EJECUCIÓN</strong> o ajusta los filtros superiores.
-                </div>
-              </div>
+              )
             ) : (
               <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
-                {filteredList.map(({ worker, jabas }) => {
+                {filteredList.map(({ worker, jabas, isValidated, validationInfo }) => {
                   const state = workerValidationState[worker.dni] || {
-                    conforme: true,
+                    conforme: validationInfo ? validationInfo.conforme : true,
                     observacion: '',
                     jabas: jabas
                   };
@@ -925,7 +1032,9 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                     <div
                       key={worker.dni}
                       className={`p-3 rounded-xl border transition-all ${
-                        isConforme
+                        isValidated
+                          ? 'bg-[#f4fbf5] border-[#a5d6a7]'
+                          : isConforme
                           ? 'bg-white border-[#e0e0e0] hover:border-[#a5d6a7]'
                           : 'bg-[#fff5f5] border-[#ffcdd2]'
                       }`}
@@ -933,13 +1042,19 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                         {/* Info Trabajador */}
                         <div className="space-y-0.5">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-bold text-xs sm:text-sm text-gray-900">
                               {worker.nombres}
                             </span>
                             <span className="text-[10px] bg-[#f5f5f5] text-gray-700 px-2 py-0.5 rounded-full font-semibold border border-gray-200">
                               DNI: {worker.dni}
                             </span>
+                            {isValidated && (
+                              <span className="text-[10px] bg-[#e8f5e9] text-[#1b5e20] px-2 py-0.5 rounded-full font-bold border border-[#a5d6a7] flex items-center gap-1">
+                                <ShieldCheck className="w-3 h-3 text-[#2e7d32]" />
+                                <span>Ya Validado ({validationInfo?.supervisor})</span>
+                              </span>
+                            )}
                             {worker.tipo && (
                               <span className="text-[10px] bg-[#e8f5e9] text-[#1b5e20] px-2 py-0.5 rounded-full font-semibold">
                                 {worker.tipo}
@@ -1053,16 +1168,16 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                   Información de Cuadrilla
                 </span>
                 <div className="font-bold text-gray-800">
-                  📅 Fecha: <span className="font-normal text-gray-600">{filtroFecha}</span>
+                  📅 Fecha: <span className="font-normal text-gray-600">{formatDateDDMMAAAA(filtroFecha)}</span>
                 </div>
                 <div className="font-bold text-gray-800">
-                  👤 Supervisor: <span className="font-normal text-gray-600">{filtroSupervisor}</span>
+                  👤 Supervisor: <span className="font-normal text-gray-600">{filtroSupervisor || 'Todos'}</span>
                 </div>
                 <div className="font-bold text-gray-800">
-                  📍 Ubicación: <span className="font-normal text-gray-600">{filtroFundo} - {filtroModulo}</span>
+                  📍 Ubicación: <span className="font-normal text-gray-600">{filtroFundo || 'Todos'} - {filtroModulo || 'Todos'}</span>
                 </div>
                 <div className="font-bold text-gray-800">
-                  👥 Grupo: <span className="font-normal text-gray-600">{filtroGrupo}</span>
+                  👥 Grupo: <span className="font-normal text-gray-600">{filtroGrupo || 'Todos'}</span>
                 </div>
                 <div className="font-bold text-[#e65100] flex items-center gap-1">
                   <Crown className="w-3.5 h-3.5 text-[#ff8f00]" />
@@ -1074,7 +1189,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
               {/* Bloque Balance de Personal */}
               <div className="bg-[#fafafa] p-3.5 rounded-xl border border-[#e0e0e0] space-y-2 text-xs">
                 <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wide block">
-                  Balance de Personal
+                  Balance de Personal a Validar
                 </span>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Total Evaluados:</span>
@@ -1130,7 +1245,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
               }`}
             >
               <Send className="w-4 h-4" />
-              <span>Guardar Validación y Enviar</span>
+              <span>Guardar Validación y Enviar ({trabajadoresConformes} conformes)</span>
             </button>
           </div>
         </div>
@@ -1159,9 +1274,9 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveSubTab('nueva')}
-                className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer shadow-xs"
               >
-                <span>+ Nueva</span>
+                <span>+ Nueva Validación</span>
               </button>
             </div>
 
@@ -1197,7 +1312,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                             </span>
                           </div>
                           <div className="text-xs text-gray-700 flex flex-wrap items-center gap-2">
-                            <span>📅 {val.fecha}</span>
+                            <span>📅 {formatDateDDMMAAAA(val.fecha)}</span>
                             <span>·</span>
                             <span>📍 {val.fundo} - {val.modulo}</span>
                             <span>·</span>
@@ -1284,7 +1399,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                           </div>
 
                           <div className="text-[10px] text-gray-400 text-right">
-                            Registrado por {val.creadoPor || val.supervisor} · {val.fechaRegistro}
+                            Registrado por {val.creadoPor || val.supervisor} · {formatDateDDMMAAAA(val.fechaRegistro)}
                           </div>
                         </div>
                       )}
@@ -1298,7 +1413,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* SECCIÓN 2: MONITOR DE VERIFICACIÓN DE REGISTROS EN VIVO */}
+      {/* SECCIÓN 3: MONITOR DE VERIFICACIÓN DE REGISTROS EN VIVO */}
       {/* ========================================================================= */}
       {activeSubTab === 'monitor' && (
         <div className="animate-in fade-in">
@@ -1375,7 +1490,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                           if (onDeleteLider) {
                             onDeleteLider(lead.nombre);
                           } else {
-                            onToast(`🗑️ Líder "${lead.nombre}" eliminado`);
+                            onToast(`🗑️ Líder "${lead.nombre}" eliminado`, 'info');
                           }
                         }
                       }}

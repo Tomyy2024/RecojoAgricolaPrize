@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Programa, ProgramaGeneral, DetalleJaba, Trabajador, ValidacionSupervisor } from '../types';
 import { exportToExcelFile, exportToCsvFile, ExportTableData } from '../utils/exportUtils';
-import { getLocalToday, normalizeDateString } from '../utils/storage';
+import { getLocalToday, normalizeDateString, formatDateDDMMAAAA } from '../utils/storage';
 import { 
   FileSpreadsheet, 
   ChevronDown, 
@@ -17,7 +17,11 @@ import {
   Package,
   Layers,
   Users,
-  ShieldCheck
+  ShieldCheck,
+  Gift,
+  Trophy,
+  DollarSign,
+  Target
 } from 'lucide-react';
 
 interface ReportesTabProps {
@@ -46,14 +50,20 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
   const [hasta, setHasta] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Bonus Report Configuration & Date Filter (Paso 2)
+  const [bonoFecha, setBonoFecha] = useState<string>(today);
+  const [metaBaseJabas, setMetaBaseJabas] = useState<number>(30);
+  const [tarifaBono, setTarifaBono] = useState<number>(2.0);
+
   // Accordion state
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    secBono: true,
     sec1: true,
     sec2: false,
     sec3: false,
     sec4: true,
     sec5: true,
-    sec6: true,
+    sec6: false,
     sec7: false
   });
 
@@ -102,6 +112,122 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
     return validaciones.filter((v) => isDateInPeriod(v.fecha || v.fechaRegistro));
   }, [validaciones, periodo, desde, hasta]);
 
+  // ----------------------------------------------------------------------------------
+  // SECCIÓN BONIFICACIÓN DIARIA: CÁLCULO POR DÍA Y METAS
+  // ----------------------------------------------------------------------------------
+  const secBonoData = useMemo(() => {
+    const targetNorm = normalizeDateString(bonoFecha);
+    const dayRecords = detalleJabas.filter((d) => normalizeDateString(d.fecha) === targetNorm);
+    const dayValidaciones = validaciones.filter((v) => normalizeDateString(v.fecha) === targetNorm);
+
+    const map = new Map<string, {
+      dni: string;
+      nombres: string;
+      fundo: string;
+      modulo: string;
+      grupo: string;
+      supervisor: string;
+      lider: string;
+      jabas: number;
+      isValidado: boolean;
+    }>();
+
+    dayRecords.forEach((d) => {
+      if (!d.dni) return;
+      const count = Number(d.jabas) || 0;
+      if (map.has(d.dni)) {
+        map.get(d.dni)!.jabas += count;
+      } else {
+        map.set(d.dni, {
+          dni: d.dni,
+          nombres: d.trabajador || d.dni,
+          fundo: d.fundo || 'Santa Teresa',
+          modulo: d.modulo || 'M01',
+          grupo: d.grupo || 'Grupo 01',
+          supervisor: d.supervisor || 'General',
+          lider: d.lider || 'Antony Cerron',
+          jabas: count,
+          isValidado: false
+        });
+      }
+    });
+
+    dayValidaciones.forEach((v) => {
+      if (v.items && Array.isArray(v.items)) {
+        v.items.forEach((it) => {
+          if (!it.dni) return;
+          if (map.has(it.dni)) {
+            map.get(it.dni)!.isValidado = it.conforme !== false;
+            if (it.jabas !== undefined && it.jabas > 0) {
+              map.get(it.dni)!.jabas = it.jabas;
+            }
+          } else if (it.jabas > 0) {
+            map.set(it.dni, {
+              dni: it.dni,
+              nombres: it.nombres || it.dni,
+              fundo: v.fundo || 'Santa Teresa',
+              modulo: v.modulo || 'M01',
+              grupo: v.grupo || 'Grupo 01',
+              supervisor: v.supervisor || 'General',
+              lider: v.lider || 'Antony Cerron',
+              jabas: it.jabas,
+              isValidado: it.conforme !== false
+            });
+          }
+        });
+      }
+    });
+
+    trabajadores.forEach((t) => {
+      if (!t.dni) return;
+      if (!map.has(t.dni) && t.fecha && normalizeDateString(t.fecha) === targetNorm && t.jabas && t.jabas > 0) {
+        map.set(t.dni, {
+          dni: t.dni,
+          nombres: t.nombres || t.dni,
+          fundo: t.fundo || 'Santa Teresa',
+          modulo: t.modulo || 'M01',
+          grupo: t.grupo || 'Grupo 01',
+          supervisor: t.supervisor || 'General',
+          lider: t.lider || 'Antony Cerron',
+          jabas: t.jabas,
+          isValidado: false
+        });
+      }
+    });
+
+    const list = Array.from(map.values()).map((w) => {
+      const jabas = w.jabas;
+      const jabasBonificadas = Math.max(0, jabas - metaBaseJabas);
+      const montoBono = Math.round(jabasBonificadas * tarifaBono * 100) / 100;
+      const isBonificado = jabas > metaBaseJabas;
+
+      return {
+        ...w,
+        metaBase: metaBaseJabas,
+        jabasBonificadas,
+        montoBono,
+        isBonificado
+      };
+    });
+
+    list.sort((a, b) => b.jabas - a.jabas || a.nombres.localeCompare(b.nombres));
+
+    const totalPersonal = list.length;
+    const totalBonificados = list.filter((w) => w.isBonificado).length;
+    const totalJabas = list.reduce((sum, w) => sum + w.jabas, 0);
+    const totalJabasExtras = list.reduce((sum, w) => sum + w.jabasBonificadas, 0);
+    const totalMonto = list.reduce((sum, w) => sum + w.montoBono, 0);
+
+    return {
+      list,
+      totalPersonal,
+      totalBonificados,
+      totalJabas,
+      totalJabasExtras,
+      totalMonto
+    };
+  }, [detalleJabas, validaciones, trabajadores, bonoFecha, metaBaseJabas, tarifaBono]);
+
   // Section 1: Fundo y Módulos Programados y Ejecutados
   const sec1Data = useMemo(() => {
     const map: Record<string, { fundo: string; modulo: string; jabas: number; programas: number; lotes: number; personal: number }> = {};
@@ -136,7 +262,6 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
       if (!map[key]) {
         map[key] = { fundo: f, modulo: m, jabas: 0, programas: 0, lotes: 0, personal: 0 };
       }
-      // If no execution parts exist for this fundo/modulo, add field jabas
       if (map[key].programas === 0) {
         map[key].jabas += Number(d.jabas) || 0;
         totalJabas += Number(d.jabas) || 0;
@@ -176,7 +301,6 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
   const sec3Data = useMemo(() => {
     const map: Record<string, { dni: string; nombres: string; fundo: string; modulo: string; supervisor: string; grupo?: string; jabasTotales: number; actividades: number }> = {};
 
-    // DetalleJabas records
     filteredDetalleJabas.forEach((d) => {
       const dni = d.dni ? d.dni.trim() : '';
       if (!dni) return;
@@ -196,7 +320,6 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
       map[dni].actividades += 1;
     });
 
-    // Existing master workers
     trabajadores.forEach((t) => {
       const dni = t.dni ? t.dni.trim() : '';
       if (!dni) return;
@@ -204,7 +327,7 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
         map[dni] = {
           dni,
           nombres: t.nombres || dni,
-          fundo: t.fundo || 'Arena Azul',
+          fundo: t.fundo || 'Santa Teresa',
           modulo: t.modulo || 'M01',
           supervisor: t.supervisor || 'General',
           grupo: t.grupo || 'Grupo 01',
@@ -294,6 +417,28 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
     let data: ExportTableData;
 
     switch (sectionId) {
+      case 'secBono':
+        data = {
+          headers: ['Fecha', 'DNI', 'Trabajador', 'Fundo', 'Módulo', 'Grupo', 'Líder', 'Supervisor', 'Jabas', 'Meta', 'Jabas Extras', 'Bono (S/)', 'Estado'],
+          rows: secBonoData.list.map((w) => [
+            formatDateDDMMAAAA(bonoFecha),
+            w.dni,
+            w.nombres,
+            w.fundo,
+            w.modulo,
+            w.grupo,
+            w.lider,
+            w.supervisor,
+            w.jabas,
+            w.metaBase,
+            w.jabasBonificadas,
+            `S/ ${w.montoBono.toFixed(2)}`,
+            w.isBonificado ? 'Bonificado' : 'Normal'
+          ])
+        };
+        data.rows.push(['TOTAL', '', `${secBonoData.totalPersonal} trabajadores`, '', '', '', '', '', secBonoData.totalJabas, '', secBonoData.totalJabasExtras, `S/ ${secBonoData.totalMonto.toFixed(2)}`, `${secBonoData.totalBonificados} premiados`]);
+        break;
+
       case 'sec1':
         data = {
           headers: ['Fundo', 'Módulo', 'Jabas', 'Programas', 'Lotes', 'Registros Tareo'],
@@ -341,7 +486,7 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
       case 'sec6':
         data = {
           headers: ['Fecha', 'DNI', 'Trabajador', 'Fundo', 'Módulo', 'Grupo', 'Líder', 'Jabas', 'Supervisor'],
-          rows: sec6Data.list.map((d) => [d.fecha, d.dni, d.trabajador, d.fundo, d.modulo, d.grupo || '', d.lider || '', d.jabas, d.supervisor])
+          rows: sec6Data.list.map((d) => [formatDateDDMMAAAA(d.fecha), d.dni, d.trabajador, d.fundo, d.modulo, d.grupo || '', d.lider || '', d.jabas, d.supervisor])
         };
         data.rows.push(['TOTAL', '', '', '', '', '', '', sec6Data.total, '']);
         break;
@@ -349,7 +494,7 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
       case 'sec7':
         data = {
           headers: ['Fecha', 'Supervisor', 'Fundo', 'Módulo', 'Grupo', 'Líder', 'Trabajadores', 'Jabas Conformes', 'Estado'],
-          rows: sec7Data.list.map((v) => [v.fecha, v.supervisor, v.fundo, v.modulo, v.grupo, v.lider || '', v.totalTrabajadores, v.jabasConformes, v.estado])
+          rows: sec7Data.list.map((v) => [formatDateDDMMAAAA(v.fecha), v.supervisor, v.fundo, v.modulo, v.grupo, v.lider || '', v.totalTrabajadores, v.jabasConformes, v.estado])
         };
         data.rows.push(['TOTAL', '', '', '', '', '', '', sec7Data.totalJabas, '']);
         break;
@@ -390,7 +535,9 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
               <h2 className="text-base sm:text-lg font-bold text-[#1b5e20]">
                 Módulo de Reportes y Exportación
               </h2>
-              <span className="text-xs text-[#757575] font-medium">Exportación consolidada a Excel (.xlsx) y CSV</span>
+              <span className="text-xs text-[#757575] font-medium">
+                Descarga de actas, bonificaciones y estadísticas en formato Excel (.xlsx) y CSV
+              </span>
             </div>
           </div>
 
@@ -407,7 +554,7 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-semibold text-[#40493d] mb-1">
-              Filtro de Período
+              Filtro de Período General
             </label>
             <select
               value={periodo}
@@ -415,7 +562,7 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
               className="w-full px-3 py-2 text-xs rounded-xl border border-[#bfcaba] bg-white focus:outline-none focus:border-[#2e7d32]"
             >
               <option value="todo">Todo el histórico (Sin restricción)</option>
-              <option value="hoy">Hoy ({today})</option>
+              <option value="hoy">Hoy ({formatDateDDMMAAAA(today)})</option>
               <option value="semana">Últimos 7 días</option>
               <option value="mes">Este mes</option>
             </select>
@@ -476,6 +623,203 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
           </div>
           <div className="text-[11px] font-semibold text-[#40493d] mt-0.5">Personal Activo</div>
         </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* ACCORDION 0: REPORTE DE BONIFICACIÓN DIARIA DE TRABAJADORES (PASO 2) */}
+      {/* ========================================================================= */}
+      <div className="bg-white rounded-2xl shadow-sm border border-[#ffe082] overflow-hidden">
+        <div
+          onClick={() => toggleSection('secBono')}
+          className="bg-gradient-to-r from-[#fff8e1] to-[#fffde7] p-3.5 sm:p-4 flex items-center justify-between cursor-pointer select-none hover:bg-amber-50 transition-colors border-b border-[#ffe082]"
+        >
+          <div className="flex items-center gap-2">
+            <Trophy className="w-5 h-5 text-[#ff8f00]" />
+            <span className="font-bold text-xs sm:text-sm text-[#b26a00]">
+              🏅 Reporte de Bonificación Diaria de Cosecha ({formatDateDDMMAAAA(bonoFecha)})
+            </span>
+            <span className="text-[11px] bg-[#e65100] text-white px-2 py-0.5 rounded-full font-bold">
+              {secBonoData.totalBonificados} bonificados
+            </span>
+          </div>
+          {openSections.secBono ? (
+            <ChevronUp className="w-4 h-4 text-gray-500" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-gray-500" />
+          )}
+        </div>
+
+        {openSections.secBono && (
+          <div className="p-4 bg-white space-y-3 animate-in fade-in">
+            {/* Controles de fecha y metas de bonificación */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-[#fafafa] p-3 rounded-xl border border-gray-200 text-xs">
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-gray-600 mb-1">
+                  📅 Día a Filtrar:
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={bonoFecha}
+                    onChange={(e) => setBonoFecha(e.target.value)}
+                    className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 font-bold text-gray-900 focus:outline-none focus:border-[#ff8f00]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setBonoFecha(today)}
+                    className="text-[10px] bg-[#ff8f00] hover:bg-[#e65100] text-white font-bold px-2 py-1.5 rounded-lg cursor-pointer"
+                  >
+                    Hoy
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-gray-600 mb-1">
+                  🎯 Meta Base Diaria:
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min="1"
+                    value={metaBaseJabas}
+                    onChange={(e) => setMetaBaseJabas(Math.max(1, parseInt(e.target.value) || 0))}
+                    className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 font-bold text-[#e65100] focus:outline-none focus:border-[#ff8f00]"
+                  />
+                  <span className="text-gray-500 font-semibold">jabas</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-gray-600 mb-1">
+                  💵 Tarifa por Jaba Excedente:
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-gray-500">S/</span>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={tarifaBono}
+                    onChange={(e) => setTarifaBono(Math.max(0, parseFloat(e.target.value) || 0))}
+                    className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 font-bold text-[#1b5e20] focus:outline-none focus:border-[#2e7d32]"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Resumen Métricas Rápidas */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
+              <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200">
+                <span className="text-[10px] text-amber-800 font-bold block uppercase">Bonificados</span>
+                <span className="text-xl font-black text-[#e65100]">{secBonoData.totalBonificados}</span>
+                <span className="text-[10px] text-gray-500 block">de {secBonoData.totalPersonal} activos</span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200">
+                <span className="text-[10px] text-emerald-800 font-bold block uppercase">Total Premios</span>
+                <span className="text-xl font-black text-[#1b5e20]">S/ {secBonoData.totalMonto.toFixed(2)}</span>
+                <span className="text-[10px] text-gray-500 block">a liquidar</span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-orange-50 border border-orange-200">
+                <span className="text-[10px] text-orange-800 font-bold block uppercase">Jabas Extras</span>
+                <span className="text-xl font-black text-[#e65100]">+{secBonoData.totalJabasExtras}</span>
+                <span className="text-[10px] text-gray-500 block">sobre meta</span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-gray-50 border border-gray-200">
+                <span className="text-[10px] text-gray-600 font-bold block uppercase">Cosecha del Día</span>
+                <span className="text-xl font-black text-gray-800">{secBonoData.totalJabas}</span>
+                <span className="text-[10px] text-gray-500 block">jabas en total</span>
+              </div>
+            </div>
+
+            {/* Tabla de Bonificados */}
+            <div className="max-h-72 overflow-y-auto rounded-xl border border-gray-200">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-[#e65100] text-white sticky top-0">
+                  <tr>
+                    <th className="p-2 text-center">#</th>
+                    <th className="p-2">DNI</th>
+                    <th className="p-2">Trabajador</th>
+                    <th className="p-2">Ubicación</th>
+                    <th className="p-2">Líder</th>
+                    <th className="p-2 text-right">Jabas</th>
+                    <th className="p-2 text-right">Meta</th>
+                    <th className="p-2 text-right">Jabas Extras</th>
+                    <th className="p-2 text-right">Premio (S/)</th>
+                    <th className="p-2 text-center">Estado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {secBonoData.list.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="p-6 text-center text-gray-400">
+                        No hay cosechadores registrados para la fecha {formatDateDDMMAAAA(bonoFecha)}.
+                      </td>
+                    </tr>
+                  ) : (
+                    secBonoData.list.map((w, idx) => (
+                      <tr key={w.dni} className={w.isBonificado ? 'bg-amber-50/40 hover:bg-amber-50' : 'hover:bg-gray-50'}>
+                        <td className="p-2 text-center font-bold text-gray-500">
+                          {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}`}
+                        </td>
+                        <td className="p-2 font-mono font-bold text-gray-900">{w.dni}</td>
+                        <td className="p-2 font-bold text-gray-900">{w.nombres}</td>
+                        <td className="p-2 text-gray-600">{w.fundo} · {w.modulo}</td>
+                        <td className="p-2 text-[#e65100] font-semibold">👑 {w.lider}</td>
+                        <td className="p-2 text-right font-black text-gray-900">{w.jabas}</td>
+                        <td className="p-2 text-right text-gray-500">{w.metaBase}</td>
+                        <td className="p-2 text-right font-bold text-[#e65100]">
+                          {w.isBonificado ? `+${w.jabasBonificadas}` : '-'}
+                        </td>
+                        <td className="p-2 text-right font-black text-[#1b5e20]">
+                          {w.isBonificado ? `S/ ${w.montoBono.toFixed(2)}` : 'S/ 0.00'}
+                        </td>
+                        <td className="p-2 text-center">
+                          {w.isBonificado ? (
+                            <span className="text-[10px] bg-[#e65100] text-white px-2 py-0.5 rounded-full font-bold">
+                              🏅 Bonificado
+                            </span>
+                          ) : (
+                            <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                              Normal
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                  {secBonoData.list.length > 0 && (
+                    <tr className="bg-[#fff8e1] font-bold text-[#b26a00]">
+                      <td colSpan={5} className="p-2.5">TOTAL LIQUIDACIÓN DE BONOS</td>
+                      <td className="p-2.5 text-right font-black text-gray-900">{secBonoData.totalJabas}</td>
+                      <td className="p-2.5"></td>
+                      <td className="p-2.5 text-right font-black text-[#e65100]">+{secBonoData.totalJabasExtras}</td>
+                      <td className="p-2.5 text-right font-black text-base text-[#1b5e20]">S/ {secBonoData.totalMonto.toFixed(2)}</td>
+                      <td className="p-2.5 text-center text-xs font-black">{secBonoData.totalBonificados} premiados</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => handleExport('secBono', 'xlsx')}
+                className="flex-1 bg-[#e65100] hover:bg-[#b26a00] text-white py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>📥 Exportar Bonificación Excel (.xlsx)</span>
+              </button>
+              <button
+                onClick={() => handleExport('secBono', 'csv')}
+                className="flex-1 border border-[#e65100] text-[#e65100] hover:bg-amber-50 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>📥 Exportar Bonificación CSV (.csv)</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Accordion 1: Fundo y Módulos Programados */}
@@ -907,7 +1251,7 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
                   ) : (
                     sec6Data.list.map((d) => (
                       <tr key={d.id} className="hover:bg-gray-50">
-                        <td className="p-2.5 whitespace-nowrap text-gray-600 font-medium">{d.fecha}</td>
+                        <td className="p-2.5 whitespace-nowrap text-gray-600 font-medium">{formatDateDDMMAAAA(d.fecha)}</td>
                         <td className="p-2.5 font-mono text-[#1b5e20]">{d.dni}</td>
                         <td className="p-2.5 font-bold text-[#212121]">{d.trabajador}</td>
                         <td className="p-2.5">{d.fundo}</td>
@@ -1000,7 +1344,7 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
                   ) : (
                     sec7Data.list.map((v) => (
                       <tr key={v.id} className="hover:bg-gray-50">
-                        <td className="p-2.5 whitespace-nowrap text-gray-600 font-medium">{v.fecha}</td>
+                        <td className="p-2.5 whitespace-nowrap text-gray-600 font-medium">{formatDateDDMMAAAA(v.fecha)}</td>
                         <td className="p-2.5 font-bold text-[#1b5e20]">{v.supervisor}</td>
                         <td className="p-2.5">{v.fundo}</td>
                         <td className="p-2.5 font-semibold">{v.modulo}</td>
