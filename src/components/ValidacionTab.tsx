@@ -4,7 +4,9 @@ import {
   DetalleJaba, 
   UserSession, 
   ValidacionSupervisor, 
-  ValidacionTrabajadorItem 
+  ValidacionTrabajadorItem,
+  Programa,
+  Lider
 } from '../types';
 import { getLocalToday, getLocalISO } from '../utils/storage';
 import { RegistroStatusMonitor } from './RegistroStatusMonitor';
@@ -33,13 +35,17 @@ import {
   ChevronUp,
   PackageCheck,
   Radio,
-  Camera
+  Camera,
+  Info,
+  Crown
 } from 'lucide-react';
 
 interface ValidacionTabProps {
   session: UserSession;
   trabajadores: Trabajador[];
   detalleJabas: DetalleJaba[];
+  programas?: Programa[];
+  lideres?: Lider[];
   validaciones: ValidacionSupervisor[];
   grupos: string[];
   onSaveValidacion: (validacion: ValidacionSupervisor) => void;
@@ -50,6 +56,8 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
   session,
   trabajadores,
   detalleJabas,
+  programas = [],
+  lideres = [],
   validaciones,
   grupos,
   onSaveValidacion,
@@ -69,7 +77,86 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
   );
   const [filtroFundo, setFiltroFundo] = useState<string>('Santa Teresa');
   const [filtroModulo, setFiltroModulo] = useState<string>('M01');
-  const [filtroGrupo, setFiltroGrupo] = useState<string>('Grupo01');
+  const [filtroGrupo, setFiltroGrupo] = useState<string>('Grupo 01');
+  const [filtroLider, setFiltroLider] = useState<string>('Antony Cerron');
+
+  // Normalization Helpers
+  const normalizeStr = (text?: string) =>
+    (text || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
+
+  const normalizeModulo = (mod?: string) => {
+    const n = normalizeStr(mod).replace(/\s+/g, '');
+    return n.replace(/^modulo/, 'm').replace(/^m0*(\d+)/, 'm$1');
+  };
+
+  const normalizeDate = (d?: string) => {
+    if (!d) return '';
+    return d.split('T')[0].split(' ')[0].trim();
+  };
+
+  const normalizeGrupo = (g?: string) => {
+    return normalizeStr(g).replace(/\s+/g, '');
+  };
+
+  const isMatchingSupervisor = (itemSup?: string, filterSup?: string) => {
+    if (!filterSup || filterSup.trim() === '') return true;
+    if (!itemSup || itemSup.trim() === '') return true;
+    const iSup = normalizeStr(itemSup);
+    const fSup = normalizeStr(filterSup);
+    if (iSup === fSup || iSup.includes(fSup) || fSup.includes(iSup)) return true;
+    
+    const wordsI = iSup.split(/\s+/).filter(Boolean);
+    const wordsF = fSup.split(/\s+/).filter(Boolean);
+    if (wordsI.length >= 2 && wordsF.length >= 2) {
+      const prefixI = wordsI.slice(0, 2).join(' ');
+      const prefixF = wordsF.slice(0, 2).join(' ');
+      if (prefixI === prefixF || iSup.includes(prefixF) || fSup.includes(prefixI)) return true;
+    }
+    return false;
+  };
+
+  // Combined leaders list (from state + defaults + records)
+  const availableLideres = useMemo(() => {
+    const list: { nombre: string; dni: string; grupo: string }[] = [];
+    
+    // Add default leaders
+    list.push({ nombre: 'Antony Cerron', dni: '71928374', grupo: 'Grupo 01' });
+    list.push({ nombre: 'Carlos Mendoza', dni: '45892134', grupo: 'Grupo 01' });
+
+    lideres.forEach((l) => {
+      if (!list.some((item) => item.nombre.toLowerCase() === l.lider.toLowerCase())) {
+        list.push({ nombre: l.lider, dni: l.dni, grupo: l.grupo });
+      }
+    });
+
+    trabajadores.forEach((t) => {
+      if (t.lider && !list.some((item) => item.nombre.toLowerCase() === t.lider!.toLowerCase())) {
+        list.push({ nombre: t.lider, dni: t.dni, grupo: t.grupo || 'Grupo 01' });
+      }
+    });
+
+    detalleJabas.forEach((dj) => {
+      if (dj.lider && !list.some((item) => item.nombre.toLowerCase() === dj.lider!.toLowerCase())) {
+        list.push({ nombre: dj.lider, dni: dj.dni, grupo: dj.grupo || 'Grupo 01' });
+      }
+    });
+
+    return list;
+  }, [lideres, trabajadores, detalleJabas]);
+
+  // Auto-sync leader when selected group changes
+  useEffect(() => {
+    const matched = availableLideres.find(
+      (l) => normalizeGrupo(l.grupo) === normalizeGrupo(filtroGrupo)
+    );
+    if (matched) {
+      setFiltroLider(matched.nombre);
+    }
+  }, [filtroGrupo, availableLideres]);
 
   // Búsqueda rápida dentro de la lista de trabajadores
   const [searchWorker, setSearchWorker] = useState<string>('');
@@ -106,8 +193,11 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     trabajadores.forEach((t) => {
       if (t.supervisor) set.add(t.supervisor);
     });
+    detalleJabas.forEach((dj) => {
+      if (dj.supervisor) set.add(dj.supervisor);
+    });
     return Array.from(set).sort();
-  }, [trabajadores, isSupervisor, sessionSupervisorName]);
+  }, [trabajadores, detalleJabas, isSupervisor, sessionSupervisorName]);
 
   // List of fundos
   const fundosList = useMemo(() => {
@@ -120,8 +210,11 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     trabajadores.forEach((t) => {
       if (t.fundo) set.add(t.fundo);
     });
+    detalleJabas.forEach((dj) => {
+      if (dj.fundo) set.add(dj.fundo);
+    });
     return Array.from(set).sort();
-  }, [trabajadores]);
+  }, [trabajadores, detalleJabas]);
 
   // Dynamic modules per fundo
   const modulosList = useMemo(() => {
@@ -138,94 +231,147 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
       ['M16', 'M17', 'M18'].forEach((m) => set.add(m));
     }
     trabajadores.forEach((t) => {
-      if ((!filtroFundo || t.fundo === filtroFundo) && t.modulo) {
+      if ((!filtroFundo || normalizeStr(t.fundo) === normalizeStr(filtroFundo)) && t.modulo) {
         set.add(t.modulo);
       }
     });
+    detalleJabas.forEach((dj) => {
+      if ((!filtroFundo || normalizeStr(dj.fundo) === normalizeStr(filtroFundo)) && dj.modulo) {
+        set.add(dj.modulo);
+      }
+    });
     return Array.from(set).sort();
-  }, [trabajadores, filtroFundo]);
+  }, [trabajadores, detalleJabas, filtroFundo]);
 
   // List of groups
   const allGrupos = useMemo(() => {
     const set = new Set<string>();
-    set.add('Grupo01');
     set.add('Grupo 01');
+    set.add('Grupo 02');
+    set.add('Grupo 03');
+    set.add('Grupo 04');
+    set.add('Grupo 05');
+    set.add('Grupo 06');
     grupos.forEach((g) => set.add(g));
     trabajadores.forEach((t) => {
       if (t.grupo) set.add(t.grupo);
     });
-    return Array.from(set);
-  }, [grupos, trabajadores]);
+    detalleJabas.forEach((dj) => {
+      if (dj.grupo) set.add(dj.grupo);
+    });
+    return Array.from(set).sort();
+  }, [grupos, trabajadores, detalleJabas]);
 
-  // Derive candidate workers based on selected filters
+  // Derive candidate workers based on selected filters (STRICTLY ONLY WORKERS WITH JABAS > 0)
   const candidateWorkers = useMemo(() => {
     const map = new Map<string, { worker: Trabajador; jabas: number }>();
 
-    // 1. Calculate jabas from DetalleJabas for this date, modulo, fundo, supervisor
-    const dateJabas = detalleJabas.filter((dj) => {
-      const matchFecha = !filtroFecha || dj.fecha === filtroFecha;
-      const matchFundo = !filtroFundo || dj.fundo.toLowerCase() === filtroFundo.toLowerCase();
-      const matchMod = !filtroModulo || dj.modulo.toLowerCase() === filtroModulo.toLowerCase();
-      return matchFecha && matchFundo && matchMod;
-    });
+    // 1. Calculate and accumulate jabas from DetalleJabas matching the filters
+    const matchingDetalle = detalleJabas.filter((dj) => {
+      if (filtroFecha) {
+        const djDate = normalizeDate(dj.fecha);
+        const fDate = normalizeDate(filtroFecha);
+        if (djDate && fDate && djDate !== fDate) return false;
+      }
 
-    const jabasByDni: Record<string, number> = {};
-    dateJabas.forEach((dj) => {
-      jabasByDni[dj.dni] = (jabasByDni[dj.dni] || 0) + (Number(dj.jabas) || 0);
-    });
-
-    // 2. Filter workers from master list matching the filters
-    trabajadores.forEach((t) => {
-      // Filter Supervisor (flexible match)
-      if (filtroSupervisor) {
-        const matchesSup =
-          t.supervisor &&
-          (t.supervisor.toLowerCase().includes(filtroSupervisor.toLowerCase()) ||
-            filtroSupervisor.toLowerCase().includes(t.supervisor.toLowerCase()));
-        if (!matchesSup && t.supervisor !== filtroSupervisor) {
-          // If not matching, only include if they have jabas explicitly recorded under this supervisor
-          const hasJabasWithSup = dateJabas.some(
-            (dj) => dj.dni === t.dni && dj.supervisor.toLowerCase() === filtroSupervisor.toLowerCase()
-          );
-          if (!hasJabasWithSup) return;
+      if (filtroFundo) {
+        const djFundo = normalizeStr(dj.fundo);
+        const fFundo = normalizeStr(filtroFundo);
+        if (djFundo && fFundo && djFundo !== fFundo && !djFundo.includes(fFundo) && !fFundo.includes(djFundo)) {
+          return false;
         }
       }
 
-      // Filter Fundo
-      if (filtroFundo && t.fundo && t.fundo.toLowerCase() !== filtroFundo.toLowerCase()) {
-        const hasJabasInFundo = dateJabas.some(
-          (dj) => dj.dni === t.dni && dj.fundo.toLowerCase() === filtroFundo.toLowerCase()
-        );
-        if (!hasJabasInFundo) return;
+      if (filtroModulo) {
+        const djMod = normalizeModulo(dj.modulo);
+        const fMod = normalizeModulo(filtroModulo);
+        if (djMod && fMod && djMod !== fMod) return false;
       }
 
-      // Filter Modulo
-      if (filtroModulo && t.modulo && t.modulo.toLowerCase() !== filtroModulo.toLowerCase()) {
-        const hasJabasInMod = dateJabas.some(
-          (dj) => dj.dni === t.dni && dj.modulo.toLowerCase() === filtroModulo.toLowerCase()
-        );
-        if (!hasJabasInMod) return;
+      if (filtroGrupo) {
+        const djGrp = normalizeGrupo(dj.grupo);
+        const fGrp = normalizeGrupo(filtroGrupo);
+        if (djGrp && fGrp && djGrp !== fGrp) return false;
       }
 
-      // Filter Grupo
-      if (filtroGrupo && t.grupo) {
-        const normGrupoFilter = filtroGrupo.replace(/\s+/g, '').toLowerCase();
-        const normWorkerGrupo = t.grupo.replace(/\s+/g, '').toLowerCase();
-        if (normWorkerGrupo !== normGrupoFilter) return;
+      if (filtroSupervisor) {
+        if (!isMatchingSupervisor(dj.supervisor, filtroSupervisor)) return false;
       }
 
-      // Compute total jabas for this worker
-      let calculatedJabas = jabasByDni[t.dni] || 0;
-      if (calculatedJabas === 0 && t.jabas && t.jabas > 0) {
-        calculatedJabas = t.jabas;
-      }
-
-      // If worker belongs to this group & fundo & supervisor, include even if 0 jabas or with default
-      map.set(t.dni, { worker: t, jabas: calculatedJabas });
+      return Number(dj.jabas) > 0;
     });
 
-    // Also include any workers that have DetalleJabas registered under these filters even if not in master list
-    dateJabas.forEach((dj) => {
+    const jabasByDni: Record<string, number> = {};
+    const metaByDni: Record<string, DetalleJaba> = {};
+    matchingDetalle.forEach((dj) => {
+      const num = Number(dj.jabas) || 0;
+      if (num > 0) {
+        jabasByDni[dj.dni] = (jabasByDni[dj.dni] || 0) + num;
+        metaByDni[dj.dni] = dj;
+      }
+    });
+
+    // 2. Also check programas.avance if any match the active filters
+    if (programas && programas.length > 0) {
+      programas.forEach((p) => {
+        if (filtroFecha && normalizeDate(p.fecha) !== normalizeDate(filtroFecha)) return;
+        if (filtroFundo && normalizeStr(p.fundo) !== normalizeStr(filtroFundo)) return;
+        if (filtroModulo && normalizeModulo(p.modulo) !== normalizeModulo(filtroModulo)) return;
+        if (filtroSupervisor && !isMatchingSupervisor(p.supervisor, filtroSupervisor)) return;
+
+        if (p.avance) {
+          Object.entries(p.avance).forEach(([dni, jVal]) => {
+            const num = Number(jVal) || 0;
+            if (num > 0 && !jabasByDni[dni]) {
+              jabasByDni[dni] = num;
+            }
+          });
+        }
+      });
+    }
+
+    // 3. For workers in master list, attach their calculated jabas ONLY IF > 0
+    trabajadores.forEach((t) => {
+      if (!t.dni) return;
+
+      let jCount = jabasByDni[t.dni] || 0;
+
+      // If no advance in detalleJabas, check if worker had jabas in master record matching current filter
+      if (jCount === 0 && t.jabas && t.jabas > 0) {
+        const matchesDate = !filtroFecha || !t.fecha || normalizeDate(t.fecha) === normalizeDate(filtroFecha);
+        const matchesFundo = !filtroFundo || !t.fundo || normalizeStr(t.fundo) === normalizeStr(filtroFundo);
+        const matchesModulo = !filtroModulo || !t.modulo || normalizeModulo(t.modulo) === normalizeModulo(filtroModulo);
+        const matchesGrupo = !filtroGrupo || !t.grupo || normalizeGrupo(t.grupo) === normalizeGrupo(filtroGrupo);
+        const matchesSup = isMatchingSupervisor(t.supervisor, filtroSupervisor);
+
+        if (matchesDate && matchesFundo && matchesModulo && matchesGrupo && matchesSup) {
+          jCount = t.jabas;
+        }
+      }
+
+      // STRICT CHECK: Only include workers who have jabas > 0!
+      if (jCount > 0) {
+        const assignedLider =
+          metaByDni[t.dni]?.lider ||
+          t.lider ||
+          filtroLider ||
+          availableLideres.find((l) => normalizeGrupo(l.grupo) === normalizeGrupo(t.grupo || filtroGrupo))?.nombre ||
+          'Antony Cerron';
+
+        map.set(t.dni, {
+          worker: {
+            ...t,
+            grupo: t.grupo || filtroGrupo,
+            supervisor: t.supervisor || filtroSupervisor,
+            lider: assignedLider
+          },
+          jabas: jCount
+        });
+      }
+    });
+
+    // 4. Also include any workers that have DetalleJabas registered under these filters even if not in master list
+    matchingDetalle.forEach((dj) => {
       if (!map.has(dj.dni)) {
         const syntheticWorker: Trabajador = {
           id: `T_DET_${dj.dni}`,
@@ -234,16 +380,18 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
           nombres: dj.trabajador,
           fundo: dj.fundo,
           modulo: dj.modulo,
-          supervisor: dj.supervisor,
-          grupo: filtroGrupo,
-          jabas: dj.jabas
+          supervisor: dj.supervisor || filtroSupervisor,
+          grupo: dj.grupo || filtroGrupo,
+          lider: dj.lider || filtroLider || 'Antony Cerron',
+          tipo: 'Cosechador',
+          jabas: jabasByDni[dj.dni] || dj.jabas
         };
         map.set(dj.dni, { worker: syntheticWorker, jabas: jabasByDni[dj.dni] || dj.jabas });
       }
     });
 
     return Array.from(map.values()).sort((a, b) => a.worker.nombres.localeCompare(b.worker.nombres));
-  }, [trabajadores, detalleJabas, filtroFecha, filtroSupervisor, filtroFundo, filtroModulo, filtroGrupo]);
+  }, [trabajadores, detalleJabas, programas, availableLideres, filtroFecha, filtroSupervisor, filtroFundo, filtroModulo, filtroGrupo, filtroLider]);
 
   // Synchronize validation state when candidate workers list changes or filters change
   useEffect(() => {
@@ -527,7 +675,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
             </div>
 
             {/* Grid de Filtros */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
               {/* Fecha */}
               <div className="space-y-1">
                 <label className="flex items-center gap-1.5 text-xs font-bold text-[#2e7d32]">
@@ -624,6 +772,25 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                   ))}
                 </select>
               </div>
+
+              {/* Líder */}
+              <div className="space-y-1">
+                <label className="flex items-center gap-1.5 text-xs font-bold text-[#e65100]">
+                  <Crown className="w-3.5 h-3.5 text-[#ff8f00]" />
+                  <span>Líder Asignado *</span>
+                </label>
+                <select
+                  value={filtroLider}
+                  onChange={(e) => setFiltroLider(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-[#ffe082] bg-[#fffde7] font-bold text-[#e65100] focus:outline-none focus:border-[#e65100]"
+                >
+                  {availableLideres.map((l, idx) => (
+                    <option key={`${l.nombre}-${idx}`} value={l.nombre}>
+                      👑 {l.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -649,6 +816,13 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
 
               {/* Métricas en Vivo */}
               <div className="flex items-center gap-2 flex-wrap">
+                <div className="bg-[#fff8e1] px-2.5 py-1 rounded-lg border border-[#ffe082] flex items-center gap-1.5 text-center">
+                  <Crown className="w-3.5 h-3.5 text-[#ff8f00]" />
+                  <div>
+                    <span className="text-[9px] text-[#e65100] font-bold block uppercase leading-none">Líder</span>
+                    <span className="text-xs font-extrabold text-[#e65100] leading-tight">{filtroLider || 'Antony Cerron'}</span>
+                  </div>
+                </div>
                 <div className="bg-[#f5f5f5] px-2.5 py-1 rounded-lg border border-gray-200 text-center">
                   <span className="text-[10px] text-gray-500 font-bold block">Personal</span>
                   <span className="text-xs font-black text-gray-800">{totalTrabajadores}</span>
@@ -719,11 +893,16 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
 
             {/* Listado de Trabajadores con Jabas y Botón Individual de Conformidad */}
             {filteredList.length === 0 ? (
-              <div className="py-12 text-center text-gray-400 text-xs bg-[#fafafa] rounded-xl border border-dashed border-gray-200">
-                <Users className="w-8 h-8 mx-auto text-gray-300 mb-2" />
-                No se encontraron trabajadores con los filtros actuales ({filtroFundo}, {filtroModulo}, {filtroGrupo}).
-                <div className="text-[11px] text-gray-400 mt-1">
-                  Intenta cambiar el grupo o módulo, o registra el avance en la pestaña Personal.
+              <div className="py-12 px-4 text-center text-gray-500 text-xs bg-[#fafafa] rounded-xl border border-dashed border-gray-200">
+                <PackageCheck className="w-10 h-10 mx-auto text-[#2e7d32]/50 mb-2.5" />
+                <div className="font-bold text-gray-800 text-sm mb-1">
+                  No hay trabajadores con jabas registradas para validar
+                </div>
+                <div className="text-[11px] text-gray-500 max-w-md mx-auto">
+                  La lista de validación muestra exclusivamente a los trabajadores con jabas cosechadas asignadas ({filtroFundo}, {filtroModulo}, {filtroGrupo}).
+                </div>
+                <div className="text-[10px] text-gray-400 mt-2">
+                  💡 Registra primero el avance de jabas en la pestaña <strong className="text-gray-600">EJECUCIÓN</strong> o ajusta los filtros superiores.
                 </div>
               </div>
             ) : (
@@ -766,6 +945,11 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                             <span>{worker.fundo || filtroFundo} · {worker.modulo || filtroModulo}</span>
                             <span>·</span>
                             <span>Grupo: {worker.grupo || filtroGrupo}</span>
+                            <span>·</span>
+                            <span className="inline-flex items-center gap-1 bg-[#fff8e1] text-[#e65100] px-2 py-0.5 rounded-md font-semibold text-[10px] border border-[#ffe082]">
+                              <Crown className="w-3 h-3 text-[#ff8f00]" />
+                              <span>Líder: {worker.lider || filtroLider || 'Antony Cerron'}</span>
+                            </span>
                             {worker.supervisor && (
                               <>
                                 <span>·</span>
@@ -874,6 +1058,11 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                 </div>
                 <div className="font-bold text-gray-800">
                   👥 Grupo: <span className="font-normal text-gray-600">{filtroGrupo}</span>
+                </div>
+                <div className="font-bold text-[#e65100] flex items-center gap-1">
+                  <Crown className="w-3.5 h-3.5 text-[#ff8f00]" />
+                  <span>Líder: </span>
+                  <span className="font-bold text-[#e65100]">{filtroLider || candidateWorkers[0]?.worker.lider || 'Antony Cerron'}</span>
                 </div>
               </div>
 
@@ -1008,6 +1197,15 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                             <span>📍 {val.fundo} - {val.modulo}</span>
                             <span>·</span>
                             <span>👥 {val.grupo}</span>
+                            {val.lider && (
+                              <>
+                                <span>·</span>
+                                <span className="inline-flex items-center gap-1 bg-[#fff8e1] text-[#e65100] px-1.5 py-0.5 rounded font-semibold text-[10px] border border-[#ffe082]">
+                                  <Crown className="w-3 h-3 text-[#ff8f00]" />
+                                  <span>Líder: {val.lider}</span>
+                                </span>
+                              </>
+                            )}
                             <span>·</span>
                             <span>👤 Sup: {val.supervisor}</span>
                           </div>

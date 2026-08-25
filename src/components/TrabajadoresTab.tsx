@@ -65,6 +65,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   // Selected Workers (Set of DNI strings)
   const [selectedDnis, setSelectedDnis] = useState<Set<string>>(new Set());
 
+  // Dynamic Group Assignment per Worker: { [dni]: assignedGroup }
+  const [workerAssignedGrupos, setWorkerAssignedGrupos] = useState<Record<string, string>>({});
+
   // Avance values: { [dni]: jabasCount }
   const [avanceValues, setAvanceValues] = useState<Record<string, number>>({});
 
@@ -175,57 +178,123 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     }
   }, [cuadrillaGrupo, availableLideres]);
 
-  // Filtered workers list
+  // Helper for normalizations
+  const normalizeStr = (text?: string) =>
+    (text || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
+
+  const normalizeModulo = (mod?: string) => {
+    const n = normalizeStr(mod).replace(/\s+/g, '');
+    return n.replace(/^modulo/, 'm').replace(/^m0*(\d+)/, 'm$1');
+  };
+
+  // Filtered workers list strictly adhering to Supervisor, Fundo, and Modulo filters
   const filteredTrabajadores = useMemo(() => {
     const seenDni = new Set<string>();
     return trabajadores.filter((t) => {
-      if (seenDni.has(t.dni)) return false;
+      if (!t.dni || seenDni.has(t.dni)) return false;
       seenDni.add(t.dni);
 
-      // Match Supervisor
-      if (cuadrillaSupervisor && t.supervisor) {
-        const matchesSup = 
-          t.supervisor.toLowerCase().includes(cuadrillaSupervisor.toLowerCase()) ||
-          cuadrillaSupervisor.toLowerCase().includes(t.supervisor.toLowerCase());
-        if (!matchesSup && cuadrillaSupervisor !== '') {
-          // allow soft match if user wants to see all
+      // 1. Strict Match Supervisor (if selected)
+      if (cuadrillaSupervisor && cuadrillaSupervisor.trim() !== '') {
+        const supNorm = normalizeStr(cuadrillaSupervisor);
+        const workerSupNorm = normalizeStr(t.supervisor);
+        if (!workerSupNorm) return false;
+
+        const matchesSup =
+          workerSupNorm === supNorm ||
+          workerSupNorm.includes(supNorm) ||
+          supNorm.includes(workerSupNorm) ||
+          (supNorm.split(/\s+/).slice(0, 2).join(' ').length >= 3 &&
+            workerSupNorm.includes(supNorm.split(/\s+/).slice(0, 2).join(' '))) ||
+          (workerSupNorm.split(/\s+/).slice(0, 2).join(' ').length >= 3 &&
+            supNorm.includes(workerSupNorm.split(/\s+/).slice(0, 2).join(' ')));
+
+        if (!matchesSup) return false;
+      }
+
+      // 2. Strict Match Fundo (if selected)
+      if (cuadrillaFundo && cuadrillaFundo.trim() !== '') {
+        const fundoNorm = normalizeStr(cuadrillaFundo);
+        const workerFundoNorm = normalizeStr(t.fundo);
+        if (!workerFundoNorm) return false;
+        if (
+          workerFundoNorm !== fundoNorm &&
+          !workerFundoNorm.includes(fundoNorm) &&
+          !fundoNorm.includes(workerFundoNorm)
+        ) {
+          return false;
         }
       }
 
-      // Match Fundo
-      if (cuadrillaFundo && t.fundo && t.fundo.toLowerCase() !== cuadrillaFundo.toLowerCase()) {
-        // filter unless blank
+      // 3. Strict Match Modulo (if selected)
+      if (cuadrillaModulo && cuadrillaModulo.trim() !== '') {
+        const modNorm = normalizeModulo(cuadrillaModulo);
+        const workerModNorm = normalizeModulo(t.modulo);
+        if (!workerModNorm) return false;
+        if (workerModNorm !== modNorm) {
+          return false;
+        }
       }
 
-      // Match search
-      if (searchTerm) {
-        const term = searchTerm.toLowerCase();
-        const matches =
-          t.nombres.toLowerCase().includes(term) ||
+      // 4. Search Filter (by Name, DNI, Fundo, or Modulo)
+      if (searchTerm && searchTerm.trim() !== '') {
+        const term = normalizeStr(searchTerm);
+        const matchesSearch =
+          normalizeStr(t.nombres).includes(term) ||
           t.dni.includes(term) ||
-          (t.grupo && t.grupo.toLowerCase().includes(term)) ||
-          (t.fundo && t.fundo.toLowerCase().includes(term));
-        if (!matches) return false;
+          (t.fundo && normalizeStr(t.fundo).includes(term)) ||
+          (t.modulo && normalizeStr(t.modulo).includes(term)) ||
+          (t.supervisor && normalizeStr(t.supervisor).includes(term));
+        if (!matchesSearch) return false;
       }
 
       return true;
     });
-  }, [trabajadores, cuadrillaSupervisor, cuadrillaFundo, searchTerm]);
+  }, [trabajadores, cuadrillaSupervisor, cuadrillaFundo, cuadrillaModulo, searchTerm]);
 
-  // Toggle single worker selection
-  const toggleWorker = (dni: string) => {
-    const next = new Set(selectedDnis);
-    if (next.has(dni)) next.delete(dni);
-    else next.add(dni);
-    setSelectedDnis(next);
+  // Handle changing group for an individual worker
+  const handleWorkerGroupChange = (dni: string, newGroup: string) => {
+    setWorkerAssignedGrupos((prev) => ({
+      ...prev,
+      [dni]: newGroup
+    }));
   };
 
-  // Select all filtered workers
+  // Toggle single worker selection (dynamically binds to cuadrillaGrupo on select)
+  const toggleWorker = (dni: string) => {
+    setSelectedDnis((prev) => {
+      const next = new Set(prev);
+      if (next.has(dni)) {
+        next.delete(dni);
+      } else {
+        next.add(dni);
+        // Dynamically assign to current cuadrillaGrupo
+        setWorkerAssignedGrupos((prevGrp) => ({
+          ...prevGrp,
+          [dni]: prevGrp[dni] || cuadrillaGrupo
+        }));
+      }
+      return next;
+    });
+  };
+
+  // Select all filtered workers and assign to cuadrillaGrupo
   const selectAllFiltered = () => {
-    const next = new Set(selectedDnis);
-    filteredTrabajadores.forEach((t) => next.add(t.dni));
-    setSelectedDnis(next);
-    onToast(`✅ ${filteredTrabajadores.length} trabajadores seleccionados`);
+    setSelectedDnis((prev) => {
+      const next = new Set(prev);
+      const newGroups: Record<string, string> = {};
+      filteredTrabajadores.forEach((t) => {
+        next.add(t.dni);
+        newGroups[t.dni] = workerAssignedGrupos[t.dni] || cuadrillaGrupo;
+      });
+      setWorkerAssignedGrupos((prevGrp) => ({ ...prevGrp, ...newGroups }));
+      return next;
+    });
+    onToast(`✅ ${filteredTrabajadores.length} trabajadores seleccionados y asignados al ${cuadrillaGrupo}`);
   };
 
   const clearSelection = () => {
@@ -233,23 +302,31 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     onToast('Selección de personal limpiada');
   };
 
-  // Barcode / DNI Scan Handler
+  // Barcode / DNI Scan Handler - dynamically binds scanned worker to cuadrillaGrupo
   const handleScanDniResult = (dni: string) => {
+    const trimmedDni = dni.trim();
     if (scannerMode === 'leader') {
-      setLiderDni(dni);
-      const found = trabajadores.find((t) => String(t.dni).trim() === dni.trim());
+      setLiderDni(trimmedDni);
+      const found = trabajadores.find((t) => String(t.dni).trim() === trimmedDni);
       if (found) {
         setLiderNombre(found.nombres);
         setCuadrillaLider(found.nombres);
         setCuadrillaLiderDni(found.dni);
       }
       setScannerOpen(false);
-      onToast(`👑 DNI de líder asignado: ${dni}`);
+      onToast(`👑 DNI de líder asignado: ${trimmedDni}`);
     } else {
-      const next = new Set(selectedDnis);
-      next.add(dni);
-      setSelectedDnis(next);
-      onToast(`👷 Trabajador con DNI ${dni} agregado a la cuadrilla`);
+      // Dynamic Group Assignment on Scan
+      setSelectedDnis((prev) => new Set(prev).add(trimmedDni));
+      setWorkerAssignedGrupos((prev) => ({
+        ...prev,
+        [trimmedDni]: cuadrillaGrupo
+      }));
+
+      const found = trabajadores.find((t) => String(t.dni).trim() === trimmedDni);
+      const nombre = found ? found.nombres : `Trabajador DNI ${trimmedDni}`;
+      setScannerOpen(false);
+      onToast(`👷 ${nombre} asignado/a exitosamente al ${cuadrillaGrupo}`);
     }
   };
 
@@ -310,9 +387,16 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   };
 
   const selectedWorkersList = useMemo(() => {
-    return trabajadores
-      .filter((t) => selectedDnis.has(t.dni))
-      .sort((a, b) => a.nombres.localeCompare(b.nombres));
+    const seenDni = new Set<string>();
+    const list: Trabajador[] = [];
+    trabajadores.forEach((t) => {
+      const cleanDni = String(t.dni || '').trim();
+      if (cleanDni && selectedDnis.has(cleanDni) && !seenDni.has(cleanDni)) {
+        seenDni.add(cleanDni);
+        list.push(t);
+      }
+    });
+    return list.sort((a, b) => a.nombres.localeCompare(b.nombres));
   }, [trabajadores, selectedDnis]);
 
   const totalJabasAvance = useMemo(() => {
@@ -347,8 +431,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       const jabas = avanceValues[dni];
       if (jabas > 0) {
         const t = trabajadores.find((x) => x.dni === dni);
+        const assignedGrupo = workerAssignedGrupos[dni] || cuadrillaGrupo;
         detalleList.push({
-          id: `${hoy}_${dni}_${cuadrillaModulo || 'M01'}`,
+          id: `${hoy}_${dni}_${cuadrillaModulo || 'M01'}_${Date.now().toString().slice(-4)}`,
           fecha: hoy,
           dni,
           trabajador: t ? t.nombres : dni,
@@ -356,6 +441,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
           modulo: cuadrillaModulo || (t ? t.modulo : 'M01'),
           jabas,
           supervisor: cuadrillaSupervisor || session.nombre,
+          grupo: assignedGrupo,
+          lider: cuadrillaLider || 'Antony Cerron',
           timestamp: nowIso
         });
       }
@@ -514,8 +601,14 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   <select
                     value={cuadrillaFundo}
                     onChange={(e) => {
-                      setCuadrillaFundo(e.target.value);
-                      setCuadrillaModulo('M01');
+                      const newFundo = e.target.value;
+                      setCuadrillaFundo(newFundo);
+                      if (newFundo === 'Santa Teresa') setCuadrillaModulo('M01');
+                      else if (newFundo === 'Arena Azul') setCuadrillaModulo('M01');
+                      else if (newFundo === 'Vivadis') setCuadrillaModulo('M01');
+                      else if (newFundo === 'Ayllu Allpa') setCuadrillaModulo('M12');
+                      else if (newFundo === 'Ampliacion') setCuadrillaModulo('M16');
+                      else setCuadrillaModulo('');
                     }}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-[#bfcaba] bg-white font-medium text-gray-900 focus:outline-none focus:border-[#2e7d32] focus:ring-1 focus:ring-[#2e7d32]"
                   >
@@ -816,12 +909,14 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] bg-[#f1f8e9] text-[#2e7d32] px-2 py-0.5 rounded-full font-semibold border border-[#c8e6c9]">
-                          {t.grupo || cuadrillaGrupo}
-                        </span>
-                        {isChecked && (
-                          <span className="text-[10px] bg-[#2e7d32] text-white px-2 py-0.5 rounded-full font-bold">
+                        {isChecked ? (
+                          <span className="text-[10px] bg-[#2e7d32] text-white px-2.5 py-0.5 rounded-full font-bold shadow-2xs">
                             Asignado
+                          </span>
+                        ) : (
+                          <span className="text-[10px] bg-gray-100 text-gray-600 px-2.5 py-0.5 rounded-full font-medium border border-gray-200 flex items-center gap-1">
+                            <Users className="w-2.5 h-2.5 text-gray-400" />
+                            <span>Rotativo</span>
                           </span>
                         )}
                       </div>
@@ -945,8 +1040,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       <span className="bg-[#fff8e1] text-[#e65100] px-2 py-0.5 rounded-md font-semibold text-[10px] border border-[#ffe082]">
                         👑 Líder: {cuadrillaLider || 'Antony Cerron'}
                       </span>
-                      <span className="bg-[#f5f5f5] text-gray-700 px-2 py-0.5 rounded-md font-semibold text-[10px] border border-gray-200">
-                        👥 Grupo: {cuadrillaGrupo}
+                      <span className="bg-[#e8f5e9] text-[#1b5e20] px-2 py-0.5 rounded-md font-semibold text-[10px] border border-[#a5d6a7] flex items-center gap-1">
+                        <Users className="w-3 h-3 text-[#2e7d32]" />
+                        <span>Grupo: {cuadrillaGrupo}</span>
                       </span>
                       <span className="bg-[#f5f5f5] text-gray-700 px-2 py-0.5 rounded-md font-medium text-[10px]">
                         📍 {cuadrillaFundo} · {cuadrillaModulo}
@@ -1157,7 +1253,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       <div className="text-[11px] text-[#757575] flex flex-wrap items-center gap-2 mt-0.5">
                         <span className="font-semibold text-[#1b5e20]">DNI: {dni}</span>
                         <span>·</span>
-                        <span>Grupo: {cuadrillaGrupo}</span>
+                        <span className="font-semibold text-[#1b5e20] bg-[#e8f5e9] px-1.5 py-0.5 rounded">
+                          Grupo: {cuadrillaGrupo}
+                        </span>
                         <span>·</span>
                         <span>Líder: {cuadrillaLider || 'Antony Cerron'}</span>
                       </div>

@@ -172,14 +172,33 @@ export function saveUsuarios(usuarios: Usuario[]) {
 export function getTrabajadores(): Trabajador[] {
   try {
     const raw = localStorage.getItem(KEYS.TRABAJADORES);
-    return raw ? JSON.parse(raw) : INITIAL_TRABAJADORES;
+    const list: Trabajador[] = raw ? JSON.parse(raw) : INITIAL_TRABAJADORES;
+    const seen = new Set<string>();
+    const unique: Trabajador[] = [];
+    list.forEach((t) => {
+      const cleanDni = String(t.dni || '').trim();
+      if (cleanDni && !seen.has(cleanDni)) {
+        seen.add(cleanDni);
+        unique.push(t);
+      }
+    });
+    return unique;
   } catch {
     return INITIAL_TRABAJADORES;
   }
 }
 
 export function saveTrabajadores(trabajadores: Trabajador[]) {
-  localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(trabajadores));
+  const seen = new Set<string>();
+  const unique: Trabajador[] = [];
+  trabajadores.forEach((t) => {
+    const cleanDni = String(t.dni || '').trim();
+    if (cleanDni && !seen.has(cleanDni)) {
+      seen.add(cleanDni);
+      unique.push(t);
+    }
+  });
+  localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(unique));
 }
 
 // Programas
@@ -280,11 +299,14 @@ export function saveLideres(lideres: Lider[]) {
 }
 
 // Google Sheets Web App Config
+export const DEFAULT_GSHEET_URL = 'https://script.google.com/macros/s/AKfycbwUwC4PwsVrEGdGItPkAwu8-k8lJePnEIwitNhakUGqHEKWLZLr_i49FMMDh-fog0y2/exec';
+
 export function getGsheetUrl(): string {
   try {
-    return localStorage.getItem(KEYS.GSHEET_URL) || '';
+    const saved = localStorage.getItem(KEYS.GSHEET_URL);
+    return saved !== null && saved !== '' ? saved : DEFAULT_GSHEET_URL;
   } catch {
-    return '';
+    return DEFAULT_GSHEET_URL;
   }
 }
 
@@ -296,12 +318,13 @@ export function saveGsheetUrl(url: string) {
   }
 }
 
-// Auto-Sync Settings
+// Auto-Sync Settings - default to enabled
 export function isAutoSyncEnabled(): boolean {
   try {
-    return localStorage.getItem(KEYS.AUTO_SYNC) === '1';
+    const setting = localStorage.getItem(KEYS.AUTO_SYNC);
+    return setting !== '0'; // Defaults to true unless explicitly disabled
   } catch {
-    return false;
+    return true;
   }
 }
 

@@ -139,6 +139,58 @@ export default function App() {
     setLogs((prev) => [newLog, ...prev.slice(0, 49)]);
   }, []);
 
+  // Background Auto-fetch on startup from Google Sheets
+  useEffect(() => {
+    const autoPullOnStart = async () => {
+      const url = getGsheetUrl();
+      if (!url) return;
+      try {
+        const res = await fetch(`${url}?accion=export`);
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json && json.status === 'ok' && json.data) {
+          const d = json.data;
+          if (Array.isArray(d.programas) && d.programas.length > 0) {
+            setProgramasState(d.programas);
+            saveProgramas(d.programas);
+          }
+          if (Array.isArray(d.programaGeneral) && d.programaGeneral.length > 0) {
+            setProgramaGeneralState(d.programaGeneral);
+            saveProgramaGeneral(d.programaGeneral);
+          }
+          if (Array.isArray(d.trabajadores) && d.trabajadores.length > 0) {
+            const seenDni = new Set<string>();
+            const uniqueWorkers: Trabajador[] = [];
+            d.trabajadores.forEach((t: Trabajador) => {
+              const cleanDni = String(t.dni || '').trim();
+              if (cleanDni && !seenDni.has(cleanDni)) {
+                seenDni.add(cleanDni);
+                uniqueWorkers.push(t);
+              }
+            });
+            setTrabajadoresState(uniqueWorkers);
+            saveTrabajadores(uniqueWorkers);
+          }
+          if (Array.isArray(d.detalleJabas) && d.detalleJabas.length > 0) {
+            setDetalleJabasState(d.detalleJabas);
+            saveDetalleJabas(d.detalleJabas);
+          }
+          if (Array.isArray(d.validaciones) && d.validaciones.length > 0) {
+            setValidacionesState(d.validaciones);
+            saveValidaciones(d.validaciones);
+          }
+          const nowIso = new Date().toISOString();
+          setLastSyncTime(nowIso);
+          setLastSync(nowIso);
+          addLog('☁️ Datos sincronizados automáticamente con Google Sheets', 'ok');
+        }
+      } catch {
+        // Silently use offline cache
+      }
+    };
+    autoPullOnStart();
+  }, [addLog]);
+
   // Background Auto-Sync Trigger
   const triggerAutoSync = useCallback(async (actionName: string) => {
     if (!isAutoSyncEnabled()) return;
@@ -211,6 +263,25 @@ export default function App() {
     setDetalleJabasState(mergedDetalle);
     saveDetalleJabas(mergedDetalle);
 
+    // Update worker current group in state based on new dynamic assignment
+    const groupUpdates: Record<string, string> = {};
+    newDetalleList.forEach((d) => {
+      if (d.dni && d.grupo) {
+        groupUpdates[d.dni] = d.grupo;
+      }
+    });
+
+    if (Object.keys(groupUpdates).length > 0) {
+      const updatedWorkers = trabajadores.map((t) => {
+        if (groupUpdates[t.dni]) {
+          return { ...t, grupo: groupUpdates[t.dni] };
+        }
+        return t;
+      });
+      setTrabajadoresState(updatedWorkers);
+      saveTrabajadores(updatedWorkers);
+    }
+
     // Also update in latest programa if available
     if (programas.length > 0) {
       const updatedProg = [...programas];
@@ -260,9 +331,18 @@ export default function App() {
   };
 
   const handleImportTrabajadores = (newWorkers: Trabajador[]) => {
-    const updated = [...newWorkers, ...trabajadores];
-    setTrabajadoresState(updated);
-    saveTrabajadores(updated);
+    const combined = [...newWorkers, ...trabajadores];
+    const seenDni = new Set<string>();
+    const uniqueWorkers: Trabajador[] = [];
+    combined.forEach((t) => {
+      const cleanDni = String(t.dni || '').trim();
+      if (cleanDni && !seenDni.has(cleanDni)) {
+        seenDni.add(cleanDni);
+        uniqueWorkers.push(t);
+      }
+    });
+    setTrabajadoresState(uniqueWorkers);
+    saveTrabajadores(uniqueWorkers);
     addLog(`📥 Importados ${newWorkers.length} trabajadores a la nómina`, 'ok');
     triggerAutoSync('Importar Trabajadores');
   };
@@ -294,11 +374,36 @@ export default function App() {
         body: JSON.stringify(payload)
       });
 
-      const nowIso = new Date().toISOString();
-      setLastSyncTime(nowIso);
-      setLastSync(nowIso);
-      addLog(`✅ Datos subidos exitosamente a Google Sheets (HTTP ${res.status})`, 'ok');
-      addToast('✅ Subida a Google Sheets completada');
+      const responseText = await res.text();
+      let responseJson: any = null;
+      try {
+        responseJson = JSON.parse(responseText);
+      } catch {
+        // Not JSON - might be HTML error from Google
+      }
+
+      if (responseJson && responseJson.status === 'ok') {
+        const nowIso = new Date().toISOString();
+        setLastSyncTime(nowIso);
+        setLastSync(nowIso);
+        addLog(`✅ Datos subidos y confirmados por Google Sheets (${responseJson.message || 'Sincronizado'})`, 'ok');
+        addToast('✅ Subida a Google Sheets completada');
+      } else if (responseJson && responseJson.status === 'error') {
+        addLog(`❌ Error en Google Apps Script: ${responseJson.message}`, 'err');
+        addToast('❌ Error en script de Google Sheets', 'error');
+      } else if (responseText.includes('ScanTrabajadores')) {
+        addLog('⚠️ Tu Apps Script tiene un código anterior ("ScanTrabajadores"). Copia el código oficial de la pestaña NUBE y haz clic en Implementar > Nueva Implementación.', 'err');
+        addToast('⚠️ Debes actualizar el código en Apps Script', 'warning');
+      } else if (responseText.includes('<!DOCTYPE html>') || responseText.includes('Page Not Found') || responseText.includes('unable to open')) {
+        addLog('❌ Error de permisos de Google Apps Script: En Apps Script, ve a Implementar > Nueva Implementación y pon "Quién tiene acceso: Cualquier usuario (Anyone)".', 'err');
+        addToast('❌ Permisos incorrectos en Google Apps Script', 'error');
+      } else {
+        const nowIso = new Date().toISOString();
+        setLastSyncTime(nowIso);
+        setLastSync(nowIso);
+        addLog(`⚠️ Respuesta inesperada de Google Sheets (HTTP ${res.status}): ${responseText.slice(0, 100)}`, 'err');
+        addToast('⚠️ Respuesta inesperada de Google Sheets', 'warning');
+      }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Error de red';
       addLog(`❌ Error en subida manual: ${errorMsg}`, 'err');
@@ -450,6 +555,8 @@ export default function App() {
             session={session}
             trabajadores={trabajadores}
             detalleJabas={detalleJabas}
+            programas={programas}
+            lideres={lideres}
             validaciones={validaciones}
             grupos={grupos}
             onSaveValidacion={handleSaveValidacion}

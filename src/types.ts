@@ -81,6 +81,8 @@ export interface DetalleJaba {
   modulo: string;
   jabas: number;
   supervisor: string;
+  grupo?: string;
+  lider?: string;
   timestamp?: string;
 }
 
