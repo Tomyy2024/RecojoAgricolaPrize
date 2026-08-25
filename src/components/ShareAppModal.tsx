@@ -1,26 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  QrCode, 
+  Smartphone, 
   Copy, 
   Check, 
-  Share2, 
-  Smartphone, 
-  ExternalLink, 
-  X, 
-  MessageSquare,
-  Globe,
-  Info,
+  MessageSquare, 
+  Globe, 
+  X,
+  Share,
+  Cloud,
   Layers,
-  ArrowRight,
-  ShieldAlert,
-  HelpCircle,
-  Share
+  Sparkles,
+  RefreshCw,
+  ShieldAlert
 } from 'lucide-react';
+import { getGsheetUrl } from '../utils/storage';
 
 interface ShareAppModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onToast: (msg: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
+  onToast: (msg: string, type?: 'success' | 'warning' | 'info' | 'error') => void;
 }
 
 export const ShareAppModal: React.FC<ShareAppModalProps> = ({
@@ -29,39 +27,38 @@ export const ShareAppModal: React.FC<ShareAppModalProps> = ({
   onToast
 }) => {
   const [copied, setCopied] = useState(false);
-  const [appUrl, setAppUrl] = useState('');
-  const [isDevUrl, setIsDevUrl] = useState(false);
-  const [activeInstructionTab, setActiveInstructionTab] = useState<'publicar' | 'android' | 'ios' | 'credenciales'>('publicar');
+  const [includeCloudParam, setIncludeCloudParam] = useState(true);
+  const [activeInstructionTab, setActiveInstructionTab] = useState<'netlify' | 'publicar' | 'android' | 'ios' | 'credenciales'>('netlify');
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const currentUrl = window.location.href;
-      setAppUrl(currentUrl);
-      // Check if URL is internal development URL (ais-dev-...)
-      if (currentUrl.includes('ais-dev-')) {
-        setIsDevUrl(true);
-      } else {
-        setIsDevUrl(false);
-      }
+  const gUrl = getGsheetUrl();
+
+  const getEffectiveShareUrl = () => {
+    if (typeof window === 'undefined') return '';
+    const base = window.location.origin + window.location.pathname;
+    if (includeCloudParam && gUrl) {
+      return `${base}?cloud=${encodeURIComponent(gUrl)}`;
     }
-  }, [isOpen]);
+    return base;
+  };
+
+  const currentShareUrl = getEffectiveShareUrl();
 
   if (!isOpen) return null;
 
   const handleCopyLink = async () => {
     try {
       if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(appUrl);
+        await navigator.clipboard.writeText(currentShareUrl);
       } else {
         const textArea = document.createElement('textarea');
-        textArea.value = appUrl;
+        textArea.value = currentShareUrl;
         document.body.appendChild(textArea);
         textArea.select();
         document.execCommand('copy');
         document.body.removeChild(textArea);
       }
       setCopied(true);
-      onToast('✅ Enlace copiado al portapapeles', 'success');
+      onToast('✅ Enlace con Sincronización en la Nube copiado', 'success');
       setTimeout(() => setCopied(false), 2500);
     } catch {
       onToast('⚠️ No se pudo copiar automáticamente. Copia el enlace manualmente.', 'warning');
@@ -70,31 +67,14 @@ export const ShareAppModal: React.FC<ShareAppModalProps> = ({
 
   const handleShareWhatsApp = () => {
     const text = encodeURIComponent(
-      `🚜 *Recojo de Fruta - App Móvil de Cosecha*\n\nAccede al sistema desde tu celular para registrar tus cuadrillas, avance de jabas y validación en campo:\n👉 ${appUrl}`
+      `🚜 *Recojo de Fruta - App Móvil de Cosecha*\n\nAccede al sistema desde tu celular para registrar tus cuadrillas, avance de jabas y validación en campo (Sincronizado en tiempo real):\n👉 ${currentShareUrl}`
     );
     window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
     onToast('📲 Abriendo WhatsApp para compartir enlace...', 'info');
   };
 
-  const handleNativeShare = async () => {
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: 'Recojo de Fruta - App Móvil',
-          text: 'Acceso al sistema de recojo de fruta y cuadrillas en campo:',
-          url: appUrl
-        });
-        onToast('✅ Compartido correctamente', 'success');
-      } catch (err) {
-        console.log('Share canceled or error', err);
-      }
-    } else {
-      handleCopyLink();
-    }
-  };
-
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=10&data=${encodeURIComponent(
-    appUrl || window.location.href
+    currentShareUrl
   )}`;
 
   return (
@@ -110,8 +90,8 @@ export const ShareAppModal: React.FC<ShareAppModalProps> = ({
               <Smartphone className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base leading-tight">Compartir App con Otros Usuarios</h3>
-              <p className="text-xs text-emerald-100">Enlace público, código QR y acceso multi-dispositivo</p>
+              <h3 className="font-bold text-base leading-tight">Compartir App y Sincronizar Móviles</h3>
+              <p className="text-xs text-emerald-100">Enlace con auto-conexión a la Nube (Netlify, PC y Celular)</p>
             </div>
           </div>
           <button
@@ -125,38 +105,30 @@ export const ShareAppModal: React.FC<ShareAppModalProps> = ({
         {/* Content Body */}
         <div className="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs">
 
-          {/* Aviso Importante de Permisos / Acceso */}
-          <div className="bg-amber-50 border-2 border-amber-300/80 p-3.5 rounded-2xl text-amber-950 space-y-2 shadow-xs">
+          {/* Banner de Sincronización en Netlify / Móvil */}
+          <div className="bg-emerald-50 border-2 border-emerald-300/80 p-3.5 rounded-2xl text-emerald-950 space-y-2 shadow-xs">
             <div className="flex items-start gap-2.5">
-              <ShieldAlert className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+              <Cloud className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold text-xs text-amber-900 block">
-                  ¿Por qué sale "No tiene acceso" a otros usuarios?
+                <span className="font-bold text-xs text-emerald-900 block">
+                  ☁️ Sincronización en Netlify y Dispositivos Móviles
                 </span>
-                <p className="text-[11px] text-amber-900/90 mt-1 leading-relaxed">
-                  Los enlaces en modo desarrollo personal (<code className="bg-amber-100 px-1 py-0.5 rounded font-mono text-[10px] text-amber-950 font-bold">ais-dev-...</code>) son privados de tu cuenta de Google. Para que <strong>cualquier persona</strong> en su celular o PC pueda entrar sin restricciones, debes usar el botón <strong>"Share" (Compartir)</strong> en la esquina superior de Google AI Studio.
+                <p className="text-[11px] text-emerald-900/90 mt-1 leading-relaxed">
+                  Al publicar en <strong>Netlify</strong>, la app sincroniza en tiempo real a través de <strong>Google Sheets</strong>. Al compartir este enlace con el parámetro de nube activado, el celular del trabajador se conectará automáticamente a la base de datos central sin que ellos tengan que configurar nada.
                 </p>
               </div>
             </div>
 
-            {/* Pasos para habilitar acceso público */}
-            <div className="bg-white/80 p-2.5 rounded-xl border border-amber-200 text-[11px] space-y-1.5 font-medium">
-              <div className="font-bold text-amber-900 flex items-center gap-1">
-                <Share className="w-3.5 h-3.5 text-[#1b5e20]" />
-                <span>Pasos para dar acceso a otros usuarios:</span>
-              </div>
-              <ol className="list-decimal pl-4 space-y-1 text-gray-800">
-                <li>
-                  En la parte superior derecha de la pantalla de <strong>AI Studio</strong>, haz clic en el botón azul o gris <strong>"Share"</strong> (Compartir).
-                </li>
-                <li>
-                  Selecciona la opción <strong>"Anyone with the link can view"</strong> (Cualquiera con el enlace puede ver).
-                </li>
-                <li>
-                  Copia ese <strong>Shared App Link</strong> (<code className="text-emerald-800 font-bold">ais-pre-...</code>) y envíaselo a tus trabajadores o supervisores.
-                </li>
-              </ol>
-            </div>
+            {/* Checkbox auto-conectar */}
+            <label className="flex items-center gap-2 pt-1 cursor-pointer select-none text-emerald-900 font-bold text-[11px] bg-white/80 p-2 rounded-xl border border-emerald-200">
+              <input
+                type="checkbox"
+                checked={includeCloudParam}
+                onChange={(e) => setIncludeCloudParam(e.target.checked)}
+                className="w-4 h-4 text-emerald-700 rounded focus:ring-emerald-500 accent-[#2e7d32]"
+              />
+              <span>Auto-conectar a la Base de Datos Cloud en celulares que abran el enlace</span>
+            </label>
           </div>
 
           {/* Card: Código QR y Enlace Directo */}
@@ -174,14 +146,14 @@ export const ShareAppModal: React.FC<ShareAppModalProps> = ({
             <div className="flex-1 space-y-2.5 w-full">
               <div>
                 <span className="text-[10px] text-gray-600 font-bold uppercase tracking-wider block">
-                  Enlace Actual de la App:
+                  Enlace para compartir (con Nube):
                 </span>
                 <div className="mt-1 flex items-center gap-1.5 bg-white border border-gray-300 rounded-xl px-2.5 py-2 overflow-hidden shadow-2xs">
                   <Globe className="w-4 h-4 text-emerald-700 shrink-0" />
                   <input
                     type="text"
                     readOnly
-                    value={appUrl}
+                    value={currentShareUrl}
                     className="w-full text-[11px] font-mono text-gray-800 bg-transparent focus:outline-none select-all"
                   />
                 </div>
@@ -211,22 +183,22 @@ export const ShareAppModal: React.FC<ShareAppModalProps> = ({
 
           {/* Guía de Instalación en Celular */}
           <div className="border border-[#e0e0e0] rounded-2xl overflow-hidden bg-white shadow-2xs">
-            <div className="flex border-b border-[#e0e0e0] bg-[#fafafa]">
+            <div className="flex border-b border-[#e0e0e0] bg-[#fafafa] overflow-x-auto">
               <button
                 type="button"
-                onClick={() => setActiveInstructionTab('publicar')}
-                className={`flex-1 py-2.5 text-center font-bold text-xs transition-all cursor-pointer border-b-2 ${
-                  activeInstructionTab === 'publicar'
+                onClick={() => setActiveInstructionTab('netlify')}
+                className={`py-2.5 px-3 text-center font-bold text-xs transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+                  activeInstructionTab === 'netlify'
                     ? 'border-[#2e7d32] text-[#1b5e20] bg-white'
                     : 'border-transparent text-gray-500 hover:text-gray-800'
                 }`}
               >
-                🌐 Acceso Público
+                ☁️ Netlify / Nube
               </button>
               <button
                 type="button"
                 onClick={() => setActiveInstructionTab('android')}
-                className={`flex-1 py-2.5 text-center font-bold text-xs transition-all cursor-pointer border-b-2 ${
+                className={`py-2.5 px-3 text-center font-bold text-xs transition-all cursor-pointer whitespace-nowrap border-b-2 ${
                   activeInstructionTab === 'android'
                     ? 'border-[#2e7d32] text-[#1b5e20] bg-white'
                     : 'border-transparent text-gray-500 hover:text-gray-800'
@@ -237,7 +209,7 @@ export const ShareAppModal: React.FC<ShareAppModalProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveInstructionTab('ios')}
-                className={`flex-1 py-2.5 text-center font-bold text-xs transition-all cursor-pointer border-b-2 ${
+                className={`py-2.5 px-3 text-center font-bold text-xs transition-all cursor-pointer whitespace-nowrap border-b-2 ${
                   activeInstructionTab === 'ios'
                     ? 'border-[#2e7d32] text-[#1b5e20] bg-white'
                     : 'border-transparent text-gray-500 hover:text-gray-800'
@@ -248,7 +220,7 @@ export const ShareAppModal: React.FC<ShareAppModalProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveInstructionTab('credenciales')}
-                className={`flex-1 py-2.5 text-center font-bold text-xs transition-all cursor-pointer border-b-2 ${
+                className={`py-2.5 px-3 text-center font-bold text-xs transition-all cursor-pointer whitespace-nowrap border-b-2 ${
                   activeInstructionTab === 'credenciales'
                     ? 'border-[#2e7d32] text-[#1b5e20] bg-white'
                     : 'border-transparent text-gray-500 hover:text-gray-800'
@@ -259,15 +231,18 @@ export const ShareAppModal: React.FC<ShareAppModalProps> = ({
             </div>
 
             <div className="p-3.5">
-              {activeInstructionTab === 'publicar' && (
+              {activeInstructionTab === 'netlify' && (
                 <div className="space-y-2.5 text-gray-700 text-xs">
-                  <div className="bg-emerald-50 p-2.5 rounded-xl border border-emerald-200 text-emerald-900 space-y-1">
-                    <span className="font-bold block">💡 Dos formas de dar acceso público permanente:</span>
+                  <div className="bg-emerald-50 p-2.5 rounded-xl border border-emerald-200 text-emerald-900 space-y-1.5">
+                    <span className="font-bold block text-emerald-950">🚀 ¿Cómo funciona en Netlify?</span>
                     <p className="text-[11px] leading-relaxed">
-                      1. <strong>Botón Share en AI Studio:</strong> Genera un enlace público accesible desde cualquier teléfono o computadora sin necesidad de iniciar sesión en Google.
+                      1. Cuando creas usuarios, programas o registras jabas en tu computadora, la app envía los datos a <strong>Google Sheets</strong>.
                     </p>
                     <p className="text-[11px] leading-relaxed">
-                      2. <strong>Deploy a Cloud Run:</strong> En el menú superior de AI Studio puedes hacer clic en <em>"Deploy"</em> para tener tu propio dominio web definitivo.
+                      2. Cuando tus trabajadores abren el link de Netlify en su celular, la app lee automáticamente los datos actualizados de Google Sheets.
+                    </p>
+                    <p className="text-[11px] leading-relaxed">
+                      3. En la pestaña <strong>Conexión</strong>, asegúrate de haber pegado el código actualizado en tu Google Sheets (Extensiones &gt; Apps Script &gt; Implementar como Aplicación Web con acceso "Cualquier persona").
                     </p>
                   </div>
                 </div>

@@ -62,6 +62,21 @@ export function normalizeDateString(d?: string): string {
 // Auto-repair & sanity check
 export function initializeStorage() {
   try {
+    // Check URL parameters for instant Cloud Sync setup from shared link or QR code
+    if (typeof window !== 'undefined' && window.location.search) {
+      const urlParams = new URLSearchParams(window.location.search);
+      const cloudUrl = urlParams.get('cloud') || urlParams.get('gsheet');
+      if (cloudUrl) {
+        try {
+          const decoded = decodeURIComponent(cloudUrl);
+          if (decoded.startsWith('http')) {
+            localStorage.setItem(KEYS.GSHEET_URL, decoded);
+            localStorage.setItem(KEYS.AUTO_SYNC, '1');
+          }
+        } catch {}
+      }
+    }
+
     // Check & Seed Usuarios
     if (!localStorage.getItem(KEYS.USUARIOS)) {
       localStorage.setItem(KEYS.USUARIOS, JSON.stringify(INITIAL_USUARIOS));

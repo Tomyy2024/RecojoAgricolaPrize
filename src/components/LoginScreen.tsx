@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { UserSession, Usuario } from '../types';
-import { getUsuarios, saveUsuarios } from '../utils/storage';
+import { getUsuarios, saveUsuarios, getGsheetUrl } from '../utils/storage';
 import { Sprout, Lock, User, KeyRound, Wifi, RefreshCw } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -17,7 +17,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onToast }) =>
   const [userList, setUserList] = useState<Usuario[]>(() => getUsuarios());
   const [serverOnline, setServerOnline] = useState<boolean>(true);
 
-  // Synchronize master user catalog from central server immediately on load
+  // Synchronize master user catalog from central server or Google Sheets immediately on load
   const syncServerUsers = async () => {
     try {
       const res = await fetch('/api/usuarios');
@@ -27,10 +27,29 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onToast }) =>
           setUserList(json.usuarios);
           saveUsuarios(json.usuarios);
           setServerOnline(true);
+          return;
         }
       }
     } catch {
       setServerOnline(false);
+    }
+
+    // Fallback for Netlify / Static Host: Pull users from Google Sheets
+    try {
+      const gUrl = getGsheetUrl();
+      if (gUrl) {
+        const gRes = await fetch(`${gUrl}?accion=export`);
+        if (gRes.ok) {
+          const gJson = await gRes.json();
+          if (gJson && gJson.status === 'ok' && gJson.data && Array.isArray(gJson.data.usuarios) && gJson.data.usuarios.length > 0) {
+            setUserList(gJson.data.usuarios);
+            saveUsuarios(gJson.data.usuarios);
+            setServerOnline(true);
+          }
+        }
+      }
+    } catch {
+      // Local fallback
     }
   };
 

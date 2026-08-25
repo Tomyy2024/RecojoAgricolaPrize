@@ -184,6 +184,52 @@ function doPost(e) {
       });
     }
 
+    // 6. Guardar Usuarios y Cuentas de Acceso
+    if (payload.usuarios && payload.usuarios.length > 0) {
+      var sheetUsers = getOrCreateSheet(ss, 'Usuarios', [
+        'Usuario', 'Password', 'Nombre', 'Rol', 'Fecha_Creacion'
+      ]);
+      sheetUsers.clearContents();
+      sheetUsers.appendRow(['Usuario', 'Password', 'Nombre', 'Rol', 'Fecha_Creacion']);
+      payload.usuarios.forEach(function(u) {
+        sheetUsers.appendRow([
+          u.user || '',
+          u.pass || '',
+          u.nombre || '',
+          u.rol || 'Trabajador',
+          u.creado || ''
+        ]);
+      });
+    }
+
+    // 7. Guardar Lideres
+    if (payload.lideres && payload.lideres.length > 0) {
+      var sheetLid = getOrCreateSheet(ss, 'Lideres', [
+        'Lider', 'DNI', 'Nombres', 'Grupo', 'Fecha_Alta'
+      ]);
+      sheetLid.clearContents();
+      sheetLid.appendRow(['Lider', 'DNI', 'Nombres', 'Grupo', 'Fecha_Alta']);
+      payload.lideres.forEach(function(l) {
+        sheetLid.appendRow([
+          l.lider || '',
+          l.dni || '',
+          l.nombres || '',
+          l.grupo || '',
+          l.fechaAlta || ''
+        ]);
+      });
+    }
+
+    // 8. Guardar Grupos
+    if (payload.grupos && payload.grupos.length > 0) {
+      var sheetGrp = getOrCreateSheet(ss, 'Grupos', ['Grupo']);
+      sheetGrp.clearContents();
+      sheetGrp.appendRow(['Grupo']);
+      payload.grupos.forEach(function(g) {
+        sheetGrp.appendRow([g || '']);
+      });
+    }
+
     return ContentService.createTextOutput(JSON.stringify({
       status: 'ok',
       message: 'Sincronización completada exitosamente',
@@ -219,7 +265,10 @@ function doGet(e) {
         validaciones: [],
         programas: [],
         programaGeneral: [],
-        trabajadores: []
+        trabajadores: [],
+        usuarios: [],
+        lideres: [],
+        grupos: []
       };
 
       // 1. Leer Registro_Avance
@@ -320,6 +369,45 @@ function doGet(e) {
             tipo: String(r[7] || 'Trabajador')
           };
         });
+      }
+
+      // 6. Leer Usuarios
+      var sheetUsers = ss.getSheetByName('Usuarios');
+      if (sheetUsers && sheetUsers.getLastRow() > 1) {
+        var userValues = sheetUsers.getRange(2, 1, sheetUsers.getLastRow() - 1, 5).getValues();
+        result.usuarios = userValues.map(function(r) {
+          return {
+            user: String(r[0] || ''),
+            pass: String(r[1] || ''),
+            nombre: String(r[2] || ''),
+            rol: String(r[3] || 'Trabajador'),
+            creado: String(r[4] || '')
+          };
+        }).filter(function(u) { return u.user !== ''; });
+      }
+
+      // 7. Leer Lideres
+      var sheetLid = ss.getSheetByName('Lideres');
+      if (sheetLid && sheetLid.getLastRow() > 1) {
+        var lidValues = sheetLid.getRange(2, 1, sheetLid.getLastRow() - 1, 5).getValues();
+        result.lideres = lidValues.map(function(r) {
+          return {
+            lider: String(r[0] || ''),
+            dni: String(r[1] || ''),
+            nombres: String(r[2] || ''),
+            grupo: String(r[3] || ''),
+            fechaAlta: String(r[4] || '')
+          };
+        });
+      }
+
+      // 8. Leer Grupos
+      var sheetGrp = ss.getSheetByName('Grupos');
+      if (sheetGrp && sheetGrp.getLastRow() > 1) {
+        var grpValues = sheetGrp.getRange(2, 1, sheetGrp.getLastRow() - 1, 1).getValues();
+        result.grupos = grpValues.map(function(r) {
+          return String(r[0] || '');
+        }).filter(function(g) { return g !== ''; });
       }
 
       return ContentService.createTextOutput(JSON.stringify({

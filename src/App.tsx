@@ -195,17 +195,40 @@ export default function App() {
     }
   }, [addLog]);
 
-  // Centralized Server Data Fetcher (Synchronizes all PCs and Users in Real-Time)
+  // Centralized Server & Cloud Data Fetcher (Synchronizes all PCs and Mobile Users)
   const fetchCentralizedData = useCallback(async (silent = false) => {
+    let fetchedFromServer = false;
+
+    // 1. Try local express backend (if running in full-stack container)
     try {
       const res = await fetch('/api/data');
-      if (!res.ok) return;
-      const json = await res.json();
-      if (json && json.status === 'ok' && json.data) {
-        applyServerData(json.data, silent);
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.status === 'ok' && json.data) {
+          applyServerData(json.data, silent);
+          fetchedFromServer = true;
+        }
       }
     } catch {
-      // Offline fallback to local state
+      // Server not reachable (e.g. static host like Netlify)
+    }
+
+    // 2. If server API not available (Netlify / Static deploy), fetch from Google Sheets Cloud Backend
+    if (!fetchedFromServer) {
+      const url = getGsheetUrl();
+      if (url) {
+        try {
+          const gRes = await fetch(`${url}?accion=export`);
+          if (gRes.ok) {
+            const gJson = await gRes.json();
+            if (gJson && gJson.status === 'ok' && gJson.data) {
+              applyServerData(gJson.data, silent);
+            }
+          }
+        } catch {
+          // Offline fallback
+        }
+      }
     }
   }, [applyServerData]);
 
