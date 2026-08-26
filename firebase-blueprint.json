@@ -1,0 +1,423 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with role-based access information",
+      "type": "object",
+      "properties": {
+        "user": {
+          "type": "string",
+          "description": "Username or identifier",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "nombre": {
+          "type": "string",
+          "description": "Full name of the user",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address",
+          "maxLength": 128
+        },
+        "rol": {
+          "type": "string",
+          "description": "Role in the system",
+          "enum": ["Administrador", "Supervisor", "Trabajador"]
+        },
+        "creado": {
+          "type": "string",
+          "description": "Creation date",
+          "maxLength": 32
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update ISO timestamp",
+          "maxLength": 64
+        }
+      },
+      "required": ["user", "nombre", "rol"]
+    },
+    "Trabajador": {
+      "title": "Trabajador",
+      "description": "Harvest worker information",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier",
+          "maxLength": 64
+        },
+        "dni": {
+          "type": "string",
+          "description": "National ID number (DNI)",
+          "minLength": 4,
+          "maxLength": 20
+        },
+        "nombres": {
+          "type": "string",
+          "description": "Full name",
+          "maxLength": 128
+        },
+        "fecha": {
+          "type": "string",
+          "description": "Registration date (YYYY-MM-DD)",
+          "maxLength": 32
+        },
+        "fundo": {
+          "type": "string",
+          "description": "Farm / field location",
+          "maxLength": 64
+        },
+        "modulo": {
+          "type": "string",
+          "description": "Module identifier",
+          "maxLength": 32
+        },
+        "supervisor": {
+          "type": "string",
+          "description": "Assigned supervisor name",
+          "maxLength": 128
+        },
+        "grupo": {
+          "type": "string",
+          "description": "Group name or number",
+          "maxLength": 64
+        },
+        "lider": {
+          "type": "string",
+          "description": "Group leader name",
+          "maxLength": 128
+        },
+        "tipo": {
+          "type": "string",
+          "description": "Worker type (e.g. Cosechador)",
+          "maxLength": 64
+        },
+        "jabas": {
+          "type": "number",
+          "description": "Crates count"
+        }
+      },
+      "required": ["dni", "nombres"]
+    },
+    "DetalleJaba": {
+      "title": "DetalleJaba",
+      "description": "Single harvest scan entry for jabas count",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique scan ID",
+          "maxLength": 64
+        },
+        "fecha": {
+          "type": "string",
+          "description": "Date of scan (YYYY-MM-DD)",
+          "maxLength": 32
+        },
+        "dni": {
+          "type": "string",
+          "description": "Worker DNI",
+          "maxLength": 20
+        },
+        "trabajador": {
+          "type": "string",
+          "description": "Worker full name",
+          "maxLength": 128
+        },
+        "fundo": {
+          "type": "string",
+          "description": "Farm location",
+          "maxLength": 64
+        },
+        "modulo": {
+          "type": "string",
+          "description": "Module",
+          "maxLength": 32
+        },
+        "jabas": {
+          "type": "number",
+          "description": "Number of jabas harvested"
+        },
+        "supervisor": {
+          "type": "string",
+          "description": "Supervisor",
+          "maxLength": 128
+        },
+        "grupo": {
+          "type": "string",
+          "description": "Group",
+          "maxLength": 64
+        },
+        "lider": {
+          "type": "string",
+          "description": "Leader",
+          "maxLength": 128
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Timestamp of harvest record",
+          "maxLength": 64
+        }
+      },
+      "required": ["dni", "fecha", "jabas"]
+    },
+    "ValidacionSupervisor": {
+      "title": "ValidacionSupervisor",
+      "description": "Supervisor harvest validation audit record",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Validation ID",
+          "maxLength": 64
+        },
+        "fecha": {
+          "type": "string",
+          "description": "Harvest validation date (YYYY-MM-DD)",
+          "maxLength": 32
+        },
+        "supervisor": {
+          "type": "string",
+          "description": "Supervisor name",
+          "maxLength": 128
+        },
+        "fundo": {
+          "type": "string",
+          "description": "Farm",
+          "maxLength": 64
+        },
+        "modulo": {
+          "type": "string",
+          "description": "Module",
+          "maxLength": 32
+        },
+        "grupo": {
+          "type": "string",
+          "description": "Group",
+          "maxLength": 64
+        },
+        "lider": {
+          "type": "string",
+          "description": "Group leader",
+          "maxLength": 128
+        },
+        "totalTrabajadores": {
+          "type": "number",
+          "description": "Total workers"
+        },
+        "trabajadoresConformes": {
+          "type": "number",
+          "description": "Conform workers count"
+        },
+        "trabajadoresAnulados": {
+          "type": "number",
+          "description": "Anulled workers count"
+        },
+        "totalJabas": {
+          "type": "number",
+          "description": "Total crates"
+        },
+        "jabasConformes": {
+          "type": "number",
+          "description": "Conform crates"
+        },
+        "estado": {
+          "type": "string",
+          "enum": ["Validado", "Enviado", "Pendiente"],
+          "description": "Status"
+        },
+        "fechaRegistro": {
+          "type": "string",
+          "description": "Registration ISO timestamp",
+          "maxLength": 64
+        },
+        "observacionesGenerales": {
+          "type": "string",
+          "description": "General observations",
+          "maxLength": 500
+        },
+        "creadoPor": {
+          "type": "string",
+          "description": "Created by user",
+          "maxLength": 128
+        }
+      },
+      "required": ["id", "fecha", "supervisor", "fundo", "modulo", "grupo"]
+    },
+    "Programa": {
+      "title": "Programa",
+      "description": "Daily harvest program",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Program ID",
+          "maxLength": 64
+        },
+        "fecha": {
+          "type": "string",
+          "description": "Date (YYYY-MM-DD)",
+          "maxLength": 32
+        },
+        "fundo": {
+          "type": "string",
+          "description": "Farm",
+          "maxLength": 64
+        },
+        "modulo": {
+          "type": "string",
+          "description": "Module",
+          "maxLength": 32
+        },
+        "haTotal": {
+          "type": "string",
+          "description": "Total hectares",
+          "maxLength": 32
+        },
+        "numTrab": {
+          "type": "string",
+          "description": "Number of workers",
+          "maxLength": 32
+        },
+        "tipo": {
+          "type": "string",
+          "description": "Harvest type",
+          "maxLength": 64
+        },
+        "totalLotes": {
+          "type": "number",
+          "description": "Total lots count"
+        },
+        "fechaRegistro": {
+          "type": "string",
+          "description": "Registration date",
+          "maxLength": 64
+        },
+        "supervisor": {
+          "type": "string",
+          "description": "Assigned supervisor",
+          "maxLength": 128
+        }
+      },
+      "required": ["fecha", "fundo", "modulo"]
+    },
+    "ProgramaGeneral": {
+      "title": "ProgramaGeneral",
+      "description": "General master harvest program",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Program ID",
+          "maxLength": 64
+        },
+        "fundo": {
+          "type": "string",
+          "description": "Farm",
+          "maxLength": 64
+        },
+        "modulo": {
+          "type": "string",
+          "description": "Module",
+          "maxLength": 32
+        },
+        "haTotal": {
+          "type": "string",
+          "description": "Total hectares",
+          "maxLength": 32
+        },
+        "numTrabajadores": {
+          "type": "string",
+          "description": "Number of workers",
+          "maxLength": 32
+        },
+        "observaciones": {
+          "type": "string",
+          "description": "Observations",
+          "maxLength": 500
+        },
+        "fechaRegistro": {
+          "type": "string",
+          "description": "Registration date",
+          "maxLength": 64
+        },
+        "supervisor": {
+          "type": "string",
+          "description": "Assigned supervisor",
+          "maxLength": 128
+        }
+      },
+      "required": ["fundo", "modulo"]
+    },
+    "AppState": {
+      "title": "AppState",
+      "description": "Centralized sync state document",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "description": "Schema version"
+        },
+        "lastUpdated": {
+          "type": "string",
+          "description": "Last update ISO string",
+          "maxLength": 64
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "User who performed update",
+          "maxLength": 128
+        }
+      },
+      "required": ["version", "lastUpdated"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "User profile records with role permissions"
+    },
+    "/trabajadores/{trabajadorId}": {
+      "schema": {
+        "$ref": "#/entities/Trabajador"
+      },
+      "description": "List of agricultural workers"
+    },
+    "/detalle_jabas/{jabaId}": {
+      "schema": {
+        "$ref": "#/entities/DetalleJaba"
+      },
+      "description": "Field harvest scan records"
+    },
+    "/validaciones/{validacionId}": {
+      "schema": {
+        "$ref": "#/entities/ValidacionSupervisor"
+      },
+      "description": "Daily supervisor harvest validations"
+    },
+    "/programas/{programaId}": {
+      "schema": {
+        "$ref": "#/entities/Programa"
+      },
+      "description": "Daily harvest operational programs"
+    },
+    "/programa_general/{progGenId}": {
+      "schema": {
+        "$ref": "#/entities/ProgramaGeneral"
+      },
+      "description": "Master harvest plan"
+    },
+    "/app_state/{stateId}": {
+      "schema": {
+        "$ref": "#/entities/AppState"
+      },
+      "description": "Central synchronized database state and catalogs"
+    }
+  }
+}

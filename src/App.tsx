@@ -62,6 +62,10 @@ import { ImportarTab } from './components/ImportarTab';
 import { ConexionTab } from './components/ConexionTab';
 import { ShareAppModal } from './components/ShareAppModal';
 import { Toast, ToastMessage } from './components/Toast';
+import { 
+  subscribeToFirestoreMasterData, 
+  syncAllDataToFirestore 
+} from './lib/firebase';
 
 export default function App() {
   // Initialize storage defaults on first load
@@ -337,12 +341,25 @@ export default function App() {
     window.addEventListener('focus', onFocusOrVisible);
     document.addEventListener('visibilitychange', onFocusOrVisible);
 
+    // 5. Firebase Firestore Real-Time Listener
+    let unsubscribeFirestoreMaster: (() => void) | null = null;
+    try {
+      unsubscribeFirestoreMaster = subscribeToFirestoreMasterData((firestoreData) => {
+        if (firestoreData) {
+          applyServerData(firestoreData, true);
+        }
+      });
+    } catch (err) {
+      console.warn('Firestore subscription error:', err);
+    }
+
     return () => {
       broadcastChannelRef.current?.close();
       es?.close();
       clearInterval(interval);
       window.removeEventListener('focus', onFocusOrVisible);
       document.removeEventListener('visibilitychange', onFocusOrVisible);
+      unsubscribeFirestoreMaster?.();
     };
   }, [fetchCentralizedData, applyServerData]);
 
@@ -373,7 +390,25 @@ export default function App() {
     // 1. Always sync immediately to Central Server so other PCs see it instantly
     syncToServer(updatedPayload);
 
-    // 2. Also sync to Google Sheets if configured
+    // 2. Sync to Firebase Firestore in real-time
+    try {
+      const firestoreData = {
+        programas: getProgramas(),
+        programaGeneral: getProgramaGeneral(),
+        trabajadores: getTrabajadores(),
+        detalleJabas: getDetalleJabas(),
+        usuarios: getUsuarios(),
+        validaciones: getValidaciones(),
+        lideres: getLideres(),
+        grupos: getGrupos(),
+        ...updatedPayload
+      };
+      syncAllDataToFirestore(firestoreData).catch(() => {});
+    } catch {
+      // Offline fallback
+    }
+
+    // 3. Also sync to Google Sheets if configured
     if (!isAutoSyncEnabled()) return;
     const url = getGsheetUrl();
     if (!url) return;
@@ -416,10 +451,27 @@ export default function App() {
     setDetalleJabasState([]);
     setValidacionesState([]);
 
+    // Clear central node server
     try {
       await fetch('/api/reset', { method: 'POST' });
     } catch (e) {
       console.warn('Reset server api error:', e);
+    }
+
+    // Clear Firebase Firestore
+    try {
+      await syncAllDataToFirestore({
+        programas: [],
+        programaGeneral: [],
+        trabajadores: [],
+        detalleJabas: [],
+        validaciones: [],
+        grupos: [],
+        lideres: [],
+        usuarios: getUsuarios()
+      });
+    } catch (e) {
+      console.warn('Reset firestore error:', e);
     }
 
     addToast('🧹 Base de datos limpiada correctamente. Sin datos de prueba.', 'success');
@@ -769,7 +821,7 @@ export default function App() {
         session={session}
         onLogout={handleLogout}
         lastSync={lastSync}
-        firebaseConnected={!!fbConfig}
+        firebaseConnected={true}
         autoSyncActive={isAutoSyncEnabled()}
         onRefresh={() => fetchCentralizedData(false)}
         onOpenShareModal={() => setIsShareModalOpen(true)}
@@ -904,6 +956,7 @@ export default function App() {
             onManualSyncPull={handleManualSyncPull}
             onToast={addToast}
             onResetData={handleResetAllData}
+            onDataLoadedFromCloud={(data) => applyServerData(data, true)}
           />
         )}
       </main>

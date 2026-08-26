@@ -11,6 +11,15 @@ import {
   setLastSyncTime 
 } from '../utils/storage';
 import { 
+  auth, 
+  signInWithGoogle, 
+  signInGuest, 
+  logOut as firebaseLogOut,
+  syncAllDataToFirestore,
+  fetchAllDataFromFirestore,
+  testConnection
+} from '../lib/firebase';
+import { 
   Cloud,
   Save, 
   UploadCloud, 
@@ -28,7 +37,11 @@ import {
   ChevronDown,
   ChevronUp,
   ShieldCheck,
-  Table
+  Table,
+  Zap,
+  LogIn,
+  LogOut,
+  Database
 } from 'lucide-react';
 
 interface ConexionTabProps {
@@ -38,6 +51,7 @@ interface ConexionTabProps {
   onManualSyncPull: () => void;
   onToast: (msg: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
   onResetData?: () => void;
+  onDataLoadedFromCloud?: (data: any) => void;
 }
 
 
@@ -512,7 +526,8 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
   onManualSyncPush,
   onManualSyncPull,
   onToast,
-  onResetData
+  onResetData,
+  onDataLoadedFromCloud
 }) => {
   const [gsheetUrl, setGsheetUrl] = useState(getGsheetUrl());
   const [autoSync, setAutoSync] = useState(isAutoSyncEnabled());
@@ -521,8 +536,105 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
     return existing ? JSON.stringify(existing, null, 2) : '';
   });
   const [testingConnection, setTestingConnection] = useState(false);
+  const [testingFirebase, setTestingFirebase] = useState(false);
+  const [syncingFirebase, setSyncingFirebase] = useState(false);
   const [showCodeGuide, setShowCodeGuide] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [firebaseUser, setFirebaseUser] = useState(() => auth.currentUser);
+
+  React.useEffect(() => {
+    const unsub = auth.onAuthStateChanged((user) => {
+      setFirebaseUser(user);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleTestFirebase = async () => {
+    setTestingFirebase(true);
+    onAddLog('🔥 Probando conexión con Firebase Firestore (recojo-fruto-campo)...', 'info');
+    try {
+      const ok = await testConnection();
+      if (ok) {
+        onAddLog('✅ Conexión con Firebase Firestore verificada con éxito. Base de datos lista en us-east1.', 'ok');
+        onToast('✅ Firebase Firestore conectado y activo', 'success');
+      } else {
+        onAddLog('⚠️ Conexión con Firebase Firestore no disponible o en modo sin conexión.', 'err');
+        onToast('⚠️ No se pudo verificar Firebase', 'warning');
+      }
+    } catch (e: any) {
+      onAddLog(`❌ Error en Firebase: ${e.message || String(e)}`, 'err');
+      onToast('❌ Error al conectar con Firebase', 'error');
+    } finally {
+      setTestingFirebase(false);
+    }
+  };
+
+  const handlePushToFirebase = async () => {
+    setSyncingFirebase(true);
+    onAddLog('🔥 Subiendo datos locales a Firebase Firestore...', 'info');
+    try {
+      const payload = {
+        trabajadores: JSON.parse(localStorage.getItem('recojoFrutosTrabajadores') || '[]'),
+        programas: JSON.parse(localStorage.getItem('recojoFrutosProgramas') || '[]'),
+        programaGeneral: JSON.parse(localStorage.getItem('recojoFrutosProgramaGeneral') || '[]'),
+        detalleJabas: JSON.parse(localStorage.getItem('recojoFrutosDetalleJabas') || '[]'),
+        validaciones: JSON.parse(localStorage.getItem('recojoFrutosValidaciones') || '[]'),
+        grupos: JSON.parse(localStorage.getItem('recojoFrutosGrupos') || '[]'),
+        lideres: JSON.parse(localStorage.getItem('recojoFrutosLideres') || '[]'),
+        usuarios: JSON.parse(localStorage.getItem('recojoFrutosUsuarios') || '[]'),
+      };
+      await syncAllDataToFirestore(payload);
+      onAddLog('✅ Datos sincronizados y guardados en Firebase Firestore con éxito', 'ok');
+      onToast('✅ Sincronizado con Firebase Firestore', 'success');
+    } catch (e: any) {
+      onAddLog(`❌ Error al subir a Firebase: ${e.message || String(e)}`, 'err');
+      onToast('❌ Error al sincronizar con Firebase', 'error');
+    } finally {
+      setSyncingFirebase(false);
+    }
+  };
+
+  const handlePullFromFirebase = async () => {
+    setSyncingFirebase(true);
+    onAddLog('🔥 Descargando datos desde Firebase Firestore...', 'info');
+    try {
+      const data = await fetchAllDataFromFirestore();
+      if (data && onDataLoadedFromCloud) {
+        onDataLoadedFromCloud(data);
+        onAddLog('✅ Datos de Firebase Firestore aplicados con éxito al sistema local', 'ok');
+        onToast('✅ Datos descargados de Firebase', 'success');
+      } else if (!data) {
+        onAddLog('ℹ️ No se encontraron datos en Firebase Firestore aún. Puedes hacer "Subir Todo".', 'info');
+        onToast('ℹ️ Firebase sin datos previos', 'info');
+      }
+    } catch (e: any) {
+      onAddLog(`❌ Error al descargar de Firebase: ${e.message || String(e)}`, 'err');
+      onToast('❌ Error al consultar Firebase', 'error');
+    } finally {
+      setSyncingFirebase(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      const user = await signInWithGoogle();
+      onAddLog(`✅ Sesión iniciada con Google en Firebase: ${user.email}`, 'ok');
+      onToast(`✅ Conectado como ${user.email}`, 'success');
+    } catch (e: any) {
+      onAddLog(`⚠️ Error al autenticar con Google: ${e.message || String(e)}`, 'err');
+      onToast('⚠️ No se completó inicio con Google', 'warning');
+    }
+  };
+
+  const handleFirebaseLogout = async () => {
+    try {
+      await firebaseLogOut();
+      onAddLog('Sesión de Google en Firebase cerrada.', 'info');
+      onToast('Sesión de Firebase cerrada', 'info');
+    } catch (e: any) {
+      onToast('Error al cerrar sesión', 'error');
+    }
+  };
 
   const handleSaveGsheetUrl = () => {
     const trimmed = gsheetUrl.trim();
@@ -611,28 +723,6 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
     }
   };
 
-  const handleSaveFirebase = () => {
-    if (!fbConfigText.trim()) {
-      saveFirebaseConfig(null);
-      onAddLog('Configuración de Firebase eliminada.', 'info');
-      onToast('🗑️ Configuración de Firebase eliminada', 'info');
-      return;
-    }
-
-    try {
-      const parsed: FirebaseConfig = JSON.parse(fbConfigText);
-      if (!parsed.apiKey || !parsed.databaseURL) {
-        onToast('❌ Faltan campos requeridos: apiKey y databaseURL', 'error');
-        return;
-      }
-      saveFirebaseConfig(parsed);
-      onAddLog(`🔥 Firebase Realtime Database configurado (Proyecto: ${parsed.projectId || 'N/A'})`, 'ok');
-      onToast('✅ Configuración Firebase guardada', 'success');
-    } catch {
-      onToast('❌ JSON de Firebase inválido. Revisa la sintaxis.', 'error');
-    }
-  };
-
   const handleExportBackup = () => {
     const jsonStr = generateBackupJson();
     const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -648,6 +738,89 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
 
   return (
     <div className="space-y-4">
+      {/* Firebase Firestore Cloud Card */}
+      <div className="bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-emerald-500/10 rounded-2xl shadow-sm border border-amber-300/60 p-4 sm:p-6">
+        <div className="flex flex-wrap items-center justify-between pb-3 border-b border-amber-200/60 mb-4 gap-2">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white shadow-sm">
+              <Flame className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-amber-950 flex items-center gap-2">
+                Firebase Firestore Cloud
+                <span className="text-[10px] bg-amber-600 text-white px-2 py-0.5 rounded-full font-extrabold uppercase">
+                  Activo
+                </span>
+              </h2>
+              <p className="text-xs text-amber-900/80">
+                Base de datos en la nube en tiempo real (Proyecto: <strong>recojo-fruto-campo</strong> · Región: <strong>us-east1</strong>)
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {firebaseUser ? (
+              <div className="flex items-center gap-2 bg-white/80 border border-amber-300 px-3 py-1 rounded-full text-xs font-semibold text-amber-900">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="max-w-[160px] truncate">{firebaseUser.email || 'Conectado'}</span>
+                <button
+                  onClick={handleFirebaseLogout}
+                  className="text-amber-800 hover:text-red-700 ml-1 font-bold cursor-pointer"
+                  title="Cerrar sesión de Firebase"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleGoogleSignIn}
+                className="bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <LogIn className="w-3.5 h-3.5 text-amber-600" />
+                <span>Acceder con Google</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Firebase Quick Actions */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-4">
+          <button
+            onClick={handlePushToFirebase}
+            disabled={syncingFirebase}
+            className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white p-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+          >
+            <UploadCloud className={`w-4 h-4 ${syncingFirebase ? 'animate-bounce' : ''}`} />
+            <span>🔥 Subir Todo a Firebase</span>
+          </button>
+
+          <button
+            onClick={handlePullFromFirebase}
+            disabled={syncingFirebase}
+            className="bg-white hover:bg-amber-50 border border-amber-300 text-amber-900 p-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+          >
+            <DownloadCloud className={`w-4 h-4 ${syncingFirebase ? 'animate-bounce' : ''}`} />
+            <span>📥 Descargar de Firebase</span>
+          </button>
+
+          <button
+            onClick={handleTestFirebase}
+            disabled={testingFirebase}
+            className="bg-white hover:bg-gray-50 border border-amber-300 text-amber-950 p-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+          >
+            <RefreshCw className={`w-4 h-4 ${testingFirebase ? 'animate-spin text-amber-600' : ''}`} />
+            <span>🔍 Probar Firebase</span>
+          </button>
+        </div>
+
+        <div className="bg-white/60 border border-amber-200/80 rounded-xl p-3 text-xs text-amber-950 flex items-start gap-2">
+          <Zap className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <p>
+            <strong>Sincronización en vivo:</strong> Cualquier escaneo de jabas, validación de supervisor o cambio en el programa se sincroniza de forma automática con Firestore para que todos los dispositivos vean los mismos datos al instante.
+          </p>
+        </div>
+      </div>
+
       {/* Google Sheets Connection Card */}
       <div className="bg-white rounded-2xl shadow-sm border border-[#e0e0e0] p-4 sm:p-6">
         <div className="flex items-center justify-between pb-3 border-b border-[#f0f0f0] mb-4">
@@ -755,7 +928,6 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
             </button>
           </div>
         )}
-
 
         {/* Auto-Sync Toggle Box */}
         <div className="bg-[#e8f5e9]/70 border border-[#a5d6a7] p-4 rounded-xl mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -884,3 +1056,4 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
     </div>
   );
 };
+
