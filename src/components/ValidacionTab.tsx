@@ -8,7 +8,15 @@ import {
   Programa,
   Lider
 } from '../types';
-import { getLocalToday, getLocalISO, formatDateDDMMAAAA, normalizeDateString } from '../utils/storage';
+import { 
+  getLocalToday, 
+  getLocalISO, 
+  formatDateDDMMAAAA, 
+  normalizeDateString,
+  cleanValidacionesList,
+  isValidValidacion,
+  purgeAllEmptyRecords
+} from '../utils/storage';
 import { RegistroStatusMonitor } from './RegistroStatusMonitor';
 import { ScannerModal } from './ScannerModal';
 import { 
@@ -265,6 +273,13 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     return Array.from(set).sort();
   }, [grupos, trabajadores, detalleJabas]);
 
+  // Clean validaciones list (discard any corrupted or empty records with 0 jabas and empty fields)
+  const validValidaciones = useMemo(() => {
+    return cleanValidacionesList(validaciones);
+  }, [validaciones]);
+
+  const emptyValidacionesCount = validaciones.length - validValidaciones.length;
+
   // Map of already validated workers for the selected date: clean DNI -> Validation Info
   const alreadyValidatedMap = useMemo(() => {
     const map = new Map<
@@ -283,7 +298,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
 
     const targetDate = normalizeDate(filtroFecha);
 
-    validaciones.forEach((val) => {
+    validValidaciones.forEach((val) => {
       const valDate = normalizeDate(val.fecha);
       if (!valDate || valDate !== targetDate) return;
 
@@ -306,7 +321,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
       }
     });
     return map;
-  }, [validaciones, filtroFecha]);
+  }, [validValidaciones, filtroFecha]);
 
   // Derive candidate workers based on selected filters (STRICTLY ONLY WORKERS WITH JABAS > 0)
   const allCandidateWorkers = useMemo(() => {
@@ -1457,7 +1472,39 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
               </button>
             </div>
 
-            {validaciones.length === 0 ? (
+            {emptyValidacionesCount > 0 && (
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-900">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                  <div>
+                    <span className="font-bold">Se detectaron {emptyValidacionesCount} registros vacíos (0 jabas) en la memoria.</span>
+                    <p className="text-[11px] text-amber-700 mt-0.5">
+                      Puedes eliminarlos en un clic para mantener el historial limpio y ordenado.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const res = purgeAllEmptyRecords();
+                    if (onDeleteValidacion) {
+                      validaciones.forEach((v) => {
+                        if (!isValidValidacion(v)) {
+                          onDeleteValidacion(v.id);
+                        }
+                      });
+                    }
+                    onToast(`🧹 Se limpiaron ${emptyValidacionesCount} registros vacíos`, 'success');
+                  }}
+                  className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 cursor-pointer shrink-0"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Limpiar Registros Vacíos</span>
+                </button>
+              </div>
+            )}
+
+            {validValidaciones.length === 0 ? (
               <div className="py-12 text-center text-gray-400 text-xs bg-[#fafafa] rounded-xl border border-dashed border-gray-200">
                 <FileCheck className="w-8 h-8 mx-auto text-gray-300 mb-2" />
                 Aún no hay validaciones registradas en el sistema.
@@ -1467,7 +1514,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
               </div>
             ) : (
               <div className="space-y-3">
-                {validaciones.map((val) => {
+                {validValidaciones.map((val) => {
                   const isExpanded = expandedHistId === val.id;
                   return (
                     <div
@@ -1491,9 +1538,9 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                           <div className="text-xs text-gray-700 flex flex-wrap items-center gap-2">
                             <span>📅 {formatDateDDMMAAAA(val.fecha)}</span>
                             <span>·</span>
-                            <span>📍 {val.fundo} - {val.modulo}</span>
+                            <span>📍 {val.fundo || 'Fundo'} - {val.modulo || 'Módulo'}</span>
                             <span>·</span>
-                            <span>👥 {val.grupo}</span>
+                            <span>👥 {val.grupo || 'Grupo'}</span>
                             {val.lider && (
                               <>
                                 <span>·</span>
@@ -1504,17 +1551,17 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                               </>
                             )}
                             <span>·</span>
-                            <span>👤 Sup: {val.supervisor}</span>
+                            <span>👤 Sup: {val.supervisor || 'Supervisor'}</span>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-3 self-end sm:self-auto">
                           <div className="text-right">
                             <div className="text-sm font-black text-[#1b5e20]">
-                              {val.jabasConformes} Jabas
+                              {val.jabasConformes || 0} Jabas
                             </div>
                             <div className="text-[10px] text-gray-500">
-                              {val.trabajadoresConformes} / {val.totalTrabajadores} personal
+                              {val.trabajadoresConformes || 0} / {val.totalTrabajadores || 0} personal
                             </div>
                           </div>
 
@@ -1568,7 +1615,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                                 >
                                   <div className="space-y-0.5">
                                     <div className="font-bold text-gray-900">
-                                      {it.nombres}{' '}
+                                      {it.nombres || 'Personal'}{' '}
                                       <span className="text-[10px] text-gray-500 font-normal">
                                         ({it.dni})
                                       </span>
@@ -1580,7 +1627,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                                     )}
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <span className="font-black text-[#1b5e20]">{it.jabas} jabas</span>
+                                    <span className="font-black text-[#1b5e20]">{it.jabas || 0} jabas</span>
                                     <span
                                       className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
                                         it.conforme

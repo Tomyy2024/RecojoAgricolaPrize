@@ -440,21 +440,106 @@ export function saveFirebaseConfig(cfg: FirebaseConfig | null) {
   }
 }
 
+// Validaciones por Supervisor Sanitizer
+export function isValidValidacion(v: any): boolean {
+  if (!v || typeof v !== 'object') return false;
+  const id = typeof v.id === 'string' ? v.id.trim() : '';
+  const fecha = typeof v.fecha === 'string' ? v.fecha.trim() : '';
+  const supervisor = typeof v.supervisor === 'string' ? v.supervisor.trim() : '';
+  const totalTrab = Number(v.totalTrabajadores) || 0;
+  const totalJab = Number(v.totalJabas) || 0;
+  const confJab = Number(v.jabasConformes) || 0;
+  const itemsCount = Array.isArray(v.items) ? v.items.length : 0;
+
+  // Strict check: An empty record has no id (or empty ID), no date, no supervisor, 0 workers and 0 jabas
+  if (!id && !fecha && !supervisor) return false;
+  if (!id && totalTrab === 0 && totalJab === 0 && itemsCount === 0) return false;
+  if (id === '' && fecha === '' && totalTrab === 0 && totalJab === 0 && confJab === 0 && itemsCount === 0) return false;
+  
+  // If id starts with 'VAL_' or has actual content, and has at least some data
+  return true;
+}
+
+export function cleanValidacionesList(list: any[]): ValidacionSupervisor[] {
+  if (!Array.isArray(list)) return [];
+  const seenIds = new Set<string>();
+  const cleaned: ValidacionSupervisor[] = [];
+
+  list.forEach((v) => {
+    if (!v || typeof v !== 'object') return;
+    const rawId = typeof v.id === 'string' ? v.id.trim() : '';
+    const rawFecha = typeof v.fecha === 'string' ? v.fecha.trim() : '';
+    const rawSup = typeof v.supervisor === 'string' ? v.supervisor.trim() : '';
+    const rawFundo = typeof v.fundo === 'string' ? v.fundo.trim() : '';
+    const rawMod = typeof v.modulo === 'string' ? v.modulo.trim() : '';
+    const rawGrp = typeof v.grupo === 'string' ? v.grupo.trim() : '';
+    const totalTrab = Number(v.totalTrabajadores) || 0;
+    const totalJab = Number(v.totalJabas) || 0;
+    const confJab = Number(v.jabasConformes) || 0;
+    const itemsCount = Array.isArray(v.items) ? v.items.length : 0;
+
+    // Discard empty phantom records (like in user screenshot where ID is empty, Fundo/Modulo are empty, 0 Jabas, 0 personal)
+    if (!rawId && !rawFecha && !rawSup && !rawFundo && totalTrab === 0 && totalJab === 0 && confJab === 0 && itemsCount === 0) {
+      return;
+    }
+    if (rawId === '' && totalTrab === 0 && totalJab === 0 && confJab === 0 && itemsCount === 0) {
+      return;
+    }
+
+    const effectiveId = rawId || `VAL_${rawFecha || 'GEN'}_${rawMod || 'M'}_${Date.now()}`;
+    const dedupeKey = `${effectiveId}_${rawFecha}_${rawMod}_${rawSup}`;
+
+    if (!seenIds.has(dedupeKey)) {
+      seenIds.add(dedupeKey);
+      cleaned.push({
+        id: effectiveId,
+        fecha: rawFecha || getLocalToday(),
+        fechaRegistro: v.fechaRegistro || getLocalISO(),
+        supervisor: rawSup || 'Supervisor de Campo',
+        fundo: rawFundo || 'Fundo General',
+        modulo: rawMod || 'M01',
+        grupo: rawGrp || 'Grupo 01',
+        lider: typeof v.lider === 'string' ? v.lider.trim() : '',
+        totalTrabajadores: totalTrab || itemsCount,
+        trabajadoresConformes: Number(v.trabajadoresConformes) || 0,
+        trabajadoresAnulados: Number(v.trabajadoresAnulados) || 0,
+        totalJabas: totalJab,
+        jabasConformes: confJab,
+        items: Array.isArray(v.items) ? v.items : [],
+        estado: v.estado || 'Validado',
+        observacionesGenerales: v.observacionesGenerales || '',
+        creadoPor: v.creadoPor || ''
+      });
+    }
+  });
+
+  return cleaned;
+}
+
 // Validaciones por Supervisor
 export function getValidaciones(): ValidacionSupervisor[] {
   try {
     const raw = localStorage.getItem(KEYS.VALIDACIONES);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const cleaned = cleanValidacionesList(parsed);
+    // If raw contained corrupted/empty phantom records, heal storage immediately
+    if (Array.isArray(parsed) && parsed.length !== cleaned.length) {
+      localStorage.setItem(KEYS.VALIDACIONES, JSON.stringify(cleaned));
+    }
+    return cleaned;
   } catch {
     return [];
   }
 }
 
 export function saveValidaciones(list: ValidacionSupervisor[]) {
-  localStorage.setItem(KEYS.VALIDACIONES, JSON.stringify(list));
+  const cleaned = cleanValidacionesList(list);
+  localStorage.setItem(KEYS.VALIDACIONES, JSON.stringify(cleaned));
 }
 
 export function saveSingleValidacion(val: ValidacionSupervisor) {
+  if (!isValidValidacion(val)) return getValidaciones();
   const current = getValidaciones();
   const existingIdx = current.findIndex(v => v.id === val.id);
   let updated: ValidacionSupervisor[];
@@ -466,6 +551,28 @@ export function saveSingleValidacion(val: ValidacionSupervisor) {
   }
   saveValidaciones(updated);
   return updated;
+}
+
+// Purge all phantom empty records from all localStorage keys
+export function purgeAllEmptyRecords() {
+  const validaciones = getValidaciones();
+  saveValidaciones(validaciones);
+
+  const rawDetalle = getDetalleJabas();
+  const cleanDetalle = rawDetalle.filter(
+    d => d && (d.dni?.trim() || d.trabajador?.trim()) && (Number(d.jabas) > 0 || d.fecha?.trim())
+  );
+  saveDetalleJabas(cleanDetalle);
+
+  const rawTrabajadores = getTrabajadores();
+  const cleanTrabajadores = rawTrabajadores.filter(t => t && t.dni?.trim());
+  saveTrabajadores(cleanTrabajadores);
+
+  return {
+    validacionesCount: validaciones.length,
+    detalleCount: cleanDetalle.length,
+    trabajadoresCount: cleanTrabajadores.length
+  };
 }
 
 // Export all local database as JSON backup

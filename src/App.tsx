@@ -44,7 +44,9 @@ import {
   isAutoSyncEnabled, 
   getLastSyncTime, 
   setLastSyncTime, 
-  getFirebaseConfig 
+  getFirebaseConfig,
+  cleanValidacionesList,
+  purgeAllEmptyRecords
 } from './utils/storage';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
@@ -171,8 +173,9 @@ export default function App() {
       saveDetalleJabas(d.detalleJabas);
     }
     if (Array.isArray(d.validaciones)) {
-      setValidacionesState(d.validaciones);
-      saveValidaciones(d.validaciones);
+      const cleanVal = cleanValidacionesList(d.validaciones);
+      setValidacionesState(cleanVal);
+      saveValidaciones(cleanVal);
     }
     if (Array.isArray(d.usuarios) && d.usuarios.length > 0) {
       setUsuariosState(d.usuarios);

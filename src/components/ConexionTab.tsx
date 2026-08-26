@@ -275,100 +275,126 @@ function doGet(e) {
       var sheetJabas = ss.getSheetByName('Registro_Avance');
       if (sheetJabas && sheetJabas.getLastRow() > 1) {
         var values = sheetJabas.getRange(2, 1, sheetJabas.getLastRow() - 1, 11).getValues();
-        result.detalleJabas = values.map(function(r) {
-          return {
-            id: String(r[0] || ''),
-            fecha: String(r[1] || ''),
-            timestamp: String(r[2] || ''),
-            supervisor: String(r[3] || ''),
-            fundo: String(r[4] || ''),
-            modulo: String(r[5] || ''),
-            grupo: String(r[6] || ''),
-            lider: String(r[7] || ''),
-            dni: String(r[8] || ''),
-            trabajador: String(r[9] || ''),
-            jabas: Number(r[10]) || 0
-          };
-        });
+        result.detalleJabas = values
+          .filter(function(r) {
+            return String(r[0] || '').trim() !== '' || String(r[8] || '').trim() !== '' || String(r[9] || '').trim() !== '';
+          })
+          .map(function(r) {
+            return {
+              id: String(r[0] || ''),
+              fecha: String(r[1] || ''),
+              timestamp: String(r[2] || ''),
+              supervisor: String(r[3] || ''),
+              fundo: String(r[4] || ''),
+              modulo: String(r[5] || ''),
+              grupo: String(r[6] || ''),
+              lider: String(r[7] || ''),
+              dni: String(r[8] || ''),
+              trabajador: String(r[9] || ''),
+              jabas: Number(r[10]) || 0
+            };
+          });
       }
 
-      // 2. Leer Validaciones_Supervisor
+      // 2. Leer Validaciones_Supervisor (Filtrar filas vacías)
       var sheetVal = ss.getSheetByName('Validaciones_Supervisor');
       if (sheetVal && sheetVal.getLastRow() > 1) {
         var valValues = sheetVal.getRange(2, 1, sheetVal.getLastRow() - 1, 16).getValues();
-        result.validaciones = valValues.map(function(r) {
-          return {
-            id: String(r[0] || ''),
-            fecha: String(r[1] || ''),
-            fechaRegistro: String(r[2] || ''),
-            supervisor: String(r[3] || ''),
-            fundo: String(r[4] || ''),
-            modulo: String(r[5] || ''),
-            grupo: String(r[6] || ''),
-            lider: String(r[7] || ''),
-            totalTrabajadores: Number(r[8]) || 0,
-            trabajadoresConformes: Number(r[9]) || 0,
-            trabajadoresAnulados: Number(r[10]) || 0,
-            totalJabas: Number(r[11]) || 0,
-            jabasConformes: Number(r[12]) || 0,
-            estado: String(r[13] || 'Validado'),
-            observacionesGenerales: String(r[14] || ''),
-            creadoPor: String(r[15] || '')
-          };
-        });
+        result.validaciones = valValues
+          .filter(function(r) {
+            var id = String(r[0] || '').trim();
+            var fecha = String(r[1] || '').trim();
+            var sup = String(r[3] || '').trim();
+            var totTrab = Number(r[8]) || 0;
+            var totJab = Number(r[11]) || 0;
+            // Ignore rows where ID, fecha, supervisor and counts are blank/0
+            return id !== '' || fecha !== '' || sup !== '' || totTrab > 0 || totJab > 0;
+          })
+          .map(function(r) {
+            return {
+              id: String(r[0] || ''),
+              fecha: String(r[1] || ''),
+              fechaRegistro: String(r[2] || ''),
+              supervisor: String(r[3] || ''),
+              fundo: String(r[4] || ''),
+              modulo: String(r[5] || ''),
+              grupo: String(r[6] || ''),
+              lider: String(r[7] || ''),
+              totalTrabajadores: Number(r[8]) || 0,
+              trabajadoresConformes: Number(r[9]) || 0,
+              trabajadoresAnulados: Number(r[10]) || 0,
+              totalJabas: Number(r[11]) || 0,
+              jabasConformes: Number(r[12]) || 0,
+              estado: String(r[13] || 'Validado'),
+              observacionesGenerales: String(r[14] || ''),
+              creadoPor: String(r[15] || '')
+            };
+          });
       }
 
       // 3. Leer Programas
       var sheetProg = ss.getSheetByName('Programas');
       if (sheetProg && sheetProg.getLastRow() > 1) {
         var progValues = sheetProg.getRange(2, 1, sheetProg.getLastRow() - 1, 7).getValues();
-        result.programas = progValues.map(function(r) {
-          return {
-            id: String(r[0] || ''),
-            fecha: String(r[1] || ''),
-            fundo: String(r[2] || ''),
-            modulo: String(r[3] || ''),
-            jabas: Number(r[4]) || 0,
-            supervisor: String(r[5] || ''),
-            estado: String(r[6] || 'Abierto')
-          };
-        });
+        result.programas = progValues
+          .filter(function(r) {
+            return String(r[0] || '').trim() !== '' || String(r[1] || '').trim() !== '';
+          })
+          .map(function(r) {
+            return {
+              id: String(r[0] || ''),
+              fecha: String(r[1] || ''),
+              fundo: String(r[2] || ''),
+              modulo: String(r[3] || ''),
+              jabas: Number(r[4]) || 0,
+              supervisor: String(r[5] || ''),
+              estado: String(r[6] || 'Abierto')
+            };
+          });
       }
 
       // 4. Leer Programa_General
       var sheetGen = ss.getSheetByName('Programa_General');
       if (sheetGen && sheetGen.getLastRow() > 1) {
         var genValues = sheetGen.getRange(2, 1, sheetGen.getLastRow() - 1, 8).getValues();
-        result.programaGeneral = genValues.map(function(r) {
-          return {
-            id: String(r[0] || ''),
-            fecha: String(r[1] || ''),
-            fundo: String(r[2] || ''),
-            modulo: String(r[3] || ''),
-            variedad: String(r[4] || ''),
-            jabas: Number(r[5]) || 0,
-            supervisor: String(r[6] || ''),
-            estado: String(r[7] || 'Pendiente')
-          };
-        });
+        result.programaGeneral = genValues
+          .filter(function(r) {
+            return String(r[0] || '').trim() !== '' || String(r[1] || '').trim() !== '';
+          })
+          .map(function(r) {
+            return {
+              id: String(r[0] || ''),
+              fecha: String(r[1] || ''),
+              fundo: String(r[2] || ''),
+              modulo: String(r[3] || ''),
+              variedad: String(r[4] || ''),
+              jabas: Number(r[5]) || 0,
+              supervisor: String(r[6] || ''),
+              estado: String(r[7] || 'Pendiente')
+            };
+          });
       }
 
       // 5. Leer Trabajadores
       var sheetTrab = ss.getSheetByName('Trabajadores');
       if (sheetTrab && sheetTrab.getLastRow() > 1) {
         var trabValues = sheetTrab.getRange(2, 1, sheetTrab.getLastRow() - 1, 8).getValues();
-        result.trabajadores = trabValues.map(function(r) {
-          return {
-            dni: String(r[0] || ''),
-            nombres: String(r[1] || ''),
-            fundo: String(r[2] || ''),
-            modulo: String(r[3] || ''),
-            grupo: String(r[4] || ''),
-            supervisor: String(r[5] || ''),
-            lider: String(r[6] || ''),
-            tipo: String(r[7] || 'Trabajador')
-          };
-        });
+        result.trabajadores = trabValues
+          .filter(function(r) {
+            return String(r[0] || '').trim() !== '' || String(r[1] || '').trim() !== '';
+          })
+          .map(function(r) {
+            return {
+              dni: String(r[0] || ''),
+              nombres: String(r[1] || ''),
+              fundo: String(r[2] || ''),
+              modulo: String(r[3] || ''),
+              grupo: String(r[4] || ''),
+              supervisor: String(r[5] || ''),
+              lider: String(r[6] || ''),
+              tipo: String(r[7] || 'Trabajador')
+            };
+          });
       }
 
       // 6. Leer Usuarios
@@ -390,15 +416,19 @@ function doGet(e) {
       var sheetLid = ss.getSheetByName('Lideres');
       if (sheetLid && sheetLid.getLastRow() > 1) {
         var lidValues = sheetLid.getRange(2, 1, sheetLid.getLastRow() - 1, 5).getValues();
-        result.lideres = lidValues.map(function(r) {
-          return {
-            lider: String(r[0] || ''),
-            dni: String(r[1] || ''),
-            nombres: String(r[2] || ''),
-            grupo: String(r[3] || ''),
-            fechaAlta: String(r[4] || '')
-          };
-        });
+        result.lideres = lidValues
+          .filter(function(r) {
+            return String(r[0] || '').trim() !== '' || String(r[2] || '').trim() !== '';
+          })
+          .map(function(r) {
+            return {
+              lider: String(r[0] || ''),
+              dni: String(r[1] || ''),
+              nombres: String(r[2] || ''),
+              grupo: String(r[3] || ''),
+              fechaAlta: String(r[4] || '')
+            };
+          });
       }
 
       // 8. Leer Grupos

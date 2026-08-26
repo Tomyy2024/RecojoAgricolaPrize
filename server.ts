@@ -48,6 +48,46 @@ function getInitialData() {
   };
 }
 
+function sanitizeValidaciones(list: any[]): any[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  const out: any[] = [];
+  list.forEach((v) => {
+    if (!v || typeof v !== 'object') return;
+    const id = String(v.id || '').trim();
+    const fecha = String(v.fecha || '').trim();
+    const sup = String(v.supervisor || '').trim();
+    const totTrab = Number(v.totalTrabajadores) || 0;
+    const totJab = Number(v.totalJabas) || 0;
+    const confJab = Number(v.jabasConformes) || 0;
+    const itemsCount = Array.isArray(v.items) ? v.items.length : 0;
+
+    // Discard empty phantom records (no id, no date, 0 workers, 0 jabas)
+    if (!id && !fecha && !sup && totTrab === 0 && totJab === 0 && confJab === 0 && itemsCount === 0) {
+      return;
+    }
+    if (id === '' && totTrab === 0 && totJab === 0 && confJab === 0 && itemsCount === 0) {
+      return;
+    }
+
+    const effectiveId = id || `VAL_${fecha || 'GEN'}_${Date.now()}`;
+    const dedupeKey = `${effectiveId}_${fecha}_${v.modulo}_${sup}`;
+    if (!seen.has(dedupeKey)) {
+      seen.add(dedupeKey);
+      out.push({
+        ...v,
+        id: effectiveId,
+        totalTrabajadores: totTrab || itemsCount,
+        trabajadoresConformes: Number(v.trabajadoresConformes) || 0,
+        trabajadoresAnulados: Number(v.trabajadoresAnulados) || 0,
+        totalJabas: totJab,
+        jabasConformes: confJab
+      });
+    }
+  });
+  return out;
+}
+
 function loadDatabase() {
   try {
     if (fs.existsSync(DB_FILE)) {
@@ -65,10 +105,13 @@ function loadDatabase() {
         if (u && u.user) userMap.set(u.user.toLowerCase(), u);
       });
 
+      const cleanedValidaciones = sanitizeValidaciones(parsed.validaciones);
+
       return {
         ...getInitialData(),
         ...parsed,
-        usuarios: Array.from(userMap.values())
+        usuarios: Array.from(userMap.values()),
+        validaciones: cleanedValidaciones
       };
     }
   } catch (err) {
@@ -204,7 +247,9 @@ async function startServer() {
         if (Array.isArray(incoming.programaGeneral)) db.programaGeneral = incoming.programaGeneral;
         if (Array.isArray(incoming.trabajadores)) db.trabajadores = incoming.trabajadores;
         if (Array.isArray(incoming.detalleJabas)) db.detalleJabas = incoming.detalleJabas;
-        if (Array.isArray(incoming.validaciones)) db.validaciones = incoming.validaciones;
+        if (Array.isArray(incoming.validaciones)) {
+          db.validaciones = sanitizeValidaciones(incoming.validaciones);
+        }
         if (Array.isArray(incoming.usuarios) && incoming.usuarios.length > 0) db.usuarios = incoming.usuarios;
         if (Array.isArray(incoming.lideres)) db.lideres = incoming.lideres;
         if (Array.isArray(incoming.grupos)) db.grupos = incoming.grupos;
