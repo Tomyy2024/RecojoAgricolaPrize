@@ -48,6 +48,28 @@ function getInitialData() {
   };
 }
 
+function normalizeDateServer(str?: string): string {
+  if (!str) return '';
+  const s = String(str).trim();
+  if (!s) return '';
+  const isoMatch = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
+  }
+  const slashMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (slashMatch) {
+    return `${slashMatch[3]}-${slashMatch[2].padStart(2, '0')}-${slashMatch[1].padStart(2, '0')}`;
+  }
+  const p = new Date(s);
+  if (!isNaN(p.getTime())) {
+    const y = p.getFullYear();
+    const m = String(p.getMonth() + 1).padStart(2, '0');
+    const d = String(p.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return s.split('T')[0].split(' ')[0].trim();
+}
+
 function sanitizeValidaciones(list: any[]): any[] {
   if (!Array.isArray(list)) return [];
   const seen = new Set<string>();
@@ -55,7 +77,8 @@ function sanitizeValidaciones(list: any[]): any[] {
   list.forEach((v) => {
     if (!v || typeof v !== 'object') return;
     const id = String(v.id || '').trim();
-    const fecha = String(v.fecha || '').trim();
+    const rawFecha = String(v.fecha || '').trim();
+    const fecha = normalizeDateServer(rawFecha);
     const sup = String(v.supervisor || '').trim();
     const totTrab = Number(v.totalTrabajadores) || 0;
     const totJab = Number(v.totalJabas) || 0;
@@ -77,6 +100,7 @@ function sanitizeValidaciones(list: any[]): any[] {
       out.push({
         ...v,
         id: effectiveId,
+        fecha: fecha || rawFecha,
         totalTrabajadores: totTrab || itemsCount,
         trabajadoresConformes: Number(v.trabajadoresConformes) || 0,
         trabajadoresAnulados: Number(v.trabajadoresAnulados) || 0,

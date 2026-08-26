@@ -301,8 +301,10 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     validValidaciones.forEach((val) => {
       const valDate = normalizeDate(val.fecha);
       if (!valDate || valDate !== targetDate) return;
+      if (val.estado && val.estado !== 'Validado') return;
 
-      if (val.items && Array.isArray(val.items)) {
+      // 1. If explicit items array exists and has elements
+      if (val.items && Array.isArray(val.items) && val.items.length > 0) {
         val.items.forEach((it) => {
           const dniClean = String(it.dni || '').trim();
           if (dniClean) {
@@ -318,10 +320,55 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
             });
           }
         });
+      } else {
+        // 2. Fallback if validation row was synced without items:
+        // A) If ID contains an 8-digit DNI (single worker validation)
+        const idDniMatch = val.id.match(/_(\d{8})_/);
+        if (idDniMatch && idDniMatch[1]) {
+          const dniClean = idDniMatch[1].trim();
+          map.set(dniClean, {
+            validacionId: val.id,
+            supervisor: val.supervisor,
+            conforme: true,
+            jabas: val.jabasConformes || val.totalJabas || 0,
+            fechaRegistro: val.fechaRegistro,
+            fecha: val.fecha,
+            modulo: val.modulo,
+            fundo: val.fundo
+          });
+        } else {
+          // B) Match cuadrilla workers in detalleJabas matching fundo, modulo, grupo
+          const valMod = normalizeModulo(val.modulo);
+          const valFundo = normalizeStr(val.fundo);
+          const valGrp = normalizeGrupo(val.grupo);
+
+          detalleJabas.forEach((dj) => {
+            if (normalizeDate(dj.fecha) !== valDate) return;
+            const djMod = normalizeModulo(dj.modulo);
+            const djFundo = normalizeStr(dj.fundo);
+            const djGrp = normalizeGrupo(dj.grupo);
+            if (valMod && djMod && valMod !== djMod) return;
+            if (valFundo && djFundo && valFundo !== djFundo) return;
+            if (valGrp && djGrp && valGrp !== djGrp) return;
+            const cleanDni = String(dj.dni || '').trim();
+            if (cleanDni && !map.has(cleanDni)) {
+              map.set(cleanDni, {
+                validacionId: val.id,
+                supervisor: val.supervisor,
+                conforme: true,
+                jabas: Number(dj.jabas) || 0,
+                fechaRegistro: val.fechaRegistro,
+                fecha: val.fecha,
+                modulo: val.modulo,
+                fundo: val.fundo
+              });
+            }
+          });
+        }
       }
     });
     return map;
-  }, [validValidaciones, filtroFecha]);
+  }, [validValidaciones, filtroFecha, detalleJabas]);
 
   // Derive candidate workers based on selected filters (STRICTLY ONLY WORKERS WITH JABAS > 0)
   const allCandidateWorkers = useMemo(() => {

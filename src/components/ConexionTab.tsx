@@ -92,13 +92,13 @@ function doPost(e) {
       var sheetVal = getOrCreateSheet(ss, 'Validaciones_Supervisor', [
         'ID_Validacion', 'Fecha', 'Hora_Validacion', 'Supervisor', 'Fundo', 'Modulo', 'Grupo', 'Lider',
         'Total_Personal', 'Personal_Conforme', 'Personal_Anulado', 'Total_Jabas', 'Jabas_Conformes',
-        'Estado', 'Observaciones', 'Creado_Por'
+        'Estado', 'Observaciones', 'Creado_Por', 'Items_JSON'
       ]);
       sheetVal.clearContents();
       sheetVal.appendRow([
         'ID_Validacion', 'Fecha', 'Hora_Validacion', 'Supervisor', 'Fundo', 'Modulo', 'Grupo', 'Lider',
         'Total_Personal', 'Personal_Conforme', 'Personal_Anulado', 'Total_Jabas', 'Jabas_Conformes',
-        'Estado', 'Observaciones', 'Creado_Por'
+        'Estado', 'Observaciones', 'Creado_Por', 'Items_JSON'
       ]);
       payload.validaciones.forEach(function(v) {
         sheetVal.appendRow([
@@ -117,7 +117,8 @@ function doPost(e) {
           v.jabasConformes || 0,
           v.estado || 'Validado',
           v.observacionesGenerales || '',
-          v.creadoPor || ''
+          v.creadoPor || '',
+          JSON.stringify(v.items || [])
         ]);
       });
     }
@@ -271,6 +272,34 @@ function doGet(e) {
         grupos: []
       };
 
+      function formatDateVal(val) {
+        if (!val) return '';
+        if (val instanceof Date) {
+          var y = val.getFullYear();
+          var m = ('0' + (val.getMonth() + 1)).slice(-2);
+          var d = ('0' + val.getDate()).slice(-2);
+          return y + '-' + m + '-' + d;
+        }
+        var str = String(val).trim();
+        if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(str)) {
+          var parts = str.split(/[-/]/);
+          var dayPart = parts[2].split('T')[0].split(' ')[0];
+          return parts[0] + '-' + ('0' + parts[1]).slice(-2) + '-' + ('0' + dayPart).slice(-2);
+        }
+        if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(str)) {
+          var sParts = str.split('/');
+          return sParts[2] + '-' + ('0' + sParts[1]).slice(-2) + '-' + ('0' + sParts[0]).slice(-2);
+        }
+        var pDate = new Date(str);
+        if (!isNaN(pDate.getTime())) {
+          var py = pDate.getFullYear();
+          var pm = ('0' + (pDate.getMonth() + 1)).slice(-2);
+          var pd = ('0' + pDate.getDate()).slice(-2);
+          return py + '-' + pm + '-' + pd;
+        }
+        return str.split('T')[0].split(' ')[0];
+      }
+
       // 1. Leer Registro_Avance
       var sheetJabas = ss.getSheetByName('Registro_Avance');
       if (sheetJabas && sheetJabas.getLastRow() > 1) {
@@ -282,7 +311,7 @@ function doGet(e) {
           .map(function(r) {
             return {
               id: String(r[0] || ''),
-              fecha: String(r[1] || ''),
+              fecha: formatDateVal(r[1]),
               timestamp: String(r[2] || ''),
               supervisor: String(r[3] || ''),
               fundo: String(r[4] || ''),
@@ -299,7 +328,8 @@ function doGet(e) {
       // 2. Leer Validaciones_Supervisor (Filtrar filas vacías)
       var sheetVal = ss.getSheetByName('Validaciones_Supervisor');
       if (sheetVal && sheetVal.getLastRow() > 1) {
-        var valValues = sheetVal.getRange(2, 1, sheetVal.getLastRow() - 1, 16).getValues();
+        var maxCols = Math.max(17, sheetVal.getLastColumn());
+        var valValues = sheetVal.getRange(2, 1, sheetVal.getLastRow() - 1, maxCols).getValues();
         result.validaciones = valValues
           .filter(function(r) {
             var id = String(r[0] || '').trim();
@@ -307,13 +337,18 @@ function doGet(e) {
             var sup = String(r[3] || '').trim();
             var totTrab = Number(r[8]) || 0;
             var totJab = Number(r[11]) || 0;
-            // Ignore rows where ID, fecha, supervisor and counts are blank/0
             return id !== '' || fecha !== '' || sup !== '' || totTrab > 0 || totJab > 0;
           })
           .map(function(r) {
+            var itemsParsed = [];
+            if (r[16]) {
+              try {
+                itemsParsed = JSON.parse(String(r[16]));
+              } catch (e) {}
+            }
             return {
               id: String(r[0] || ''),
-              fecha: String(r[1] || ''),
+              fecha: formatDateVal(r[1]),
               fechaRegistro: String(r[2] || ''),
               supervisor: String(r[3] || ''),
               fundo: String(r[4] || ''),
@@ -327,7 +362,8 @@ function doGet(e) {
               jabasConformes: Number(r[12]) || 0,
               estado: String(r[13] || 'Validado'),
               observacionesGenerales: String(r[14] || ''),
-              creadoPor: String(r[15] || '')
+              creadoPor: String(r[15] || ''),
+              items: itemsParsed
             };
           });
       }

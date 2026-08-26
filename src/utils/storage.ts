@@ -49,14 +49,42 @@ export function getLocalISO(): string {
   return new Date().toISOString();
 }
 
-export function normalizeDateString(d?: string): string {
+export function normalizeDateString(d?: any): string {
   if (!d) return '';
-  const trimmed = d.split('T')[0].split(' ')[0].trim();
-  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(trimmed)) {
-    const [day, month, year] = trimmed.split('/');
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  if (typeof d !== 'string') {
+    if (d instanceof Date && !isNaN(d.getTime())) {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    d = String(d);
   }
-  return trimmed;
+  const str = d.trim();
+  if (!str) return '';
+
+  // 1. If starts with YYYY-MM-DD (e.g. "2026-08-25", "2026-08-25T01:23:45.000Z")
+  const isoMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
+  }
+
+  // 2. If starts with DD/MM/YYYY (e.g. "25/08/2026", "25/8/2026")
+  const slashMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (slashMatch) {
+    return `${slashMatch[3]}-${slashMatch[2].padStart(2, '0')}-${slashMatch[1].padStart(2, '0')}`;
+  }
+
+  // 3. If JavaScript Date string (e.g. "Tue Aug 25 2026 00:00:00 GMT-0500" or similar)
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  return str.split('T')[0].split(' ')[0].trim();
 }
 
 /** Formats any date string (YYYY-MM-DD, ISO timestamp, DD/MM/YYYY) to DD/MM/YYYY (ej: 25/08/2026) */
