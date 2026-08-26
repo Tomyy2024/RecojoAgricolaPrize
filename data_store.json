@@ -1,0 +1,84 @@
+{
+  "version": 10,
+  "usuarios": [
+    {
+      "user": "admin",
+      "pass": "admin123",
+      "nombre": "Administrador General",
+      "rol": "Administrador",
+      "creado": "2026-08-18"
+    },
+    {
+      "user": "supervisor1",
+      "pass": "super123",
+      "nombre": "Carlos Mendoza",
+      "rol": "Supervisor",
+      "creado": "2026-08-19"
+    },
+    {
+      "user": "trabajador1",
+      "pass": "campo123",
+      "nombre": "Trabajador de Campo",
+      "rol": "Trabajador",
+      "creado": "2026-08-18"
+    },
+    {
+      "user": "trabajador",
+      "pass": "campo123",
+      "nombre": "Trabajador General",
+      "rol": "Trabajador",
+      "creado": "2026-08-18"
+    }
+  ],
+  "fundos": [
+    "Ampliacion",
+    "Arena Azul",
+    "Ayllu Allpa",
+    "Santa Teresa",
+    "Vivadis"
+  ],
+  "modulos": {
+    "Ampliacion": [
+      "M16",
+      "M17",
+      "M18"
+    ],
+    "Arena Azul": [
+      "M01",
+      "M02",
+      "M03",
+      "M04"
+    ],
+    "Ayllu Allpa": [
+      "M12",
+      "M13",
+      "M14",
+      "M15"
+    ],
+    "Santa Teresa": [
+      "M01",
+      "M06",
+      "M07",
+      "M08",
+      "M09",
+      "M10A",
+      "M10B",
+      "M11"
+    ],
+    "Vivadis": [
+      "M01",
+      "M02",
+      "M03",
+      "M04",
+      "M05"
+    ]
+  },
+  "grupos": [],
+  "trabajadores": [],
+  "programas": [],
+  "programaGeneral": [],
+  "detalleJabas": [],
+  "validaciones": [],
+  "lideres": [],
+  "lastUpdated": "2026-08-26T02:00:00.000Z"
+}
