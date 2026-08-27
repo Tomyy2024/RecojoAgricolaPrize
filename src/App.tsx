@@ -182,8 +182,17 @@ export default function App() {
       saveValidaciones(cleanVal);
     }
     if (Array.isArray(d.usuarios) && d.usuarios.length > 0) {
-      setUsuariosState(d.usuarios);
-      saveUsuarios(d.usuarios);
+      const current = getUsuarios();
+      const userMap = new Map<string, Usuario>();
+      current.forEach((u) => {
+        if (u && u.user) userMap.set(u.user.toLowerCase().trim(), u);
+      });
+      d.usuarios.forEach((u: Usuario) => {
+        if (u && u.user) userMap.set(u.user.toLowerCase().trim(), u);
+      });
+      const mergedUsers = Array.from(userMap.values());
+      setUsuariosState(mergedUsers);
+      saveUsuarios(mergedUsers);
     }
     if (Array.isArray(d.lideres)) {
       const uniqueLideresMap = new Map<string, Lider>();

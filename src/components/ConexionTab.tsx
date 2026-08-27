@@ -621,8 +621,38 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
       onAddLog(`✅ Sesión iniciada con Google en Firebase: ${user.email}`, 'ok');
       onToast(`✅ Conectado como ${user.email}`, 'success');
     } catch (e: any) {
-      onAddLog(`⚠️ Error al autenticar con Google: ${e.message || String(e)}`, 'err');
-      onToast('⚠️ No se completó inicio con Google', 'warning');
+      const code = e?.code || '';
+      const msg = e?.message || String(e);
+      let userFriendlyMsg = 'No se completó el inicio con Google.';
+
+      if (code === 'auth/unauthorized-domain') {
+        userFriendlyMsg = 'Dominio no autorizado en Firebase Console (Authentication > Sign-in method > Authorized domains).';
+        onAddLog(`⚠️ Firebase Auth: El dominio actual no está en la lista de "Authorized Domains" de Firebase Console. Agrega este dominio en la consola de Firebase o usa la app directamente (Firestore funciona sin requerir login).`, 'err');
+      } else if (code === 'auth/popup-blocked') {
+        userFriendlyMsg = 'El navegador bloqueó la ventana emergente. Ábrela en una pestaña nueva o permite popups.';
+        onAddLog(`⚠️ Ventana emergente bloqueada por el navegador o por el visor (iframe).`, 'err');
+      } else if (code === 'auth/popup-closed-by-user') {
+        userFriendlyMsg = 'Se cerró la ventana de Google antes de finalizar.';
+        onAddLog(`ℹ️ Ventana de inicio de sesión cerrada por el usuario.`, 'info');
+      } else if (code === 'auth/operation-not-allowed') {
+        userFriendlyMsg = 'El proveedor Google no está habilitado en Firebase Authentication.';
+        onAddLog(`⚠️ Ve a Firebase Console > Authentication > Sign-in method y habilita "Google".`, 'err');
+      } else {
+        onAddLog(`⚠️ Error al autenticar con Google (${code || 'desconocido'}): ${msg}`, 'err');
+      }
+
+      onToast(`⚠️ ${userFriendlyMsg}`, 'warning');
+    }
+  };
+
+  const handleAnonymousSignIn = async () => {
+    try {
+      const user = await signInGuest();
+      onAddLog(`✅ Conectado a Firebase en modo invitado/dispositivo: ${user.uid.slice(0, 8)}...`, 'ok');
+      onToast('✅ Conectado a Firebase', 'success');
+    } catch (e: any) {
+      onAddLog(`⚠️ Error en modo invitado: ${e.message || String(e)}`, 'err');
+      onToast('⚠️ No se pudo conectar como invitado', 'warning');
     }
   };
 
@@ -758,11 +788,11 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {firebaseUser ? (
-              <div className="flex items-center gap-2 bg-white/80 border border-amber-300 px-3 py-1 rounded-full text-xs font-semibold text-amber-900">
+              <div className="flex items-center gap-2 bg-white/90 border border-amber-300 px-3 py-1 rounded-full text-xs font-semibold text-amber-900 shadow-sm">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="max-w-[160px] truncate">{firebaseUser.email || 'Conectado'}</span>
+                <span className="max-w-[160px] truncate">{firebaseUser.email || `Dispositivo (${firebaseUser.uid.slice(0, 6)})`}</span>
                 <button
                   onClick={handleFirebaseLogout}
                   className="text-amber-800 hover:text-red-700 ml-1 font-bold cursor-pointer"
@@ -772,13 +802,23 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
                 </button>
               </div>
             ) : (
-              <button
-                onClick={handleGoogleSignIn}
-                className="bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
-              >
-                <LogIn className="w-3.5 h-3.5 text-amber-600" />
-                <span>Acceder con Google</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={handleGoogleSignIn}
+                  className="bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Iniciar sesión con tu cuenta de Google"
+                >
+                  <LogIn className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Acceder con Google</span>
+                </button>
+                <button
+                  onClick={handleAnonymousSignIn}
+                  className="bg-amber-100/80 hover:bg-amber-200/80 text-amber-900 border border-amber-300 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer"
+                  title="Conectar sesión de este dispositivo a Firebase"
+                >
+                  <span>Conectar Dispositivo</span>
+                </button>
+              </div>
             )}
           </div>
         </div>

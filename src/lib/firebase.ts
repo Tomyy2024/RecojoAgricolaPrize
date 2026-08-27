@@ -99,8 +99,13 @@ export async function testConnection(): Promise<boolean> {
   }
 }
 
-// Automatically test connection when module loads
+// Automatically test connection and authenticate guest if needed
 testConnection();
+auth.onAuthStateChanged((user) => {
+  if (!user) {
+    signInAnonymously(auth).catch(() => {});
+  }
+});
 
 // Auth Helpers
 export async function signInWithGoogle() {

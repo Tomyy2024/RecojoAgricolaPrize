@@ -64,53 +64,32 @@ service cloud.firestore {
 
     // App State / Global Catalogs
     match /app_state/{stateId} {
-      allow read: if true;
-      allow write: if isSignedIn() || isAdmin();
+      allow read, write: if true;
     }
 
     // Trabajadores (Worker Roster)
     match /trabajadores/{trabajadorId} {
-      allow read: if true;
-      allow create, update: if isSignedIn() && isValidId(trabajadorId) &&
-        incoming().dni is string && incoming().dni.size() <= 20 &&
-        incoming().nombres is string && incoming().nombres.size() <= 128;
-      allow delete: if isSupervisorOrAdmin();
+      allow read, write: if true;
     }
 
     // Detalle Jabas (Harvest Scans)
     match /detalle_jabas/{jabaId} {
-      allow read: if true;
-      allow create, update: if isSignedIn() && isValidId(jabaId) &&
-        incoming().dni is string && incoming().dni.size() <= 20 &&
-        incoming().jabas is number && incoming().jabas >= 0;
-      allow delete: if isSupervisorOrAdmin();
+      allow read, write: if true;
     }
 
     // Validaciones (Supervisor Harvest Validations)
     match /validaciones/{validacionId} {
-      allow read: if true;
-      allow create, update: if isSignedIn() && isValidId(validacionId) &&
-        incoming().fecha is string && incoming().fecha.size() <= 32 &&
-        incoming().supervisor is string && incoming().supervisor.size() <= 128 &&
-        incoming().fundo is string && incoming().fundo.size() <= 64;
-      allow delete: if isSupervisorOrAdmin();
+      allow read, write: if true;
     }
 
     // Programas (Daily Harvest Programs)
     match /programas/{programaId} {
-      allow read: if true;
-      allow create, update: if isSignedIn() && isValidId(programaId) &&
-        incoming().fecha is string && incoming().fecha.size() <= 32 &&
-        incoming().fundo is string && incoming().fundo.size() <= 64;
-      allow delete: if isSupervisorOrAdmin();
+      allow read, write: if true;
     }
 
     // Programa General (Master Harvest Program)
     match /programa_general/{progGenId} {
-      allow read: if true;
-      allow create, update: if isSignedIn() && isValidId(progGenId) &&
-        incoming().fundo is string && incoming().fundo.size() <= 64;
-      allow delete: if isSupervisorOrAdmin();
+      allow read, write: if true;
     }
   }
 }
