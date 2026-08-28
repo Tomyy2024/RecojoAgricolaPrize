@@ -15,7 +15,8 @@ import {
   INITIAL_TRABAJADORES, 
   INITIAL_PROGRAMAS, 
   INITIAL_PROGRAMA_GENERAL, 
-  INITIAL_GRUPOS 
+  INITIAL_GRUPOS,
+  INITIAL_MODULOS_POR_FUNDO 
 } from '../data/initialData';
 
 const KEYS = {
@@ -28,6 +29,7 @@ const KEYS = {
   DETALLE_JABAS: 'recojoFrutosDetalleJabas',
   GRUPOS: 'recojoFrutosGrupos',
   LIDERES: 'recojoFrutosLideres',
+  MODULOS_POR_FUNDO: 'recojoFrutosModulosPorFundo',
   GSHEET_URL: 'recojoFrutosGsheetUrl',
   AUTO_SYNC: 'recojoFrutosAutoSync',
   AUTO_SYNC_QUEUE: 'recojoFrutosAutoSyncCola',
@@ -224,17 +226,12 @@ export function clearSession() {
 export function getUsuarios(): Usuario[] {
   try {
     const raw = localStorage.getItem(KEYS.USUARIOS);
-    const parsed: Usuario[] = raw ? JSON.parse(raw) : [];
-    const map = new Map<string, Usuario>();
-    
-    // Seed defaults first
-    INITIAL_USUARIOS.forEach((u) => map.set(u.user.toLowerCase(), u));
-    // Overwrite with stored custom/edited users
-    parsed.forEach((u) => {
-      if (u && u.user) map.set(u.user.toLowerCase(), u);
-    });
-
-    return Array.from(map.values());
+    if (!raw) return INITIAL_USUARIOS;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+    return INITIAL_USUARIOS;
   } catch {
     return INITIAL_USUARIOS;
   }
@@ -398,6 +395,55 @@ export function getLideres(): Lider[] {
 
 export function saveLideres(lideres: Lider[]) {
   localStorage.setItem(KEYS.LIDERES, JSON.stringify(lideres));
+}
+
+// Modulos por Fundo
+export function getModulosPorFundo(): Record<string, string[]> {
+  try {
+    const raw = localStorage.getItem(KEYS.MODULOS_POR_FUNDO);
+    const customMap: Record<string, string[]> = raw ? JSON.parse(raw) : {};
+    
+    // Merge defaults with custom modulos
+    const merged: Record<string, string[]> = { ...INITIAL_MODULOS_POR_FUNDO };
+    Object.keys(customMap).forEach((fundo) => {
+      const existing = merged[fundo] || [];
+      const set = new Set<string>(existing);
+      if (Array.isArray(customMap[fundo])) {
+        customMap[fundo].forEach((m) => {
+          if (m && typeof m === 'string' && m.trim()) {
+            set.add(m.trim().toUpperCase());
+          }
+        });
+      }
+      merged[fundo] = Array.from(set).sort();
+    });
+
+    return merged;
+  } catch {
+    return { ...INITIAL_MODULOS_POR_FUNDO };
+  }
+}
+
+export function saveModulosPorFundo(map: Record<string, string[]>) {
+  try {
+    localStorage.setItem(KEYS.MODULOS_POR_FUNDO, JSON.stringify(map));
+  } catch (e) {
+    console.warn('Error saving modulos:', e);
+  }
+}
+
+export function addModuloToFundo(fundo: string, modulo: string): Record<string, string[]> {
+  const current = getModulosPorFundo();
+  const cleanFundo = (fundo || 'General').trim();
+  const cleanMod = modulo.trim().toUpperCase();
+  if (!cleanMod) return current;
+
+  const currentList = current[cleanFundo] || [];
+  if (!currentList.includes(cleanMod)) {
+    current[cleanFundo] = [...currentList, cleanMod].sort();
+    saveModulosPorFundo(current);
+  }
+  return current;
 }
 
 // Google Sheets Web App Config

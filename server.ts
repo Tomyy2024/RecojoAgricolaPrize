@@ -277,6 +277,9 @@ async function startServer() {
         if (Array.isArray(incoming.usuarios) && incoming.usuarios.length > 0) db.usuarios = incoming.usuarios;
         if (Array.isArray(incoming.lideres)) db.lideres = incoming.lideres;
         if (Array.isArray(incoming.grupos)) db.grupos = incoming.grupos;
+        if (incoming.modulos && typeof incoming.modulos === 'object') {
+          db.modulos = { ...(db.modulos || {}), ...incoming.modulos };
+        }
 
         db.version = (db.version || 1) + 1;
         db.lastUpdated = new Date().toISOString();

@@ -37,6 +37,10 @@ import {
   saveGrupos,
   getLideres, 
   saveLideres,
+  getModulosPorFundo,
+  saveModulosPorFundo,
+  addModuloToFundo,
+  getLocalToday,
   getValidaciones,
   saveValidaciones,
   saveSingleValidacion,
@@ -114,6 +118,7 @@ export default function App() {
   const [usuarios, setUsuariosState] = useState<Usuario[]>(() => getUsuarios());
   const [grupos, setGruposState] = useState<string[]>(() => getGrupos());
   const [lideres, setLideresState] = useState<Lider[]>(() => getLideres());
+  const [modulosPorFundo, setModulosPorFundo] = useState<Record<string, string[]>>(() => getModulosPorFundo());
   const [validaciones, setValidacionesState] = useState<ValidacionSupervisor[]>(() => getValidaciones());
 
   // Cloud Sync & Logging States
@@ -182,17 +187,8 @@ export default function App() {
       saveValidaciones(cleanVal);
     }
     if (Array.isArray(d.usuarios) && d.usuarios.length > 0) {
-      const current = getUsuarios();
-      const userMap = new Map<string, Usuario>();
-      current.forEach((u) => {
-        if (u && u.user) userMap.set(u.user.toLowerCase().trim(), u);
-      });
-      d.usuarios.forEach((u: Usuario) => {
-        if (u && u.user) userMap.set(u.user.toLowerCase().trim(), u);
-      });
-      const mergedUsers = Array.from(userMap.values());
-      setUsuariosState(mergedUsers);
-      saveUsuarios(mergedUsers);
+      setUsuariosState(d.usuarios);
+      saveUsuarios(d.usuarios);
     }
     if (Array.isArray(d.lideres)) {
       const uniqueLideresMap = new Map<string, Lider>();
@@ -218,6 +214,11 @@ export default function App() {
     if (Array.isArray(d.grupos)) {
       setGruposState(d.grupos);
       saveGrupos(d.grupos);
+    }
+    if (d.modulos && typeof d.modulos === 'object') {
+      const mergedMods = { ...getModulosPorFundo(), ...d.modulos };
+      setModulosPorFundo(mergedMods);
+      saveModulosPorFundo(mergedMods);
     }
     const nowIso = new Date().toISOString();
     setLastSyncTime(nowIso);
@@ -527,25 +528,63 @@ export default function App() {
     setDetalleJabasState(mergedDetalle);
     saveDetalleJabas(mergedDetalle);
 
-    // Update worker current group in state based on new dynamic assignment
-    const groupUpdates: Record<string, string> = {};
+    // Update full worker context (Supervisor, Fundo, Modulo, Grupo, Lider) based on this cuadrilla record
+    const workerUpdates: Record<string, { supervisor?: string; fundo?: string; modulo?: string; grupo?: string; lider?: string; nombres?: string; fecha?: string }> = {};
     newDetalleList.forEach((d) => {
-      if (d.dni && d.grupo) {
-        groupUpdates[d.dni] = d.grupo;
+      if (d.dni) {
+        workerUpdates[d.dni] = {
+          supervisor: d.supervisor,
+          fundo: d.fundo,
+          modulo: d.modulo,
+          grupo: d.grupo,
+          lider: d.lider,
+          nombres: d.trabajador,
+          fecha: d.fecha || getLocalToday()
+        };
       }
     });
 
-    let updatedWorkers = trabajadores;
-    if (Object.keys(groupUpdates).length > 0) {
-      updatedWorkers = trabajadores.map((t) => {
-        if (groupUpdates[t.dni]) {
-          return { ...t, grupo: groupUpdates[t.dni] };
-        }
-        return t;
-      });
-      setTrabajadoresState(updatedWorkers);
-      saveTrabajadores(updatedWorkers);
-    }
+    let updatedWorkers = trabajadores.map((t) => {
+      if (workerUpdates[t.dni]) {
+        const u = workerUpdates[t.dni];
+        return {
+          ...t,
+          supervisor: u.supervisor || t.supervisor,
+          fundo: u.fundo || t.fundo,
+          modulo: u.modulo || t.modulo,
+          grupo: u.grupo || t.grupo,
+          lider: u.lider || t.lider,
+          fecha: u.fecha || t.fecha
+        };
+      }
+      return t;
+    });
+
+    // Add any workers not previously in the roster
+    const existingDniSet = new Set(trabajadores.map((t) => t.dni));
+    newDetalleList.forEach((d) => {
+      if (d.dni && !existingDniSet.has(d.dni)) {
+        existingDniSet.add(d.dni);
+        updatedWorkers = [
+          {
+            id: `TRAB_${d.dni}`,
+            fecha: d.fecha || getLocalToday(),
+            dni: d.dni,
+            nombres: d.trabajador || `Trabajador ${d.dni}`,
+            fundo: d.fundo || 'Santa Teresa',
+            modulo: d.modulo || 'M01',
+            supervisor: d.supervisor || '',
+            grupo: d.grupo || '',
+            lider: d.lider || '',
+            tipo: 'Cosechero'
+          },
+          ...updatedWorkers
+        ];
+      }
+    });
+
+    setTrabajadoresState(updatedWorkers);
+    saveTrabajadores(updatedWorkers);
 
     let updatedProg = programas;
     if (programas.length > 0) {
@@ -558,12 +597,46 @@ export default function App() {
       saveProgramas(updatedProg);
     }
 
-    addLog(`📊 Avance de jabas registrado (${newDetalleList.length} registros)`, 'ok');
+    addLog(`📊 Avance registrado con Supervisor, Fundo, Módulo, Grupo y Líder para ${newDetalleList.length} trabajadores`, 'ok');
     triggerAutoSync('Avance Jabas', { 
       detalleJabas: mergedDetalle, 
       trabajadores: updatedWorkers,
       programas: updatedProg
     });
+  };
+
+  const handleSaveModulo = (fundo: string, modulo: string) => {
+    const cleanFundo = fundo || 'General';
+    const cleanMod = modulo.trim().toUpperCase();
+    if (!cleanMod) return;
+    const updated = addModuloToFundo(cleanFundo, cleanMod);
+    setModulosPorFundo(updated);
+    saveModulosPorFundo(updated);
+    addLog(`📍 Nuevo Módulo registrado: ${cleanMod} para fundo ${cleanFundo}`, 'ok');
+    triggerAutoSync('Registro Módulo', { modulos: updated });
+    addToast(`✅ Módulo "${cleanMod}" registrado para el fundo "${cleanFundo}"`, 'success');
+  };
+
+  const handleUpdateTrabajadores = (updatedWorkers: Trabajador[]) => {
+    setTrabajadoresState(updatedWorkers);
+    saveTrabajadores(updatedWorkers);
+    addLog(`👥 Nómina de personal actualizada (${updatedWorkers.length} trabajadores)`, 'ok');
+    triggerAutoSync('Actualización Personal', { trabajadores: updatedWorkers });
+  };
+
+  const handleSaveTrabajador = (worker: Trabajador) => {
+    const exists = trabajadores.some((t) => t.dni === worker.dni);
+    let updated: Trabajador[];
+    if (exists) {
+      updated = trabajadores.map((t) => (t.dni === worker.dni ? { ...t, ...worker } : t));
+    } else {
+      updated = [worker, ...trabajadores];
+    }
+    setTrabajadoresState(updated);
+    saveTrabajadores(updated);
+    addLog(`👷 Trabajador registrado con Supervisor, Fundo, Módulo, Grupo y Líder: ${worker.nombres} (DNI: ${worker.dni})`, 'ok');
+    triggerAutoSync('Registro Trabajador', { trabajadores: updated });
+    addToast(`✅ Trabajador "${worker.nombres}" guardado con éxito`, 'success');
   };
 
   const handleSaveUsuarios = async (updatedUsuarios: Usuario[]) => {
@@ -892,6 +965,10 @@ export default function App() {
             grupos={grupos}
             lideres={lideres}
             usuarios={usuarios}
+            modulosPorFundo={modulosPorFundo}
+            onSaveModulo={handleSaveModulo}
+            onUpdateTrabajadores={handleUpdateTrabajadores}
+            onSaveTrabajador={handleSaveTrabajador}
             onSaveLider={handleSaveLider}
             onDeleteLider={handleDeleteLider}
             onSaveSupervisor={handleSaveSupervisor}

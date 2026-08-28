@@ -22,7 +22,11 @@ import {
   Minus,
   Info,
   Calendar,
-  Trash2
+  Trash2,
+  UserPlus,
+  FolderPlus,
+  CheckCheck,
+  Tag
 } from 'lucide-react';
 
 interface TrabajadoresTabProps {
@@ -31,12 +35,16 @@ interface TrabajadoresTabProps {
   grupos: string[];
   lideres: Lider[];
   usuarios?: Usuario[];
+  modulosPorFundo?: Record<string, string[]>;
+  onSaveModulo?: (fundo: string, modulo: string) => void;
+  onUpdateTrabajadores?: (updated: Trabajador[]) => void;
+  onSaveTrabajador?: (worker: Trabajador) => void;
   onSaveLider: (lider: Lider) => void;
   onDeleteLider?: (liderNameOrDni: string) => void;
   onSaveSupervisor?: (supervisorName: string) => void;
   onSaveGrupo?: (grupo: string) => void;
   onSaveAvance: (avanceMap: Record<string, number>, detalleList: DetalleJaba[]) => void;
-  onToast: (msg: string) => void;
+  onToast: (msg: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
 }
 
 export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
@@ -45,6 +53,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   grupos,
   lideres,
   usuarios = [],
+  modulosPorFundo = {},
+  onSaveModulo,
+  onUpdateTrabajadores,
+  onSaveTrabajador,
   onSaveLider,
   onDeleteLider,
   onSaveSupervisor,
@@ -85,6 +97,11 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const [showSupervisorForm, setShowSupervisorForm] = useState(false);
   const [newSupervisorNombre, setNewSupervisorNombre] = useState('');
 
+  // Modulo registration state
+  const [showModuloForm, setShowModuloForm] = useState(false);
+  const [newModuloNombre, setNewModuloNombre] = useState('');
+  const [newModuloFundo, setNewModuloFundo] = useState('');
+
   // Grupo registration state
   const [showGrupoForm, setShowGrupoForm] = useState(false);
   const [newGrupoNombre, setNewGrupoNombre] = useState('');
@@ -93,6 +110,16 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const [showLeaderForm, setShowLeaderForm] = useState(false);
   const [liderNombre, setLiderNombre] = useState('');
   const [liderDni, setLiderDni] = useState('');
+
+  // New Worker direct registration modal state
+  const [showNewWorkerModal, setShowNewWorkerModal] = useState(false);
+  const [newWorkerDni, setNewWorkerDni] = useState('');
+  const [newWorkerNombres, setNewWorkerNombres] = useState('');
+  const [newWorkerSupervisor, setNewWorkerSupervisor] = useState('');
+  const [newWorkerFundo, setNewWorkerFundo] = useState('');
+  const [newWorkerModulo, setNewWorkerModulo] = useState('');
+  const [newWorkerGrupo, setNewWorkerGrupo] = useState('');
+  const [newWorkerLider, setNewWorkerLider] = useState('');
 
   // Scanner modal state
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -130,6 +157,16 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
   const modulosList = useMemo(() => {
     const set = new Set<string>();
+    const fundoKey = cuadrillaFundo || 'Santa Teresa';
+    
+    // Dynamic modules from modulosPorFundo prop
+    if (modulosPorFundo && modulosPorFundo[fundoKey]) {
+      modulosPorFundo[fundoKey].forEach((m) => {
+        if (m && m.trim()) set.add(m.trim().toUpperCase());
+      });
+    }
+
+    // Default static initial modules
     if (cuadrillaFundo === 'Santa Teresa') {
       ['M01', 'M06', 'M07', 'M08', 'M09', 'M10A', 'M10B', 'M11'].forEach((m) => set.add(m));
     } else if (cuadrillaFundo === 'Arena Azul') {
@@ -140,14 +177,23 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       ['M12', 'M13', 'M14', 'M15'].forEach((m) => set.add(m));
     } else if (cuadrillaFundo === 'Ampliacion') {
       ['M16', 'M17', 'M18'].forEach((m) => set.add(m));
+    } else if (!cuadrillaFundo && modulosPorFundo) {
+      Object.values(modulosPorFundo).forEach((mods) => {
+        if (Array.isArray(mods)) {
+          mods.forEach((m) => m && set.add(m.trim().toUpperCase()));
+        }
+      });
     }
+
+    // Include any module found in trabajadores records for this fundo
     trabajadores.forEach((t) => {
-      if ((!cuadrillaFundo || t.fundo === cuadrillaFundo) && t.modulo) {
-        set.add(t.modulo);
+      if ((!cuadrillaFundo || t.fundo === cuadrillaFundo) && t.modulo && t.modulo.trim()) {
+        set.add(t.modulo.trim().toUpperCase());
       }
     });
+
     return Array.from(set).sort();
-  }, [trabajadores, cuadrillaFundo]);
+  }, [trabajadores, cuadrillaFundo, modulosPorFundo]);
 
   const allGrupos = useMemo(() => {
     const set = new Set<string>();
@@ -354,7 +400,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     e.preventDefault();
     const clean = newSupervisorNombre.trim();
     if (!clean) {
-      onToast('⚠️ Ingresa el nombre del supervisor');
+      onToast('⚠️ Ingresa el nombre del supervisor', 'warning');
       return;
     }
     if (onSaveSupervisor) {
@@ -363,7 +409,30 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     setCuadrillaSupervisor(clean);
     setNewSupervisorNombre('');
     setShowSupervisorForm(false);
-    onToast(`✅ Supervisor "${clean}" registrado y seleccionado`);
+    onToast(`✅ Supervisor "${clean}" registrado y seleccionado`, 'success');
+  };
+
+  // Register new Modulo
+  const handleRegisterModulo = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanModulo = newModuloNombre.trim().toUpperCase();
+    const targetFundo = newModuloFundo.trim() || cuadrillaFundo || 'Santa Teresa';
+    
+    if (!cleanModulo) {
+      onToast('⚠️ Ingresa el código o nombre del módulo (ej: M05, M10A)', 'warning');
+      return;
+    }
+
+    if (onSaveModulo) {
+      onSaveModulo(targetFundo, cleanModulo);
+    }
+
+    setCuadrillaFundo(targetFundo);
+    setCuadrillaModulo(cleanModulo);
+    setNewModuloNombre('');
+    setNewModuloFundo('');
+    setShowModuloForm(false);
+    onToast(`✅ Módulo "${cleanModulo}" agregado exitosamente al fundo "${targetFundo}"`, 'success');
   };
 
   // Register new Grupo
@@ -371,7 +440,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     e.preventDefault();
     const clean = newGrupoNombre.trim();
     if (!clean) {
-      onToast('⚠️ Ingresa el nombre del grupo');
+      onToast('⚠️ Ingresa el nombre del grupo', 'warning');
       return;
     }
     if (onSaveGrupo) {
@@ -380,18 +449,18 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     setCuadrillaGrupo(clean);
     setNewGrupoNombre('');
     setShowGrupoForm(false);
-    onToast(`✅ Grupo "${clean}" registrado y seleccionado`);
+    onToast(`✅ Grupo "${clean}" registrado y seleccionado`, 'success');
   };
 
   // Register new Leader (Independent of groups)
   const handleRegisterLider = (e: React.FormEvent) => {
     e.preventDefault();
     if (!liderNombre.trim()) {
-      onToast('⚠️ Ingresa el nombre del líder');
+      onToast('⚠️ Ingresa el nombre del líder', 'warning');
       return;
     }
     if (!liderDni.trim() || liderDni.length < 8) {
-      onToast('⚠️ Ingresa un DNI válido de 8 dígitos');
+      onToast('⚠️ Ingresa un DNI válido de 8 dígitos', 'warning');
       return;
     }
 
@@ -405,10 +474,117 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     onSaveLider(newLider);
     setCuadrillaLider(liderNombre.trim());
     setCuadrillaLiderDni(liderDni.trim());
-    onToast(`👑 Líder "${liderNombre.trim()}" registrado (disponible para todos los grupos)`);
+    onToast(`👑 Líder "${liderNombre.trim()}" registrado (disponible para todos los grupos)`, 'success');
     setLiderNombre('');
     setLiderDni('');
     setShowLeaderForm(false);
+  };
+
+  // Open worker modal with current cuadrilla context pre-filled
+  const handleOpenNewWorkerModal = () => {
+    setNewWorkerDni('');
+    setNewWorkerNombres('');
+    setNewWorkerSupervisor(cuadrillaSupervisor || (supervisoresList[0] || ''));
+    setNewWorkerFundo(cuadrillaFundo || 'Santa Teresa');
+    setNewWorkerModulo(cuadrillaModulo || 'M01');
+    setNewWorkerGrupo(cuadrillaGrupo || (allGrupos[0] || 'Grupo 01'));
+    setNewWorkerLider(cuadrillaLider || (availableLideres[0]?.nombre || ''));
+    setShowNewWorkerModal(true);
+  };
+
+  // Direct registration of worker with 5 fields: Supervisor, Fundo, Modulo, Grupo, Lider
+  const handleRegisterNewWorker = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanDni = newWorkerDni.trim().replace(/\D/g, '');
+    const cleanNombres = newWorkerNombres.trim().toUpperCase();
+
+    if (!cleanDni || cleanDni.length < 5) {
+      onToast('⚠️ Ingresa un DNI / Fotocheck válido', 'warning');
+      return;
+    }
+    if (!cleanNombres) {
+      onToast('⚠️ Ingresa el nombre completo del trabajador', 'warning');
+      return;
+    }
+
+    const workerSupervisor = newWorkerSupervisor.trim() || cuadrillaSupervisor || session.nombre;
+    const workerFundo = newWorkerFundo.trim() || cuadrillaFundo || 'Santa Teresa';
+    const workerModulo = newWorkerModulo.trim().toUpperCase() || cuadrillaModulo || 'M01';
+    const workerGrupo = newWorkerGrupo.trim() || cuadrillaGrupo || 'Grupo 01';
+    const workerLider = newWorkerLider.trim() || cuadrillaLider || '';
+
+    const newWorker: Trabajador = {
+      id: `TRAB_${cleanDni}_${Date.now().toString().slice(-4)}`,
+      fecha: getLocalToday(),
+      dni: cleanDni,
+      nombres: cleanNombres,
+      supervisor: workerSupervisor,
+      fundo: workerFundo,
+      modulo: workerModulo,
+      grupo: workerGrupo,
+      lider: workerLider,
+      tipo: 'Cosechero'
+    };
+
+    if (onSaveTrabajador) {
+      onSaveTrabajador(newWorker);
+    } else if (onUpdateTrabajadores) {
+      const exists = trabajadores.some((t) => String(t.dni).trim() === cleanDni);
+      const updated = exists
+        ? trabajadores.map((t) => (String(t.dni).trim() === cleanDni ? newWorker : t))
+        : [newWorker, ...trabajadores];
+      onUpdateTrabajadores(updated);
+    }
+
+    // Auto-select in current cuadrilla selection
+    setSelectedDnis((prev) => new Set(prev).add(cleanDni));
+    setWorkerAssignedGrupos((prev) => ({
+      ...prev,
+      [cleanDni]: workerGrupo
+    }));
+
+    setShowNewWorkerModal(false);
+    onToast(
+      `✅ ${cleanNombres} registrado con Supervisor: ${workerSupervisor}, Fundo: ${workerFundo}, Módulo: ${workerModulo}, Grupo: ${workerGrupo}, Líder: ${workerLider || 'Sin asignar'}`,
+      'success'
+    );
+  };
+
+  // Explicitly assign current cuadrilla context to all currently selected workers
+  const handleAssignCuadrillaToSelected = () => {
+    if (selectedDnis.size === 0) {
+      onToast('⚠️ Selecciona al menos un trabajador para asignarle la cuadrilla', 'warning');
+      return;
+    }
+
+    const targetSupervisor = cuadrillaSupervisor || session.nombre;
+    const targetFundo = cuadrillaFundo || 'Santa Teresa';
+    const targetModulo = cuadrillaModulo || 'M01';
+    const targetGrupo = cuadrillaGrupo || 'Grupo 01';
+    const targetLider = cuadrillaLider || '';
+
+    if (onUpdateTrabajadores) {
+      const updated = trabajadores.map((t) => {
+        if (selectedDnis.has(String(t.dni).trim())) {
+          return {
+            ...t,
+            supervisor: targetSupervisor,
+            fundo: targetFundo,
+            modulo: targetModulo,
+            grupo: workerAssignedGrupos[t.dni] || targetGrupo,
+            lider: targetLider || t.lider,
+            fecha: getLocalToday()
+          };
+        }
+        return t;
+      });
+      onUpdateTrabajadores(updated);
+    }
+
+    onToast(
+      `✅ Cuadrilla asignada a ${selectedDnis.size} trabajadores (Supervisor: ${targetSupervisor}, Fundo: ${targetFundo}, Módulo: ${targetModulo}, Grupo: ${targetGrupo}, Líder: ${targetLider || 'Sin asignar'})`,
+      'success'
+    );
   };
 
   // Step 2: Jabas Avance Handlers
@@ -697,9 +873,24 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
               {/* 3. Módulo */}
               <div className="space-y-1">
-                <label className="flex items-center gap-1.5 text-xs font-bold text-[#2e7d32]">
-                  <MapPin className="w-3.5 h-3.5" />
-                  <span>3. Módulo</span>
+                <label className="flex items-center justify-between text-xs font-bold text-[#2e7d32]">
+                  <span className="flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>3. Módulo</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowModuloForm(!showModuloForm);
+                      setShowSupervisorForm(false);
+                      setShowGrupoForm(false);
+                      setShowLeaderForm(false);
+                      setNewModuloFundo(cuadrillaFundo || 'Santa Teresa');
+                    }}
+                    className="text-[10px] text-[#2e7d32] hover:underline font-normal cursor-pointer"
+                  >
+                    {showModuloForm ? 'Cerrar' : '+ Registrar'}
+                  </button>
                 </label>
                 <div className="relative">
                   <select
@@ -849,6 +1040,77 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   >
                     <Save className="w-3.5 h-3.5" />
                     <span>Guardar Supervisor</span>
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Sub-Panel Opcional: Registro de Nuevo Módulo */}
+            {showModuloForm && (
+              <form
+                onSubmit={handleRegisterModulo}
+                className="mb-5 p-4 bg-[#e8f5e9]/90 rounded-xl border border-[#81c784] space-y-3 animate-in fade-in"
+              >
+                <div className="flex items-center justify-between pb-2 border-b border-[#a5d6a7]">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-[#2e7d32]" />
+                    <h3 className="text-xs font-bold text-[#1b5e20] uppercase tracking-wide">
+                      Registrar Nuevo Módulo de Campo
+                    </h3>
+                  </div>
+                  <span className="text-[11px] text-[#2e7d32] font-semibold bg-white px-2 py-0.5 rounded border border-[#a5d6a7]">
+                    🌱 Se guardará en la base de datos y quedará seleccionado
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#40493d] mb-1">
+                      Fundo Agrícola *
+                    </label>
+                    <select
+                      value={newModuloFundo}
+                      onChange={(e) => setNewModuloFundo(e.target.value)}
+                      required
+                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white text-gray-900 focus:outline-none focus:border-[#2e7d32]"
+                    >
+                      {fundosList.map((f) => (
+                        <option key={f} value={f}>
+                          {f}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#40493d] mb-1">
+                      Código / Nombre del Módulo *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: M05, M09, M10A, M21..."
+                      value={newModuloNombre}
+                      onChange={(e) => setNewModuloNombre(e.target.value)}
+                      required
+                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white text-gray-900 font-bold uppercase focus:outline-none focus:border-[#2e7d32]"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowModuloForm(false)}
+                    className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Guardar Módulo</span>
                   </button>
                 </div>
               </form>
@@ -1055,18 +1317,29 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   Selección de Personal para la Cuadrilla
                 </h3>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="bg-[#e8f5e9] text-[#1b5e20] font-bold text-xs px-2.5 py-1 rounded-full border border-[#a5d6a7]">
                   {selectedDnis.size} de {filteredTrabajadores.length} seleccionados
                 </span>
                 {selectedDnis.size > 0 && (
-                  <button
-                    type="button"
-                    onClick={clearSelection}
-                    className="text-[11px] text-gray-500 hover:text-red-600 underline cursor-pointer"
-                  >
-                    Limpiar
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleAssignCuadrillaToSelected}
+                      className="text-[11px] bg-[#1b5e20] text-white hover:bg-[#2e7d32] font-bold px-2.5 py-1 rounded-lg shadow-xs flex items-center gap-1 cursor-pointer"
+                      title="Asignar los 5 campos actuales a los trabajadores seleccionados"
+                    >
+                      <Sparkles className="w-3 h-3 text-[#ffe082]" />
+                      <span>Asignar Cuadrilla ({selectedDnis.size})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearSelection}
+                      className="text-[11px] text-gray-500 hover:text-red-600 underline cursor-pointer ml-1"
+                    >
+                      Limpiar
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -1077,13 +1350,22 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Buscar trabajador por nombre (Ej: Julia Cruz) o DNI..."
+                  placeholder="Buscar trabajador por nombre (Ej: Juan Soto) o DNI..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 text-xs border border-[#bfcaba] rounded-lg focus:outline-none focus:border-[#2e7d32] bg-white"
                 />
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleOpenNewWorkerModal}
+                  className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white text-xs font-bold py-2 px-3 rounded-lg shadow-sm flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  title="Registrar nuevo trabajador con Supervisor, Fundo, Módulo, Grupo y Líder"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Registrar Personal</span>
+                </button>
                 <button
                   type="button"
                   onClick={selectAllFiltered}
@@ -1107,53 +1389,89 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             </div>
 
             {/* Listado de Tarjetas de Trabajadores */}
-            <div className="max-h-80 overflow-y-auto space-y-1.5 rounded-xl border border-[#e0e0e0] p-2 bg-[#fafafa]">
+            <div className="max-h-96 overflow-y-auto space-y-2 rounded-xl border border-[#e0e0e0] p-2 bg-[#fafafa]">
               {filteredTrabajadores.length === 0 ? (
                 <div className="py-8 text-center text-gray-400 text-xs">
                   No se encontraron trabajadores con los filtros de búsqueda aplicados.
+                  <div className="mt-2">
+                    <button
+                      type="button"
+                      onClick={handleOpenNewWorkerModal}
+                      className="text-[#2e7d32] font-bold underline"
+                    >
+                      Haz clic aquí para registrar un nuevo trabajador
+                    </button>
+                  </div>
                 </div>
               ) : (
                 filteredTrabajadores.map((t) => {
                   const isChecked = selectedDnis.has(t.dni);
+                  const effectiveSupervisor = t.supervisor || cuadrillaSupervisor || 'Carlos Solar';
+                  const effectiveFundo = t.fundo || cuadrillaFundo || 'Santa Teresa';
+                  const effectiveModulo = t.modulo || cuadrillaModulo || 'M01';
+                  const effectiveGrupo = workerAssignedGrupos[t.dni] || t.grupo || cuadrillaGrupo || 'Grupo 01';
+                  const effectiveLider = t.lider || cuadrillaLider || '';
+
                   return (
                     <div
                       key={t.dni}
                       onClick={() => toggleWorker(t.dni)}
-                      className={`flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer select-none ${
+                      className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border transition-all cursor-pointer select-none gap-2 ${
                         isChecked
                           ? 'bg-[#e8f5e9] border-[#2e7d32] shadow-sm'
                           : 'bg-white border-[#e0e0e0] hover:border-[#a5d6a7]'
                       }`}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-start sm:items-center gap-3">
                         <input
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => {}}
-                          className="w-4 h-4 rounded text-[#2e7d32] accent-[#2e7d32] pointer-events-none"
+                          className="w-4 h-4 mt-0.5 sm:mt-0 rounded text-[#2e7d32] accent-[#2e7d32] pointer-events-none shrink-0"
                         />
                         <div>
-                          <div className="font-bold text-xs sm:text-sm text-[#212121]">
-                            {t.nombres}
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xs sm:text-sm text-[#212121]">
+                              {t.nombres}
+                            </span>
+                            <span className="font-mono text-[11px] font-bold text-[#1b5e20] bg-white px-1.5 py-0.2 rounded border border-[#c8e6c9]">
+                              DNI: {t.dni}
+                            </span>
                           </div>
-                          <div className="text-[11px] text-[#757575] flex flex-wrap items-center gap-2 mt-0.5">
-                            <span className="font-semibold text-[#1b5e20]">DNI: {t.dni}</span>
-                            <span>·</span>
-                            <span>{t.fundo || cuadrillaFundo} - {t.modulo || cuadrillaModulo}</span>
-                            <span>·</span>
-                            <span>Sup: {t.supervisor || cuadrillaSupervisor}</span>
+
+                          {/* 5 Campos requeridos: Supervisor, Fundo, Modulo, Grupo, Lider */}
+                          <div className="text-[11px] text-[#555] flex flex-wrap items-center gap-1.5 mt-1">
+                            <span className="bg-white/80 px-1.5 py-0.5 rounded border border-gray-200 text-gray-700">
+                              👤 <b>Sup:</b> {effectiveSupervisor}
+                            </span>
+                            <span className="bg-white/80 px-1.5 py-0.5 rounded border border-gray-200 text-gray-700">
+                              📍 <b>Fundo:</b> {effectiveFundo}
+                            </span>
+                            <span className="bg-[#e8f5e9] px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
+                              🌱 <b>Módulo:</b> {effectiveModulo}
+                            </span>
+                            <span className="bg-white/80 px-1.5 py-0.5 rounded border border-gray-200 text-gray-700">
+                              👥 <b>Grupo:</b> {effectiveGrupo}
+                            </span>
+                            {effectiveLider && (
+                              <span className="bg-[#fff8e1] px-1.5 py-0.5 rounded border border-[#ffe082] text-[#e65100] font-semibold">
+                                👑 <b>Líder:</b> {effectiveLider}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+
+                      <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
                         {isChecked ? (
-                          <span className="text-[10px] bg-[#2e7d32] text-white px-2.5 py-0.5 rounded-full font-bold shadow-2xs">
-                            Asignado
+                          <span className="text-[10px] bg-[#2e7d32] text-white px-2.5 py-1 rounded-full font-bold shadow-xs flex items-center gap-1">
+                            <Check className="w-3 h-3" />
+                            <span>En Cuadrilla</span>
                           </span>
                         ) : (
-                          <span className="text-[10px] bg-gray-100 text-gray-600 px-2.5 py-0.5 rounded-full font-medium border border-gray-200 flex items-center gap-1">
+                          <span className="text-[10px] bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full font-medium border border-gray-200 flex items-center gap-1">
                             <Users className="w-2.5 h-2.5 text-gray-400" />
-                            <span>Rotativo</span>
+                            <span>Disponible</span>
                           </span>
                         )}
                       </div>
@@ -1312,17 +1630,20 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       </span>
                     </div>
 
-                    {/* Fila de Contexto Vinculado */}
+                    {/* Fila de Contexto Vinculado con los 5 campos */}
                     <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-600">
-                      <span className="bg-[#fff8e1] text-[#e65100] px-2 py-0.5 rounded-md font-semibold text-[10px] border border-[#ffe082]">
-                        👑 Líder: {cuadrillaLider || 'Antony Cerron'}
+                      <span className="bg-white px-2 py-0.5 rounded-md text-gray-700 border border-gray-200 text-[10px]">
+                        👤 <b>Sup:</b> {t.supervisor || cuadrillaSupervisor || 'Carlos Solar'}
+                      </span>
+                      <span className="bg-[#f5f5f5] text-gray-700 px-2 py-0.5 rounded-md font-medium text-[10px]">
+                        📍 <b>Fundo:</b> {t.fundo || cuadrillaFundo} · <b>Módulo:</b> {t.modulo || cuadrillaModulo}
                       </span>
                       <span className="bg-[#e8f5e9] text-[#1b5e20] px-2 py-0.5 rounded-md font-semibold text-[10px] border border-[#a5d6a7] flex items-center gap-1">
                         <Users className="w-3 h-3 text-[#2e7d32]" />
-                        <span>Grupo: {cuadrillaGrupo}</span>
+                        <span><b>Grupo:</b> {workerAssignedGrupos[t.dni] || t.grupo || cuadrillaGrupo}</span>
                       </span>
-                      <span className="bg-[#f5f5f5] text-gray-700 px-2 py-0.5 rounded-md font-medium text-[10px]">
-                        📍 {cuadrillaFundo} · {cuadrillaModulo}
+                      <span className="bg-[#fff8e1] text-[#e65100] px-2 py-0.5 rounded-md font-semibold text-[10px] border border-[#ffe082]">
+                        👑 <b>Líder:</b> {t.lider || cuadrillaLider || 'Antony Cerron'}
                       </span>
                     </div>
                   </div>
@@ -1519,29 +1840,45 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               {Object.keys(avanceValues).map((dni) => {
                 const t = trabajadores.find((x) => x.dni === dni);
                 const count = avanceValues[dni];
+                const effectiveSupervisor = t?.supervisor || cuadrillaSupervisor || 'Carlos Solar';
+                const effectiveFundo = t?.fundo || cuadrillaFundo || 'Santa Teresa';
+                const effectiveModulo = t?.modulo || cuadrillaModulo || 'M01';
+                const effectiveGrupo = workerAssignedGrupos[dni] || t?.grupo || cuadrillaGrupo;
+                const effectiveLider = t?.lider || cuadrillaLider || 'Antony Cerron';
+
                 return (
                   <div
                     key={dni}
                     className="p-3.5 flex flex-col sm:flex-row justify-between sm:items-center gap-2 hover:bg-[#fafafa] transition-colors"
                   >
                     <div>
-                      <div className="font-bold text-xs sm:text-sm text-[#212121]">
-                        {t ? t.nombres : dni}
-                      </div>
-                      <div className="text-[11px] text-[#757575] flex flex-wrap items-center gap-2 mt-0.5">
-                        <span className="font-semibold text-[#1b5e20]">DNI: {dni}</span>
-                        <span>·</span>
-                        <span className="font-semibold text-[#1b5e20] bg-[#e8f5e9] px-1.5 py-0.5 rounded">
-                          Grupo: {cuadrillaGrupo}
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs sm:text-sm text-[#212121]">
+                          {t ? t.nombres : dni}
                         </span>
-                        <span>·</span>
-                        <span>Líder: {cuadrillaLider || 'Antony Cerron'}</span>
+                        <span className="font-mono text-[11px] font-bold text-[#1b5e20] bg-[#e8f5e9] px-1.5 py-0.2 rounded border border-[#c8e6c9]">
+                          DNI: {dni}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-[#757575] flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700">
+                          👤 <b>Sup:</b> {effectiveSupervisor}
+                        </span>
+                        <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700">
+                          📍 <b>Fundo:</b> {effectiveFundo} · <b>Módulo:</b> {effectiveModulo}
+                        </span>
+                        <span className="font-semibold text-[#1b5e20] bg-[#e8f5e9] px-1.5 py-0.5 rounded border border-[#a5d6a7]">
+                          👥 <b>Grupo:</b> {effectiveGrupo}
+                        </span>
+                        <span className="bg-[#fff8e1] px-1.5 py-0.5 rounded text-[#e65100] font-semibold border border-[#ffe082]">
+                          👑 <b>Líder:</b> {effectiveLider}
+                        </span>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 self-end sm:self-auto">
+                    <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
                       <span className="text-xs font-bold text-gray-500">Avance:</span>
-                      <span className="px-3 py-1 bg-[#fff8e1] border border-[#ffe082] text-[#e65100] font-extrabold text-sm rounded-lg">
+                      <span className="px-3 py-1 bg-[#fff8e1] border border-[#ffe082] text-[#e65100] font-extrabold text-sm rounded-lg shadow-2xs">
                         {count} jabas
                       </span>
                     </div>
@@ -1569,6 +1906,209 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               <Save className="w-4 h-4" />
               <span>💾 Guardar Avance en el Sistema</span>
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Registrar Nuevo Personal (con los 5 campos requeridos) */}
+      {showNewWorkerModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-[#e0e0e0]">
+            <div className="bg-[#1b5e20] text-white px-5 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center">
+                  <UserCheck className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base">Registrar Nuevo Trabajador</h3>
+                  <p className="text-[11px] text-green-100">
+                    Se asociará con Supervisor, Fundo, Módulo, Grupo y Líder
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNewWorkerModal(false)}
+                className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleRegisterNewWorker} className="p-5 space-y-3.5 max-h-[80vh] overflow-y-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* DNI */}
+                <div>
+                  <label className="block text-xs font-bold text-[#40493d] mb-1">
+                    DNI / Fotocheck (8 dígitos) *
+                  </label>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      maxLength={12}
+                      placeholder="Ej: 71234567"
+                      value={newWorkerDni}
+                      onChange={(e) => setNewWorkerDni(e.target.value.replace(/\D/g, ''))}
+                      required
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-[#bfcaba] bg-white font-mono text-gray-900 focus:outline-none focus:border-[#2e7d32]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScannerMode('worker');
+                        setScannerOpen(true);
+                      }}
+                      className="bg-gray-100 border border-[#bfcaba] px-2.5 rounded-lg text-[#ff8f00] hover:bg-gray-200 flex items-center justify-center cursor-pointer"
+                      title="Escanear DNI"
+                    >
+                      <Camera className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Nombres */}
+                <div>
+                  <label className="block text-xs font-bold text-[#40493d] mb-1">
+                    Nombres y Apellidos *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej: Juan Soto Quispe"
+                    value={newWorkerNombres}
+                    onChange={(e) => setNewWorkerNombres(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-[#bfcaba] bg-white uppercase text-gray-900 focus:outline-none focus:border-[#2e7d32]"
+                  />
+                </div>
+              </div>
+
+              {/* Contexto: 5 Campos */}
+              <div className="bg-[#fcf9f8] p-3.5 rounded-xl border border-[#e0e0e0] space-y-2.5">
+                <div className="text-[11px] font-bold text-[#1b5e20] uppercase tracking-wide flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-[#ff8f00]" />
+                  <span>Asignación de Cuadrilla del Trabajador</span>
+                </div>
+
+                {/* 1. Supervisor */}
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-700 mb-0.5">
+                    1. Supervisor Responsable
+                  </label>
+                  <select
+                    value={newWorkerSupervisor}
+                    onChange={(e) => setNewWorkerSupervisor(e.target.value)}
+                    className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white font-medium text-gray-900 focus:outline-none focus:border-[#2e7d32]"
+                  >
+                    <option value="">Seleccionar supervisor...</option>
+                    {supervisoresList.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 2 & 3. Fundo y Modulo */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-0.5">
+                      2. Fundo Agrícola
+                    </label>
+                    <select
+                      value={newWorkerFundo}
+                      onChange={(e) => {
+                        setNewWorkerFundo(e.target.value);
+                        if (e.target.value === 'Santa Teresa') setNewWorkerModulo('M01');
+                        else if (e.target.value === 'Arena Azul') setNewWorkerModulo('M01');
+                        else if (e.target.value === 'Vivadis') setNewWorkerModulo('M01');
+                        else if (e.target.value === 'Ayllu Allpa') setNewWorkerModulo('M12');
+                        else if (e.target.value === 'Ampliacion') setNewWorkerModulo('M16');
+                      }}
+                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white font-medium text-gray-900 focus:outline-none focus:border-[#2e7d32]"
+                    >
+                      {fundosList.map((f) => (
+                        <option key={f} value={f}>
+                          {f}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-0.5">
+                      3. Módulo de Campo
+                    </label>
+                    <select
+                      value={newWorkerModulo}
+                      onChange={(e) => setNewWorkerModulo(e.target.value)}
+                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white font-medium text-gray-900 focus:outline-none focus:border-[#2e7d32]"
+                    >
+                      {modulosList.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* 4 & 5. Grupo y Lider */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-0.5">
+                      4. Grupo de Trabajo
+                    </label>
+                    <select
+                      value={newWorkerGrupo}
+                      onChange={(e) => setNewWorkerGrupo(e.target.value)}
+                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white font-medium text-gray-900 focus:outline-none focus:border-[#2e7d32]"
+                    >
+                      {allGrupos.map((g) => (
+                        <option key={g} value={g}>
+                          {g}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-0.5">
+                      5. Líder Responsable
+                    </label>
+                    <select
+                      value={newWorkerLider}
+                      onChange={(e) => setNewWorkerLider(e.target.value)}
+                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white font-medium text-gray-900 focus:outline-none focus:border-[#2e7d32]"
+                    >
+                      <option value="">Sin líder asignado</option>
+                      {availableLideres.map((l) => (
+                        <option key={`${l.nombre}_${l.dni}`} value={l.nombre}>
+                          👑 {l.nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Botones de acción del Modal */}
+              <div className="flex justify-end gap-2.5 pt-2 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setShowNewWorkerModal(false)}
+                  className="px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-5 py-2 rounded-xl text-xs font-bold shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Guardar y Asignar a Cuadrilla</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
