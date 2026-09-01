@@ -252,70 +252,25 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return n.replace(/^modulo/, 'm').replace(/^m0*(\d+)/, 'm$1');
   };
 
-  // Filtered workers list strictly adhering to Supervisor, Fundo, and Modulo filters
+  // Filtered workers list - general pool available for assignment, searchable by name or DNI
   const filteredTrabajadores = useMemo(() => {
     const seenDni = new Set<string>();
     return trabajadores.filter((t) => {
       if (!t.dni || seenDni.has(t.dni)) return false;
       seenDni.add(t.dni);
 
-      // 1. Strict Match Supervisor (if selected)
-      if (cuadrillaSupervisor && cuadrillaSupervisor.trim() !== '') {
-        const supNorm = normalizeStr(cuadrillaSupervisor);
-        const workerSupNorm = normalizeStr(t.supervisor);
-        if (!workerSupNorm) return false;
-
-        const matchesSup =
-          workerSupNorm === supNorm ||
-          workerSupNorm.includes(supNorm) ||
-          supNorm.includes(workerSupNorm) ||
-          (supNorm.split(/\s+/).slice(0, 2).join(' ').length >= 3 &&
-            workerSupNorm.includes(supNorm.split(/\s+/).slice(0, 2).join(' '))) ||
-          (workerSupNorm.split(/\s+/).slice(0, 2).join(' ').length >= 3 &&
-            supNorm.includes(workerSupNorm.split(/\s+/).slice(0, 2).join(' ')));
-
-        if (!matchesSup) return false;
-      }
-
-      // 2. Strict Match Fundo (if selected)
-      if (cuadrillaFundo && cuadrillaFundo.trim() !== '') {
-        const fundoNorm = normalizeStr(cuadrillaFundo);
-        const workerFundoNorm = normalizeStr(t.fundo);
-        if (!workerFundoNorm) return false;
-        if (
-          workerFundoNorm !== fundoNorm &&
-          !workerFundoNorm.includes(fundoNorm) &&
-          !fundoNorm.includes(workerFundoNorm)
-        ) {
-          return false;
-        }
-      }
-
-      // 3. Strict Match Modulo (if selected)
-      if (cuadrillaModulo && cuadrillaModulo.trim() !== '') {
-        const modNorm = normalizeModulo(cuadrillaModulo);
-        const workerModNorm = normalizeModulo(t.modulo);
-        if (!workerModNorm) return false;
-        if (workerModNorm !== modNorm) {
-          return false;
-        }
-      }
-
-      // 4. Search Filter (by Name, DNI, Fundo, or Modulo)
+      // Search Filter (by Name or DNI)
       if (searchTerm && searchTerm.trim() !== '') {
         const term = normalizeStr(searchTerm);
         const matchesSearch =
           normalizeStr(t.nombres).includes(term) ||
-          t.dni.includes(term) ||
-          (t.fundo && normalizeStr(t.fundo).includes(term)) ||
-          (t.modulo && normalizeStr(t.modulo).includes(term)) ||
-          (t.supervisor && normalizeStr(t.supervisor).includes(term));
+          t.dni.includes(term);
         if (!matchesSearch) return false;
       }
 
       return true;
     });
-  }, [trabajadores, cuadrillaSupervisor, cuadrillaFundo, cuadrillaModulo, searchTerm]);
+  }, [trabajadores, searchTerm]);
 
   // Handle changing group for an individual worker
   const handleWorkerGroupChange = (dni: string, newGroup: string) => {
@@ -670,12 +625,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
           fecha: hoy,
           dni,
           trabajador: t ? t.nombres : dni,
-          fundo: cuadrillaFundo || (t ? t.fundo : 'Santa Teresa'),
-          modulo: cuadrillaModulo || (t ? t.modulo : 'M01'),
+          fundo: cuadrillaFundo || 'Santa Teresa',
+          modulo: cuadrillaModulo || 'M01',
           jabas,
           supervisor: cuadrillaSupervisor || session.nombre,
           grupo: assignedGrupo,
-          lider: cuadrillaLider || 'Antony Cerron',
+          lider: cuadrillaLider || '',
           timestamp: nowIso
         });
       }
@@ -1406,11 +1361,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               ) : (
                 filteredTrabajadores.map((t) => {
                   const isChecked = selectedDnis.has(t.dni);
-                  const effectiveSupervisor = t.supervisor || cuadrillaSupervisor || 'Carlos Solar';
-                  const effectiveFundo = t.fundo || cuadrillaFundo || 'Santa Teresa';
-                  const effectiveModulo = t.modulo || cuadrillaModulo || 'M01';
-                  const effectiveGrupo = workerAssignedGrupos[t.dni] || t.grupo || cuadrillaGrupo || 'Grupo 01';
-                  const effectiveLider = t.lider || cuadrillaLider || '';
+                  const assignedGrupo = workerAssignedGrupos[t.dni] || cuadrillaGrupo;
 
                   return (
                     <div
@@ -1418,7 +1369,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       onClick={() => toggleWorker(t.dni)}
                       className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border transition-all cursor-pointer select-none gap-2 ${
                         isChecked
-                          ? 'bg-[#e8f5e9] border-[#2e7d32] shadow-sm'
+                          ? 'bg-[#e8f5e9] border-[#2e7d32] shadow-sm ring-1 ring-[#2e7d32]'
                           : 'bg-white border-[#e0e0e0] hover:border-[#a5d6a7]'
                       }`}
                     >
@@ -1439,26 +1390,34 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                             </span>
                           </div>
 
-                          {/* 5 Campos requeridos: Supervisor, Fundo, Modulo, Grupo, Lider */}
-                          <div className="text-[11px] text-[#555] flex flex-wrap items-center gap-1.5 mt-1">
-                            <span className="bg-white/80 px-1.5 py-0.5 rounded border border-gray-200 text-gray-700">
-                              👤 <b>Sup:</b> {effectiveSupervisor}
-                            </span>
-                            <span className="bg-white/80 px-1.5 py-0.5 rounded border border-gray-200 text-gray-700">
-                              📍 <b>Fundo:</b> {effectiveFundo}
-                            </span>
-                            <span className="bg-[#e8f5e9] px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
-                              🌱 <b>Módulo:</b> {effectiveModulo}
-                            </span>
-                            <span className="bg-white/80 px-1.5 py-0.5 rounded border border-gray-200 text-gray-700">
-                              👥 <b>Grupo:</b> {effectiveGrupo}
-                            </span>
-                            {effectiveLider && (
-                              <span className="bg-[#fff8e1] px-1.5 py-0.5 rounded border border-[#ffe082] text-[#e65100] font-semibold">
-                                👑 <b>Líder:</b> {effectiveLider}
+                          {/* Estado de Vinculación: Solo cuando el usuario selecciona el trabajador se amarra a la cuadrilla */}
+                          {isChecked ? (
+                            <div className="text-[11px] text-[#555] flex flex-wrap items-center gap-1.5 mt-1.5 animate-in fade-in">
+                              <span className="bg-white px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
+                                👤 <b>Sup:</b> {cuadrillaSupervisor || 'Por seleccionar'}
                               </span>
-                            )}
-                          </div>
+                              <span className="bg-white px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
+                                📍 <b>Fundo:</b> {cuadrillaFundo || 'Por seleccionar'}
+                              </span>
+                              <span className="bg-[#e8f5e9] px-1.5 py-0.5 rounded border border-[#81c784] font-bold text-[#1b5e20]">
+                                🌱 <b>Módulo:</b> {cuadrillaModulo || 'Por seleccionar'}
+                              </span>
+                              <span className="bg-white px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
+                                👥 <b>Grupo:</b> {assignedGrupo || 'Por seleccionar'}
+                              </span>
+                              {cuadrillaLider && (
+                                <span className="bg-[#fff8e1] px-1.5 py-0.5 rounded border border-[#ffe082] text-[#e65100] font-bold">
+                                  👑 <b>Líder:</b> {cuadrillaLider}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-[#757575] flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[10px] text-gray-500 font-medium">
+                                Personal de nómina general disponible para asignación
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -1630,21 +1589,23 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       </span>
                     </div>
 
-                    {/* Fila de Contexto Vinculado con los 5 campos */}
+                    {/* Fila de Contexto Vinculado con los 5 campos de la cuadrilla seleccionada */}
                     <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-600">
                       <span className="bg-white px-2 py-0.5 rounded-md text-gray-700 border border-gray-200 text-[10px]">
-                        👤 <b>Sup:</b> {t.supervisor || cuadrillaSupervisor || 'Carlos Solar'}
+                        👤 <b>Sup:</b> {cuadrillaSupervisor || t.supervisor || session.nombre}
                       </span>
                       <span className="bg-[#f5f5f5] text-gray-700 px-2 py-0.5 rounded-md font-medium text-[10px]">
-                        📍 <b>Fundo:</b> {t.fundo || cuadrillaFundo} · <b>Módulo:</b> {t.modulo || cuadrillaModulo}
+                        📍 <b>Fundo:</b> {cuadrillaFundo || t.fundo || 'Santa Teresa'} · <b>Módulo:</b> {cuadrillaModulo || t.modulo || 'M01'}
                       </span>
                       <span className="bg-[#e8f5e9] text-[#1b5e20] px-2 py-0.5 rounded-md font-semibold text-[10px] border border-[#a5d6a7] flex items-center gap-1">
                         <Users className="w-3 h-3 text-[#2e7d32]" />
-                        <span><b>Grupo:</b> {workerAssignedGrupos[t.dni] || t.grupo || cuadrillaGrupo}</span>
+                        <span><b>Grupo:</b> {workerAssignedGrupos[t.dni] || cuadrillaGrupo || t.grupo || 'Grupo 01'}</span>
                       </span>
-                      <span className="bg-[#fff8e1] text-[#e65100] px-2 py-0.5 rounded-md font-semibold text-[10px] border border-[#ffe082]">
-                        👑 <b>Líder:</b> {t.lider || cuadrillaLider || 'Antony Cerron'}
-                      </span>
+                      {cuadrillaLider && (
+                        <span className="bg-[#fff8e1] text-[#e65100] px-2 py-0.5 rounded-md font-semibold text-[10px] border border-[#ffe082]">
+                          👑 <b>Líder:</b> {cuadrillaLider}
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -1840,11 +1801,11 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               {Object.keys(avanceValues).map((dni) => {
                 const t = trabajadores.find((x) => x.dni === dni);
                 const count = avanceValues[dni];
-                const effectiveSupervisor = t?.supervisor || cuadrillaSupervisor || 'Carlos Solar';
-                const effectiveFundo = t?.fundo || cuadrillaFundo || 'Santa Teresa';
-                const effectiveModulo = t?.modulo || cuadrillaModulo || 'M01';
-                const effectiveGrupo = workerAssignedGrupos[dni] || t?.grupo || cuadrillaGrupo;
-                const effectiveLider = t?.lider || cuadrillaLider || 'Antony Cerron';
+                const effectiveSupervisor = cuadrillaSupervisor || t?.supervisor || session.nombre;
+                const effectiveFundo = cuadrillaFundo || t?.fundo || 'Santa Teresa';
+                const effectiveModulo = cuadrillaModulo || t?.modulo || 'M01';
+                const effectiveGrupo = workerAssignedGrupos[dni] || cuadrillaGrupo || t?.grupo || 'Grupo 01';
+                const effectiveLider = cuadrillaLider || t?.lider || '';
 
                 return (
                   <div
@@ -1870,9 +1831,11 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                         <span className="font-semibold text-[#1b5e20] bg-[#e8f5e9] px-1.5 py-0.5 rounded border border-[#a5d6a7]">
                           👥 <b>Grupo:</b> {effectiveGrupo}
                         </span>
-                        <span className="bg-[#fff8e1] px-1.5 py-0.5 rounded text-[#e65100] font-semibold border border-[#ffe082]">
-                          👑 <b>Líder:</b> {effectiveLider}
-                        </span>
+                        {effectiveLider && (
+                          <span className="bg-[#fff8e1] px-1.5 py-0.5 rounded text-[#e65100] font-semibold border border-[#ffe082]">
+                            👑 <b>Líder:</b> {effectiveLider}
+                          </span>
+                        )}
                       </div>
                     </div>
 
