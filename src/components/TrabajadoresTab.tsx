@@ -80,9 +80,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const [cuadrillaLider, setCuadrillaLider] = useState('');
   const [cuadrillaLiderDni, setCuadrillaLiderDni] = useState('');
 
-  // Search filter
+  // Search filter and high-performance list pagination
   const [searchTerm, setSearchTerm] = useState('');
   const [step2SearchTerm, setStep2SearchTerm] = useState('');
+  const [visibleLimit, setVisibleLimit] = useState(60);
 
   // Selected Workers (Set of DNI strings)
   const [selectedDnis, setSelectedDnis] = useState<Set<string>>(new Set());
@@ -252,25 +253,33 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return n.replace(/^modulo/, 'm').replace(/^m0*(\d+)/, 'm$1');
   };
 
+  // Pre-indexed workers for sub-millisecond search
+  const indexedTrabajadores = useMemo(() => {
+    const seenDni = new Set<string>();
+    const list: (Trabajador & { _normName: string; _cleanDni: string })[] = [];
+    for (let i = 0; i < trabajadores.length; i++) {
+      const t = trabajadores[i];
+      const cleanDni = String(t.dni || '').trim();
+      if (cleanDni && !seenDni.has(cleanDni)) {
+        seenDni.add(cleanDni);
+        list.push({
+          ...t,
+          _normName: normalizeStr(t.nombres),
+          _cleanDni: cleanDni
+        });
+      }
+    }
+    return list;
+  }, [trabajadores]);
+
   // Filtered workers list - general pool available for assignment, searchable by name or DNI
   const filteredTrabajadores = useMemo(() => {
-    const seenDni = new Set<string>();
-    return trabajadores.filter((t) => {
-      if (!t.dni || seenDni.has(t.dni)) return false;
-      seenDni.add(t.dni);
-
-      // Search Filter (by Name or DNI)
-      if (searchTerm && searchTerm.trim() !== '') {
-        const term = normalizeStr(searchTerm);
-        const matchesSearch =
-          normalizeStr(t.nombres).includes(term) ||
-          t.dni.includes(term);
-        if (!matchesSearch) return false;
-      }
-
-      return true;
-    });
-  }, [trabajadores, searchTerm]);
+    const term = normalizeStr(searchTerm);
+    if (!term) return indexedTrabajadores;
+    return indexedTrabajadores.filter(
+      (t) => t._cleanDni.includes(term) || t._normName.includes(term)
+    );
+  }, [indexedTrabajadores, searchTerm]);
 
   // Handle changing group for an individual worker
   const handleWorkerGroupChange = (dni: string, newGroup: string) => {
@@ -1343,7 +1352,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               </div>
             </div>
 
-            {/* Listado de Tarjetas de Trabajadores */}
+            {/* Listado de Tarjetas de Trabajadores con renderizado de alto rendimiento */}
             <div className="max-h-96 overflow-y-auto space-y-2 rounded-xl border border-[#e0e0e0] p-2 bg-[#fafafa]">
               {filteredTrabajadores.length === 0 ? (
                 <div className="py-8 text-center text-gray-400 text-xs">
@@ -1359,84 +1368,111 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   </div>
                 </div>
               ) : (
-                filteredTrabajadores.map((t) => {
-                  const isChecked = selectedDnis.has(t.dni);
-                  const assignedGrupo = workerAssignedGrupos[t.dni] || cuadrillaGrupo;
+                <>
+                  {filteredTrabajadores.slice(0, visibleLimit).map((t) => {
+                    const isChecked = selectedDnis.has(t.dni);
+                    const assignedGrupo = workerAssignedGrupos[t.dni] || cuadrillaGrupo;
 
-                  return (
-                    <div
-                      key={t.dni}
-                      onClick={() => toggleWorker(t.dni)}
-                      className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border transition-all cursor-pointer select-none gap-2 ${
-                        isChecked
-                          ? 'bg-[#e8f5e9] border-[#2e7d32] shadow-sm ring-1 ring-[#2e7d32]'
-                          : 'bg-white border-[#e0e0e0] hover:border-[#a5d6a7]'
-                      }`}
-                    >
-                      <div className="flex items-start sm:items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => {}}
-                          className="w-4 h-4 mt-0.5 sm:mt-0 rounded text-[#2e7d32] accent-[#2e7d32] pointer-events-none shrink-0"
-                        />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-xs sm:text-sm text-[#212121]">
-                              {t.nombres}
-                            </span>
-                            <span className="font-mono text-[11px] font-bold text-[#1b5e20] bg-white px-1.5 py-0.2 rounded border border-[#c8e6c9]">
-                              DNI: {t.dni}
-                            </span>
-                          </div>
+                    return (
+                      <div
+                        key={t.dni}
+                        onClick={() => toggleWorker(t.dni)}
+                        className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border transition-all cursor-pointer select-none gap-2 ${
+                          isChecked
+                            ? 'bg-[#e8f5e9] border-[#2e7d32] shadow-sm ring-1 ring-[#2e7d32]'
+                            : 'bg-white border-[#e0e0e0] hover:border-[#a5d6a7]'
+                        }`}
+                      >
+                        <div className="flex items-start sm:items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {}}
+                            className="w-4 h-4 mt-0.5 sm:mt-0 rounded text-[#2e7d32] accent-[#2e7d32] pointer-events-none shrink-0"
+                          />
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-xs sm:text-sm text-[#212121]">
+                                {t.nombres}
+                              </span>
+                              <span className="font-mono text-[11px] font-bold text-[#1b5e20] bg-white px-1.5 py-0.2 rounded border border-[#c8e6c9]">
+                                DNI: {t.dni}
+                              </span>
+                            </div>
 
-                          {/* Estado de Vinculación: Solo cuando el usuario selecciona el trabajador se amarra a la cuadrilla */}
-                          {isChecked ? (
-                            <div className="text-[11px] text-[#555] flex flex-wrap items-center gap-1.5 mt-1.5 animate-in fade-in">
-                              <span className="bg-white px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
-                                👤 <b>Sup:</b> {cuadrillaSupervisor || 'Por seleccionar'}
-                              </span>
-                              <span className="bg-white px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
-                                📍 <b>Fundo:</b> {cuadrillaFundo || 'Por seleccionar'}
-                              </span>
-                              <span className="bg-[#e8f5e9] px-1.5 py-0.5 rounded border border-[#81c784] font-bold text-[#1b5e20]">
-                                🌱 <b>Módulo:</b> {cuadrillaModulo || 'Por seleccionar'}
-                              </span>
-                              <span className="bg-white px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
-                                👥 <b>Grupo:</b> {assignedGrupo || 'Por seleccionar'}
-                              </span>
-                              {cuadrillaLider && (
-                                <span className="bg-[#fff8e1] px-1.5 py-0.5 rounded border border-[#ffe082] text-[#e65100] font-bold">
-                                  👑 <b>Líder:</b> {cuadrillaLider}
+                            {/* Estado de Vinculación: Solo cuando el usuario selecciona el trabajador se amarra a la cuadrilla */}
+                            {isChecked ? (
+                              <div className="text-[11px] text-[#555] flex flex-wrap items-center gap-1.5 mt-1.5 animate-in fade-in">
+                                <span className="bg-white px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
+                                  👤 <b>Sup:</b> {cuadrillaSupervisor || 'Por seleccionar'}
                                 </span>
-                              )}
-                            </div>
+                                <span className="bg-white px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
+                                  📍 <b>Fundo:</b> {cuadrillaFundo || 'Por seleccionar'}
+                                </span>
+                                <span className="bg-[#e8f5e9] px-1.5 py-0.5 rounded border border-[#81c784] font-bold text-[#1b5e20]">
+                                  🌱 <b>Módulo:</b> {cuadrillaModulo || 'Por seleccionar'}
+                                </span>
+                                <span className="bg-white px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
+                                  👥 <b>Grupo:</b> {assignedGrupo || 'Por seleccionar'}
+                                </span>
+                                {cuadrillaLider && (
+                                  <span className="bg-[#fff8e1] px-1.5 py-0.5 rounded border border-[#ffe082] text-[#e65100] font-bold">
+                                    👑 <b>Líder:</b> {cuadrillaLider}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="text-[11px] text-[#757575] flex items-center gap-1.5 mt-0.5">
+                                <span className="text-[10px] text-gray-500 font-medium">
+                                  Personal de nómina general disponible para asignación
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                          {isChecked ? (
+                            <span className="text-[10px] bg-[#2e7d32] text-white px-2.5 py-1 rounded-full font-bold shadow-xs flex items-center gap-1">
+                              <Check className="w-3 h-3" />
+                              <span>En Cuadrilla</span>
+                            </span>
                           ) : (
-                            <div className="text-[11px] text-[#757575] flex items-center gap-1.5 mt-0.5">
-                              <span className="text-[10px] text-gray-500 font-medium">
-                                Personal de nómina general disponible para asignación
-                              </span>
-                            </div>
+                            <span className="text-[10px] bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full font-medium border border-gray-200 flex items-center gap-1">
+                              <Users className="w-2.5 h-2.5 text-gray-400" />
+                              <span>Disponible</span>
+                            </span>
                           )}
                         </div>
                       </div>
+                    );
+                  })}
 
-                      <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-                        {isChecked ? (
-                          <span className="text-[10px] bg-[#2e7d32] text-white px-2.5 py-1 rounded-full font-bold shadow-xs flex items-center gap-1">
-                            <Check className="w-3 h-3" />
-                            <span>En Cuadrilla</span>
-                          </span>
-                        ) : (
-                          <span className="text-[10px] bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full font-medium border border-gray-200 flex items-center gap-1">
-                            <Users className="w-2.5 h-2.5 text-gray-400" />
-                            <span>Disponible</span>
-                          </span>
-                        )}
+                  {/* Controles de Carga Rápida / Paginación Fluida */}
+                  {filteredTrabajadores.length > visibleLimit && (
+                    <div className="pt-2 pb-1 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-gray-200 bg-white/80 p-2 rounded-lg text-xs">
+                      <span className="text-gray-500 font-medium">
+                        Mostrando <b>{visibleLimit}</b> de <b>{filteredTrabajadores.length}</b> trabajadores
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setVisibleLimit((prev) => prev + 60)}
+                          className="px-3 py-1 bg-white border border-[#2e7d32] text-[#2e7d32] font-bold rounded-lg hover:bg-[#e8f5e9] transition-colors cursor-pointer text-xs"
+                        >
+                          + Cargar 60 más
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setVisibleLimit(filteredTrabajadores.length)}
+                          className="px-3 py-1 bg-[#2e7d32] text-white font-bold rounded-lg hover:bg-[#1b5e20] transition-colors cursor-pointer text-xs"
+                        >
+                          Ver todos ({filteredTrabajadores.length})
+                        </button>
                       </div>
                     </div>
-                  );
-                })
+                  )}
+                </>
               )}
             </div>
 

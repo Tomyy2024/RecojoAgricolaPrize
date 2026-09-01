@@ -262,6 +262,47 @@ async function startServer() {
     }
   });
 
+  // Fast bulk worker sync endpoint
+  app.post('/api/trabajadores', (req, res) => {
+    try {
+      const { trabajadores, append } = req.body || {};
+      if (Array.isArray(trabajadores)) {
+        if (append) {
+          const map = new Map<string, any>();
+          (db.trabajadores || []).forEach((t: any) => {
+            const dni = String(t.dni || '').trim();
+            if (dni) map.set(dni, t);
+          });
+          trabajadores.forEach((t: any) => {
+            const dni = String(t.dni || '').trim();
+            if (dni) map.set(dni, t);
+          });
+          db.trabajadores = Array.from(map.values());
+        } else {
+          const seen = new Set<string>();
+          const unique: any[] = [];
+          trabajadores.forEach((t: any) => {
+            const dni = String(t.dni || '').trim();
+            if (dni && !seen.has(dni)) {
+              seen.add(dni);
+              unique.push(t);
+            }
+          });
+          db.trabajadores = unique;
+        }
+
+        db.version = (db.version || 1) + 1;
+        db.lastUpdated = new Date().toISOString();
+        saveDatabase(db);
+        notifyClients({ type: 'sync', version: db.version, data: db });
+        return res.json({ status: 'ok', count: db.trabajadores.length, data: db.trabajadores });
+      }
+      res.status(400).json({ status: 'error', message: 'Formato de trabajadores no válido' });
+    } catch (err: any) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
   // Sync data from any client
   app.post('/api/sync', (req, res) => {
     try {

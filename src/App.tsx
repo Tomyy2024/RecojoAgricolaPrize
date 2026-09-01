@@ -806,7 +806,15 @@ export default function App() {
     });
     setTrabajadoresState(uniqueWorkers);
     saveTrabajadores(uniqueWorkers);
-    addLog(`📥 Importados ${newWorkers.length} trabajadores a la nómina`, 'ok');
+    addLog(`📥 Sincronizados ${newWorkers.length} trabajadores en nómina (${uniqueWorkers.length} total)`, 'ok');
+
+    // Fast-path direct push to dedicated trabajadores endpoint
+    fetch('/api/trabajadores', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trabajadores: uniqueWorkers, append: false })
+    }).catch(() => {});
+
     triggerAutoSync('Importar Trabajadores', { trabajadores: uniqueWorkers });
   };
 

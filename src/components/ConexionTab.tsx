@@ -83,9 +83,9 @@ function doPost(e) {
         'ID', 'Fecha', 'Hora_Registro', 'Supervisor', 'Fundo', 'Modulo', 'Grupo', 'Lider', 'DNI', 'Trabajador', 'Jabas'
       ]);
       sheetJabas.clearContents();
-      sheetJabas.appendRow(['ID', 'Fecha', 'Hora_Registro', 'Supervisor', 'Fundo', 'Modulo', 'Grupo', 'Lider', 'DNI', 'Trabajador', 'Jabas']);
+      var rowsJabas = [['ID', 'Fecha', 'Hora_Registro', 'Supervisor', 'Fundo', 'Modulo', 'Grupo', 'Lider', 'DNI', 'Trabajador', 'Jabas']];
       payload.detalleJabas.forEach(function(item) {
-        sheetJabas.appendRow([
+        rowsJabas.push([
           item.id || '',
           item.fecha || '',
           item.timestamp || timestamp.toISOString(),
@@ -99,6 +99,9 @@ function doPost(e) {
           Number(item.jabas) || 0
         ]);
       });
+      if (rowsJabas.length > 0) {
+        sheetJabas.getRange(1, 1, rowsJabas.length, 11).setValues(rowsJabas);
+      }
     }
 
     // 2. Guardar Validaciones Oficiales de Supervisor
@@ -109,13 +112,13 @@ function doPost(e) {
         'Estado', 'Observaciones', 'Creado_Por', 'Items_JSON'
       ]);
       sheetVal.clearContents();
-      sheetVal.appendRow([
+      var rowsVal = [[
         'ID_Validacion', 'Fecha', 'Hora_Validacion', 'Supervisor', 'Fundo', 'Modulo', 'Grupo', 'Lider',
         'Total_Personal', 'Personal_Conforme', 'Personal_Anulado', 'Total_Jabas', 'Jabas_Conformes',
         'Estado', 'Observaciones', 'Creado_Por', 'Items_JSON'
-      ]);
+      ]];
       payload.validaciones.forEach(function(v) {
-        sheetVal.appendRow([
+        rowsVal.push([
           v.id || '',
           v.fecha || '',
           v.fechaRegistro || timestamp.toISOString(),
@@ -135,6 +138,9 @@ function doPost(e) {
           JSON.stringify(v.items || [])
         ]);
       });
+      if (rowsVal.length > 0) {
+        sheetVal.getRange(1, 1, rowsVal.length, 17).setValues(rowsVal);
+      }
     }
 
     // 3. Guardar Programas de Cosecha
@@ -143,9 +149,9 @@ function doPost(e) {
         'ID', 'Fecha', 'Fundo', 'Modulo', 'Jabas_Estimadas', 'Supervisor', 'Estado'
       ]);
       sheetProg.clearContents();
-      sheetProg.appendRow(['ID', 'Fecha', 'Fundo', 'Modulo', 'Jabas_Estimadas', 'Supervisor', 'Estado']);
+      var rowsProg = [['ID', 'Fecha', 'Fundo', 'Modulo', 'Jabas_Estimadas', 'Supervisor', 'Estado']];
       payload.programas.forEach(function(p) {
-        sheetProg.appendRow([
+        rowsProg.push([
           p.id || '',
           p.fecha || '',
           p.fundo || '',
@@ -155,6 +161,9 @@ function doPost(e) {
           p.estado || 'Abierto'
         ]);
       });
+      if (rowsProg.length > 0) {
+        sheetProg.getRange(1, 1, rowsProg.length, 7).setValues(rowsProg);
+      }
     }
 
     // 4. Guardar Programa General
@@ -163,9 +172,9 @@ function doPost(e) {
         'ID', 'Fecha', 'Fundo', 'Modulo', 'Variedad', 'Jabas_Estimadas', 'Supervisor', 'Estado'
       ]);
       sheetGen.clearContents();
-      sheetGen.appendRow(['ID', 'Fecha', 'Fundo', 'Modulo', 'Variedad', 'Jabas_Estimadas', 'Supervisor', 'Estado']);
+      var rowsGen = [['ID', 'Fecha', 'Fundo', 'Modulo', 'Variedad', 'Jabas_Estimadas', 'Supervisor', 'Estado']];
       payload.programaGeneral.forEach(function(pg) {
-        sheetGen.appendRow([
+        rowsGen.push([
           pg.id || '',
           pg.fecha || '',
           pg.fundo || '',
@@ -176,17 +185,20 @@ function doPost(e) {
           pg.estado || 'Pendiente'
         ]);
       });
+      if (rowsGen.length > 0) {
+        sheetGen.getRange(1, 1, rowsGen.length, 8).setValues(rowsGen);
+      }
     }
 
-    // 5. Guardar Trabajadores
+    // 5. Guardar Trabajadores (Bulk Rápido con setValues)
     if (payload.trabajadores && payload.trabajadores.length > 0) {
       var sheetTrab = getOrCreateSheet(ss, 'Trabajadores', [
         'DNI', 'Nombres', 'Fundo', 'Modulo', 'Grupo', 'Supervisor', 'Lider', 'Tipo'
       ]);
       sheetTrab.clearContents();
-      sheetTrab.appendRow(['DNI', 'Nombres', 'Fundo', 'Modulo', 'Grupo', 'Supervisor', 'Lider', 'Tipo']);
+      var rowsTrab = [['DNI', 'Nombres', 'Fundo', 'Modulo', 'Grupo', 'Supervisor', 'Lider', 'Tipo']];
       payload.trabajadores.forEach(function(t) {
-        sheetTrab.appendRow([
+        rowsTrab.push([
           t.dni || '',
           t.nombres || '',
           t.fundo || '',
@@ -197,6 +209,9 @@ function doPost(e) {
           t.tipo || 'Trabajador'
         ]);
       });
+      if (rowsTrab.length > 0) {
+        sheetTrab.getRange(1, 1, rowsTrab.length, 8).setValues(rowsTrab);
+      }
     }
 
     // 6. Guardar Usuarios y Cuentas de Acceso
@@ -205,9 +220,9 @@ function doPost(e) {
         'Usuario', 'Password', 'Nombre', 'Rol', 'Fecha_Creacion'
       ]);
       sheetUsers.clearContents();
-      sheetUsers.appendRow(['Usuario', 'Password', 'Nombre', 'Rol', 'Fecha_Creacion']);
+      var rowsUsers = [['Usuario', 'Password', 'Nombre', 'Rol', 'Fecha_Creacion']];
       payload.usuarios.forEach(function(u) {
-        sheetUsers.appendRow([
+        rowsUsers.push([
           u.user || '',
           u.pass || '',
           u.nombre || '',
@@ -215,6 +230,9 @@ function doPost(e) {
           u.creado || ''
         ]);
       });
+      if (rowsUsers.length > 0) {
+        sheetUsers.getRange(1, 1, rowsUsers.length, 5).setValues(rowsUsers);
+      }
     }
 
     // 7. Guardar Lideres
@@ -223,9 +241,9 @@ function doPost(e) {
         'Lider', 'DNI', 'Nombres', 'Grupo', 'Fecha_Alta'
       ]);
       sheetLid.clearContents();
-      sheetLid.appendRow(['Lider', 'DNI', 'Nombres', 'Grupo', 'Fecha_Alta']);
+      var rowsLid = [['Lider', 'DNI', 'Nombres', 'Grupo', 'Fecha_Alta']];
       payload.lideres.forEach(function(l) {
-        sheetLid.appendRow([
+        rowsLid.push([
           l.lider || '',
           l.dni || '',
           l.nombres || '',
@@ -233,16 +251,22 @@ function doPost(e) {
           l.fechaAlta || ''
         ]);
       });
+      if (rowsLid.length > 0) {
+        sheetLid.getRange(1, 1, rowsLid.length, 5).setValues(rowsLid);
+      }
     }
 
     // 8. Guardar Grupos
     if (payload.grupos && payload.grupos.length > 0) {
       var sheetGrp = getOrCreateSheet(ss, 'Grupos', ['Grupo']);
       sheetGrp.clearContents();
-      sheetGrp.appendRow(['Grupo']);
+      var rowsGrp = [['Grupo']];
       payload.grupos.forEach(function(g) {
-        sheetGrp.appendRow([g || '']);
+        rowsGrp.push([g || '']);
       });
+      if (rowsGrp.length > 0) {
+        sheetGrp.getRange(1, 1, rowsGrp.length, 1).setValues(rowsGrp);
+      }
     }
 
     return ContentService.createTextOutput(JSON.stringify({
