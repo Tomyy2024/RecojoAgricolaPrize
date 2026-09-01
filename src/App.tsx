@@ -78,7 +78,17 @@ export default function App() {
   }, []);
 
   // State
-  const [session, setSession] = useState<UserSession | null>(() => getSession());
+  const [session, setSession] = useState<UserSession | null>(() => {
+    // If opened via shared link or explicit login param, enforce authentication screen
+    if (typeof window !== 'undefined' && window.location.search) {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('shared') === '1' || params.get('login') === '1' || params.get('auth') === '1') {
+        clearSession();
+        return null;
+      }
+    }
+    return getSession();
+  });
   const [activeTab, setActiveTab] = useState<TabId>(() => {
     const initialSession = getSession();
     if (initialSession?.rol === 'Trabajador') return 'trabajadores';
@@ -500,6 +510,18 @@ export default function App() {
     }
     addLog(`👤 Sesión iniciada: ${userSession.nombre} (${userSession.rol})`, 'ok');
     fetchCentralizedData(false);
+
+    // Remove shared/login query params from browser address bar smoothly
+    if (typeof window !== 'undefined' && window.history && window.location.search) {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('shared');
+        url.searchParams.delete('login');
+        url.searchParams.delete('auth');
+        const remainingQuery = url.searchParams.toString();
+        window.history.replaceState({}, '', url.pathname + (remainingQuery ? `?${remainingQuery}` : ''));
+      } catch {}
+    }
   };
 
   const handleLogout = () => {

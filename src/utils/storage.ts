@@ -125,9 +125,15 @@ export function formatDateDDMMAAAA(d?: string): string {
 // Auto-repair & sanity check
 export function initializeStorage() {
   try {
-    // Check URL parameters for instant Cloud Sync setup from shared link or QR code
+    // Check URL parameters for instant Cloud Sync setup & shared link login requirement
     if (typeof window !== 'undefined' && window.location.search) {
       const urlParams = new URLSearchParams(window.location.search);
+      const isShared = urlParams.get('shared') === '1' || urlParams.get('login') === '1' || urlParams.get('auth') === '1';
+      if (isShared) {
+        // Enforce login for shared links: clear existing cached session
+        localStorage.removeItem(KEYS.SESSION);
+      }
+
       const cloudUrl = urlParams.get('cloud') || urlParams.get('gsheet');
       if (cloudUrl) {
         try {

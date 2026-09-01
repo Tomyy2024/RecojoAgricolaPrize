@@ -35,10 +35,15 @@ export const ShareAppModal: React.FC<ShareAppModalProps> = ({
   const getEffectiveShareUrl = () => {
     if (typeof window === 'undefined') return '';
     const base = window.location.origin + window.location.pathname;
+    const params = new URLSearchParams();
     if (includeCloudParam && gUrl) {
-      return `${base}?cloud=${encodeURIComponent(gUrl)}`;
+      params.set('cloud', gUrl);
     }
-    return base;
+    // Forzar login obligatorio al abrir desde enlace compartido
+    params.set('shared', '1');
+    params.set('login', '1');
+    const queryString = params.toString();
+    return queryString ? `${base}?${queryString}` : base;
   };
 
   const currentShareUrl = getEffectiveShareUrl();
