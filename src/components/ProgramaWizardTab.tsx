@@ -104,7 +104,7 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
   };
 
   const handleStep2Next = () => {
-    if (selectedLotes.size === 0) {
+    if (availableLotes.length > 0 && selectedLotes.size === 0) {
       onToast('⚠️ Selecciona al menos un lote para continuar');
       return;
     }
@@ -217,7 +217,7 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
 
         <div
           onClick={() => {
-            if (selectedLotes.size > 0) setStep(3);
+            if (availableLotes.length === 0 || selectedLotes.size > 0) setStep(3);
           }}
           className={`flex items-center gap-2 cursor-pointer transition-all ${
             step === 3 ? 'text-[#1b5e20] font-bold' : 'text-gray-400'
@@ -430,8 +430,24 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
           </div>
 
           {availableLotes.length === 0 ? (
-            <div className="py-12 text-center text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-300">
-              <p className="text-sm">No hay lotes catalogados para este Fundo y Módulo.</p>
+            <div className="py-10 px-4 text-center bg-[#f9fbe7] rounded-xl border border-dashed border-[#cddc39]">
+              <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center mx-auto mb-3 text-[#afb42b] shadow-xs">
+                <Box className="w-6 h-6" />
+              </div>
+              <h3 className="text-sm font-bold text-[#827717] mb-1">
+                Módulo sin lotes configurados
+              </h3>
+              <p className="text-xs text-[#9e9d24] max-w-md mx-auto mb-4">
+                El módulo <strong>{modulo}</strong> de <strong>{fundo}</strong> no cuenta con lotes individuales asignados. Puedes continuar directamente para registrar la ejecución a nivel de módulo completo.
+              </p>
+              <button
+                type="button"
+                onClick={() => setStep(3)}
+                className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-md inline-flex items-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+              >
+                <span>Continuar al Resumen sin Lotes</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
             </div>
           ) : (
             <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
@@ -545,9 +561,11 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
 
           {/* Big Lotes Badge */}
           <div className="bg-[#e8f5e9] border border-[#a5d6a7] rounded-xl p-4 text-center mb-5">
-            <div className="text-3xl font-extrabold text-[#1b5e20]">{selectedLotes.size}</div>
+            <div className="text-3xl font-extrabold text-[#1b5e20]">
+              {selectedLotes.size > 0 ? selectedLotes.size : 'Módulo Completo'}
+            </div>
             <div className="text-xs text-[#2e7d32] font-semibold uppercase tracking-wider mt-0.5">
-              Lotes de Cosecha Seleccionados
+              {selectedLotes.size > 0 ? 'Lotes de Cosecha Seleccionados' : 'Sin desglose de lotes (Nivel Módulo)'}
             </div>
           </div>
 
@@ -555,19 +573,25 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
           <h4 className="text-xs font-bold text-[#40493d] uppercase tracking-wider mb-2">
             Detalle de Lotes incluidos:
           </h4>
-          <div className="max-h-48 overflow-y-auto rounded-xl border border-[#e0e0e0] divide-y divide-[#f0f0f0] bg-white p-2 mb-6">
-            {Array.from<string>(selectedLotes)
-              .sort()
-              .map((key: string) => {
-                const [turno, lote] = key.split('|');
-                return (
-                  <div key={key} className="py-1.5 px-3 flex justify-between items-center text-xs">
-                    <span className="text-[#5f6368] font-medium">Turno {turno}</span>
-                    <span className="font-bold text-[#1b5e20]">{lote}</span>
-                  </div>
-                );
-              })}
-          </div>
+          {selectedLotes.size > 0 ? (
+            <div className="max-h-48 overflow-y-auto rounded-xl border border-[#e0e0e0] divide-y divide-[#f0f0f0] bg-white p-2 mb-6">
+              {Array.from<string>(selectedLotes)
+                .sort()
+                .map((key: string) => {
+                  const [turno, lote] = key.split('|');
+                  return (
+                    <div key={key} className="py-1.5 px-3 flex justify-between items-center text-xs">
+                      <span className="text-[#5f6368] font-medium">Turno {turno}</span>
+                      <span className="font-bold text-[#1b5e20]">{lote}</span>
+                    </div>
+                  );
+                })}
+            </div>
+          ) : (
+            <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 text-xs text-gray-500 mb-6 text-center italic">
+              Ejecución registrada para todo el módulo {modulo} ({fundo}) sin asignación de lotes específicos.
+            </div>
+          )}
 
           <div className="flex gap-3">
             <button

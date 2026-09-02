@@ -945,7 +945,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                   value={filtroFundo}
                   onChange={(e) => {
                     setFiltroFundo(e.target.value);
-                    setFiltroModulo('M01');
+                    setFiltroModulo('');
                   }}
                   className="w-full px-3 py-2 text-xs rounded-lg border border-[#bfcaba] bg-white font-medium text-gray-900 focus:outline-none focus:border-[#2e7d32]"
                 >
