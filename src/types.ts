@@ -94,6 +94,26 @@ export interface Lider {
   fechaAlta?: string;
 }
 
+export interface ReservaItemTrabajador {
+  dni: string;
+  nombres: string;
+  grupo?: string;
+}
+
+export interface ReservaCuadrilla {
+  id: string;
+  fecha: string;
+  hora?: string;
+  supervisor: string;
+  fundo: string;
+  modulo: string;
+  grupo?: string;
+  lider?: string;
+  totalTrabajadores: number;
+  trabajadores: ReservaItemTrabajador[];
+  timestamp: string;
+}
+
 export interface SyncLogEntry {
   id: string;
   timestamp: string;

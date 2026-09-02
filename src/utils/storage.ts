@@ -8,7 +8,8 @@ import {
   UserSession, 
   SyncLogEntry, 
   FirebaseConfig,
-  ValidacionSupervisor
+  ValidacionSupervisor,
+  ReservaCuadrilla
 } from '../types';
 import { 
   INITIAL_USUARIOS, 
@@ -35,7 +36,8 @@ const KEYS = {
   AUTO_SYNC_QUEUE: 'recojoFrutosAutoSyncCola',
   LAST_SYNC: 'recojoFrutosLastSync',
   FIREBASE_CONFIG: 'recojoFrutosFirebaseConfig',
-  VALIDACIONES: 'recojoFrutosValidaciones'
+  VALIDACIONES: 'recojoFrutosValidaciones',
+  RESERVAS: 'recojoFrutosReservas'
 };
 
 // Date helpers
@@ -450,6 +452,24 @@ export function addModuloToFundo(fundo: string, modulo: string): Record<string, 
     saveModulosPorFundo(current);
   }
   return current;
+}
+
+// Reservas de Cuadrilla
+export function getReservas(): ReservaCuadrilla[] {
+  try {
+    const raw = localStorage.getItem(KEYS.RESERVAS);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveReservas(reservas: ReservaCuadrilla[]) {
+  try {
+    localStorage.setItem(KEYS.RESERVAS, JSON.stringify(reservas));
+  } catch (e) {
+    console.warn('Error saving reservas:', e);
+  }
 }
 
 // Google Sheets Web App Config

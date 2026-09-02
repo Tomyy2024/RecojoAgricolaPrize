@@ -44,6 +44,7 @@ function getInitialData() {
     detalleJabas: [],
     validaciones: [],
     lideres: [],
+    reservas: [],
     lastUpdated: new Date().toISOString()
   };
 }
@@ -318,6 +319,7 @@ async function startServer() {
         if (Array.isArray(incoming.usuarios) && incoming.usuarios.length > 0) db.usuarios = incoming.usuarios;
         if (Array.isArray(incoming.lideres)) db.lideres = incoming.lideres;
         if (Array.isArray(incoming.grupos)) db.grupos = incoming.grupos;
+        if (Array.isArray(incoming.reservas)) db.reservas = incoming.reservas;
         if (incoming.modulos && typeof incoming.modulos === 'object') {
           db.modulos = { ...(db.modulos || {}), ...incoming.modulos };
         }

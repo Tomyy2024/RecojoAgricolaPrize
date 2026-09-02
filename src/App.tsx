@@ -15,7 +15,8 @@ import {
   Lider, 
   SyncLogEntry, 
   ValidacionSupervisor,
-  DeviceViewMode
+  DeviceViewMode,
+  ReservaCuadrilla
 } from './types';
 import { 
   initializeStorage, 
@@ -44,6 +45,8 @@ import {
   getValidaciones,
   saveValidaciones,
   saveSingleValidacion,
+  getReservas,
+  saveReservas,
   getGsheetUrl, 
   isAutoSyncEnabled, 
   getLastSyncTime, 
@@ -130,6 +133,7 @@ export default function App() {
   const [lideres, setLideresState] = useState<Lider[]>(() => getLideres());
   const [modulosPorFundo, setModulosPorFundo] = useState<Record<string, string[]>>(() => getModulosPorFundo());
   const [validaciones, setValidacionesState] = useState<ValidacionSupervisor[]>(() => getValidaciones());
+  const [reservas, setReservasState] = useState<ReservaCuadrilla[]>(() => getReservas());
 
   // Cloud Sync & Logging States
   const [lastSync, setLastSync] = useState<string | null>(() => getLastSyncTime());
@@ -225,6 +229,10 @@ export default function App() {
       setGruposState(d.grupos);
       saveGrupos(d.grupos);
     }
+    if (Array.isArray(d.reservas)) {
+      setReservasState(d.reservas);
+      saveReservas(d.reservas);
+    }
     if (d.modulos && typeof d.modulos === 'object') {
       const mergedMods = { ...getModulosPorFundo(), ...d.modulos };
       setModulosPorFundo(mergedMods);
@@ -290,7 +298,8 @@ export default function App() {
         usuarios: getUsuarios(),
         validaciones: getValidaciones(),
         lideres: getLideres(),
-        grupos: getGrupos()
+        grupos: getGrupos(),
+        reservas: getReservas()
       };
 
       // Broadcast to all tabs on this machine instantly
@@ -793,6 +802,16 @@ export default function App() {
     addToast(`🗑️ Validación eliminada del historial`);
   };
 
+  const handleSaveReserva = (newReserva: ReservaCuadrilla) => {
+    const current = getReservas();
+    const updated = [newReserva, ...current.filter((r) => r.id !== newReserva.id)];
+    setReservasState(updated);
+    saveReservas(updated);
+    addLog(`💾 Reserva guardada: ${newReserva.totalTrabajadores} trabajadores para ${newReserva.supervisor} (${newReserva.fundo} - ${newReserva.modulo})`, 'ok');
+    triggerAutoSync('Guardar Reserva', { reservas: updated });
+    addToast(`💾 Reserva guardada con éxito (${newReserva.totalTrabajadores} trabajadores amarrados a ${newReserva.supervisor})`, 'success');
+  };
+
   const handleImportTrabajadores = (newWorkers: Trabajador[]) => {
     const combined = [...newWorkers, ...trabajadores];
     const seenDni = new Set<string>();
@@ -1004,6 +1023,8 @@ export default function App() {
             onSaveSupervisor={handleSaveSupervisor}
             onSaveGrupo={handleSaveGrupo}
             onSaveAvance={handleSaveAvance}
+            reservas={reservas}
+            onSaveReserva={handleSaveReserva}
             onToast={addToast}
           />
         )}
