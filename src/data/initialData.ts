@@ -22,10 +22,7 @@ export const INITIAL_GRUPOS: string[] = [];
 export const INITIAL_LOTES: LoteItem[] = PARSED_INITIAL_LOTES;
 
 export const INITIAL_USUARIOS: Usuario[] = [
-  { user: 'admin', pass: 'admin123', nombre: 'Administrador General', rol: 'Administrador', creado: '2026-08-18' },
-  { user: 'supervisor1', pass: 'super123', nombre: 'Supervisor de Campo', rol: 'Supervisor', creado: '2026-08-18' },
-  { user: 'trabajador1', pass: 'campo123', nombre: 'Trabajador de Campo', rol: 'Trabajador', creado: '2026-08-18' },
-  { user: 'trabajador', pass: 'campo123', nombre: 'Trabajador General', rol: 'Trabajador', creado: '2026-08-18' }
+  { user: 'admin', pass: 'prize2026', nombre: 'Administrador General', rol: 'Administrador', creado: '2026-08-18' }
 ];
 
 export const INITIAL_TRABAJADORES: Trabajador[] = [];

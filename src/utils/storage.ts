@@ -127,6 +127,17 @@ export function formatDateDDMMAAAA(d?: string): string {
 // Auto-repair & sanity check
 export function initializeStorage() {
   try {
+    const WIPE_VERSION_KEY = 'recojoFrutosDataVersion';
+    const TARGET_VERSION = 'v100_clean_wipe';
+    if (typeof localStorage !== 'undefined' && localStorage.getItem(WIPE_VERSION_KEY) !== TARGET_VERSION) {
+      resetAllData();
+      const sess = getSession();
+      if (sess && (sess.rol === 'Supervisor' || sess.rol === 'Trabajador')) {
+        clearSession();
+      }
+      localStorage.setItem(WIPE_VERSION_KEY, TARGET_VERSION);
+    }
+
     // Check URL parameters for instant Cloud Sync setup & shared link login requirement
     if (typeof window !== 'undefined' && window.location.search) {
       const urlParams = new URLSearchParams(window.location.search);
@@ -206,6 +217,12 @@ export function resetAllData() {
     localStorage.setItem(KEYS.DETALLE_JABAS, JSON.stringify([]));
     localStorage.setItem(KEYS.AVANCE, JSON.stringify({}));
     localStorage.setItem(KEYS.VALIDACIONES, JSON.stringify([]));
+    localStorage.setItem(KEYS.LIDERES, JSON.stringify([]));
+    localStorage.setItem(KEYS.GRUPOS, JSON.stringify([]));
+    localStorage.setItem(KEYS.RESERVAS, JSON.stringify([]));
+    const currentUsers = getUsuarios();
+    const cleanUsers = currentUsers.filter(u => u.rol !== 'Supervisor');
+    localStorage.setItem(KEYS.USUARIOS, JSON.stringify(cleanUsers.length > 0 ? cleanUsers : INITIAL_USUARIOS));
   } catch (e) {
     console.error('Reset all data error:', e);
   }

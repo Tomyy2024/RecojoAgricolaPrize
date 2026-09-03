@@ -191,11 +191,8 @@ export default function App() {
           uniqueWorkers.push(t);
         }
       });
-      // Guard against accidental wipes: only apply empty array if local storage is also empty
-      if (uniqueWorkers.length > 0 || getTrabajadores().length === 0) {
-        setTrabajadoresState(uniqueWorkers);
-        saveTrabajadores(uniqueWorkers);
-      }
+      setTrabajadoresState(uniqueWorkers);
+      saveTrabajadores(uniqueWorkers);
     }
     if (Array.isArray(d.detalleJabas)) {
       setDetalleJabasState(d.detalleJabas);
@@ -236,9 +233,8 @@ export default function App() {
       saveGrupos(d.grupos);
     }
     if (Array.isArray(d.reservas)) {
-      const merged = mergeReservasArrays(getReservas(), d.reservas);
-      setReservasState(merged);
-      saveReservas(merged);
+      setReservasState(d.reservas);
+      saveReservas(d.reservas);
     }
     if (d.modulos && typeof d.modulos === 'object') {
       const mergedMods = { ...getModulosPorFundo(), ...d.modulos };
@@ -486,6 +482,7 @@ export default function App() {
     setProgramaGeneralState([]);
     setDetalleJabasState([]);
     setValidacionesState([]);
+    setUsuariosState(getUsuarios());
 
     // Clear central node server
     try {
@@ -504,6 +501,7 @@ export default function App() {
         validaciones: [],
         grupos: [],
         lideres: [],
+        reservas: [],
         usuarios: getUsuarios()
       });
     } catch (e) {
