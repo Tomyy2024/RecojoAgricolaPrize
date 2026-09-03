@@ -188,8 +188,11 @@ export default function App() {
           uniqueWorkers.push(t);
         }
       });
-      setTrabajadoresState(uniqueWorkers);
-      saveTrabajadores(uniqueWorkers);
+      // Guard against accidental wipes: only apply empty array if local storage is also empty
+      if (uniqueWorkers.length > 0 || getTrabajadores().length === 0) {
+        setTrabajadoresState(uniqueWorkers);
+        saveTrabajadores(uniqueWorkers);
+      }
     }
     if (Array.isArray(d.detalleJabas)) {
       setDetalleJabasState(d.detalleJabas);
@@ -652,6 +655,14 @@ export default function App() {
     setTrabajadoresState(updatedWorkers);
     saveTrabajadores(updatedWorkers);
     addLog(`👥 Nómina de personal actualizada (${updatedWorkers.length} trabajadores)`, 'ok');
+
+    // Fast direct push to server API so other devices and SSE receive immediately
+    fetch('/api/trabajadores', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trabajadores: updatedWorkers, append: false })
+    }).catch(() => {});
+
     triggerAutoSync('Actualización Personal', { trabajadores: updatedWorkers });
   };
 
@@ -665,6 +676,14 @@ export default function App() {
     }
     setTrabajadoresState(updated);
     saveTrabajadores(updated);
+
+    // Fast direct push to server API
+    fetch('/api/trabajadores', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trabajadores: updated, append: false })
+    }).catch(() => {});
+
     addLog(`👷 Trabajador registrado con Supervisor, Fundo, Módulo, Grupo y Líder: ${worker.nombres} (DNI: ${worker.dni})`, 'ok');
     triggerAutoSync('Registro Trabajador', { trabajadores: updated });
     addToast(`✅ Trabajador "${worker.nombres}" guardado con éxito`, 'success');

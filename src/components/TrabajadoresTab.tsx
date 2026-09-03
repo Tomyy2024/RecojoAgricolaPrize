@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Trabajador, Lider, UserSession, DetalleJaba, Usuario, ReservaCuadrilla } from '../types';
 import { ScannerModal } from './ScannerModal';
 import { getLocalToday, getLocalISO, getReservas, saveReservas } from '../utils/storage';
@@ -277,6 +277,29 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return n.replace(/^modulo/, 'm').replace(/^m0*(\d+)/, 'm$1');
   };
 
+  // Matches supervisor taking into account Peruvian naming conventions (Apellidos / Nombres order)
+  const matchesSupervisor = useCallback((s1Raw?: string, s2Raw?: string): boolean => {
+    if (!s1Raw || !s2Raw) return false;
+    const s1 = normalizeStr(s1Raw);
+    const s2 = normalizeStr(s2Raw);
+    if (!s1 || !s2) return false;
+    if (s1 === s2 || s1.includes(s2) || s2.includes(s1)) return true;
+
+    const words1 = s1.split(/\s+/).filter((w) => w.length > 2);
+    const words2 = s2.split(/\s+/).filter((w) => w.length > 2);
+    if (words1.length === 0 || words2.length === 0) return false;
+
+    const matches = words1.filter((w1) =>
+      words2.some(
+        (w2) =>
+          w1 === w2 ||
+          (w1.length >= 4 && (w1.includes(w2) || w2.includes(w1)))
+      )
+    );
+    if (matches.length >= Math.min(2, words1.length)) return true;
+    return false;
+  }, []);
+
   // Pre-indexed workers for sub-millisecond search and strict binding
   const indexedTrabajadores = useMemo(() => {
     const seenDni = new Set<string>();
@@ -305,35 +328,63 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return list;
   }, [trabajadores]);
 
+  // Auto-detect supervisor's default fundo & modulo, or default gracefully so workers are immediately visible
+  useEffect(() => {
+    if (!cuadrillaFundo) {
+      if (cuadrillaSupervisor) {
+        // Look for workers already assigned to this supervisor
+        const matchingWorker = trabajadores.find((t) => matchesSupervisor(cuadrillaSupervisor, t.supervisor));
+        if (matchingWorker && matchingWorker.fundo) {
+          setCuadrillaFundo(matchingWorker.fundo);
+          if (matchingWorker.modulo) {
+            setCuadrillaModulo(matchingWorker.modulo);
+          }
+          return;
+        }
+      }
+      // If admin or no supervisor match yet, default to first available fundo with workers
+      const firstFundoWithWorkers = fundosList.find((f) => trabajadores.some((t) => t.fundo === f));
+      if (firstFundoWithWorkers) {
+        setCuadrillaFundo(firstFundoWithWorkers);
+        const firstWorkerInFundo = trabajadores.find((t) => t.fundo === firstFundoWithWorkers && t.modulo);
+        if (firstWorkerInFundo?.modulo) {
+          setCuadrillaModulo(firstWorkerInFundo.modulo);
+        }
+      }
+    }
+  }, [cuadrillaSupervisor, cuadrillaFundo, fundosList, trabajadores, matchesSupervisor]);
+
   // Counts of workers in current Fundo & Modulo
   const moduloWorkerCounts = useMemo(() => {
-    if (!cuadrillaFundo) return { total: 0, misAsignados: 0, general: 0 };
-    const normF = normalizeStr(cuadrillaFundo);
+    const normF = cuadrillaFundo ? normalizeStr(cuadrillaFundo) : '';
     const normM = cuadrillaModulo ? normalizeModulo(cuadrillaModulo) : '';
-    const normS = cuadrillaSupervisor ? normalizeStr(cuadrillaSupervisor) : '';
 
     let total = 0;
     let misAsignados = 0;
     let general = 0;
 
     for (const t of indexedTrabajadores) {
-      if (t._normFundo !== normF) continue;
+      if (normF && t._normFundo && t._normFundo !== normF) continue;
       if (normM && t._normModulo && t._normModulo !== normM) continue;
 
-      const isMyWorker = normS && (t._normSupervisor === normS || t._normSupervisor.includes(normS) || normS.includes(t._normSupervisor));
-      const isGeneral = !t._normSupervisor || t._normSupervisor === 'general' || t._normSupervisor === 'sin asignar';
+      total++;
+      const isMyWorker = cuadrillaSupervisor && matchesSupervisor(cuadrillaSupervisor, t.supervisor);
+      const isGeneral =
+        !t.supervisor ||
+        normalizeStr(t.supervisor) === 'general' ||
+        normalizeStr(t.supervisor) === 'sin asignar' ||
+        normalizeStr(t.supervisor) === '';
 
       if (isMyWorker) {
         misAsignados++;
-        total++;
-      } else if (isGeneral) {
+      }
+      if (isGeneral) {
         general++;
-        total++;
       }
     }
 
     return { total, misAsignados, general };
-  }, [indexedTrabajadores, cuadrillaFundo, cuadrillaModulo, cuadrillaSupervisor]);
+  }, [indexedTrabajadores, cuadrillaFundo, cuadrillaModulo, cuadrillaSupervisor, matchesSupervisor]);
 
   // Filtered workers list - strictly tied to Supervisor, Fundo y Módulo
   const filteredTrabajadores = useMemo(() => {
@@ -346,32 +397,27 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       );
     }
 
-    // Require Fundo to display workers of that cuadrilla
-    if (!cuadrillaFundo) {
-      return [];
-    }
-
-    const normF = normalizeStr(cuadrillaFundo);
+    const normF = cuadrillaFundo ? normalizeStr(cuadrillaFundo) : '';
     const normM = cuadrillaModulo ? normalizeModulo(cuadrillaModulo) : '';
-    const normS = cuadrillaSupervisor ? normalizeStr(cuadrillaSupervisor) : '';
 
     return indexedTrabajadores.filter((t) => {
-      // 1. Amarrado a Fundo (Estricto)
-      if (t._normFundo && t._normFundo !== normF) {
-        return false;
-      }
-      if (!t._normFundo && t.fundo !== undefined && t.fundo !== '') {
+      // 1. Amarrado a Fundo (Estricto si se seleccionó fundo específico)
+      if (normF && t._normFundo && t._normFundo !== normF) {
         return false;
       }
 
-      // 2. Amarrado a Módulo (Estricto si se seleccionó módulo)
+      // 2. Amarrado a Módulo (Estricto si se seleccionó módulo específico)
       if (normM && t._normModulo && t._normModulo !== normM) {
         return false;
       }
 
-      // 3. Amarrado a Supervisor (Estricto)
-      const isMyWorker = normS && (t._normSupervisor === normS || t._normSupervisor.includes(normS) || normS.includes(t._normSupervisor));
-      const isGeneralWorker = !t._normSupervisor || t._normSupervisor === 'general' || t._normSupervisor === 'sin asignar';
+      // 3. Filtro por tipo de asignación
+      const isMyWorker = cuadrillaSupervisor && matchesSupervisor(cuadrillaSupervisor, t.supervisor);
+      const isGeneralWorker =
+        !t.supervisor ||
+        normalizeStr(t.supervisor) === 'general' ||
+        normalizeStr(t.supervisor) === 'sin asignar' ||
+        normalizeStr(t.supervisor) === '';
 
       if (filtroTipoAsignacion === 'mis_asignados') {
         return Boolean(isMyWorker);
@@ -380,15 +426,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         return isGeneralWorker;
       }
 
-      // 'todos': show workers already amarrados to this supervisor AND unassigned/general workers of this fundo & modulo
-      // Exclude workers who are explicitly assigned to another different supervisor
-      if (normS && !isMyWorker && !isGeneralWorker) {
-        return false;
-      }
-
+      // 'todos': show all workers in this Fundo & Módulo scope
       return true;
     });
-  }, [indexedTrabajadores, searchTerm, cuadrillaFundo, cuadrillaModulo, cuadrillaSupervisor, filtroTipoAsignacion]);
+  }, [indexedTrabajadores, searchTerm, cuadrillaFundo, cuadrillaModulo, cuadrillaSupervisor, filtroTipoAsignacion, matchesSupervisor]);
 
   // Handle changing group for an individual worker
   const handleWorkerGroupChange = (dni: string, newGroup: string) => {
@@ -1094,16 +1135,16 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     onChange={(e) => {
                       const newFundo = e.target.value;
                       setCuadrillaFundo(newFundo);
-                      if (newFundo === 'Santa Teresa') setCuadrillaModulo('M01');
-                      else if (newFundo === 'Arena Azul') setCuadrillaModulo('M01');
-                      else if (newFundo === 'Vivadis') setCuadrillaModulo('M01');
-                      else if (newFundo === 'Ayllu Allpa') setCuadrillaModulo('M12');
-                      else if (newFundo === 'Ampliacion') setCuadrillaModulo('M16');
-                      else setCuadrillaModulo('');
+                      if (!newFundo) {
+                        setCuadrillaModulo('');
+                      } else {
+                        const workerInFundo = trabajadores.find((t) => t.fundo === newFundo && t.modulo);
+                        setCuadrillaModulo(workerInFundo?.modulo || '');
+                      }
                     }}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-[#bfcaba] bg-white font-medium text-gray-900 focus:outline-none focus:border-[#2e7d32] focus:ring-1 focus:ring-[#2e7d32]"
                   >
-                    <option value="">Seleccionar fundo...</option>
+                    <option value="">Todos los fundos agrícolas</option>
                     {fundosList.map((f) => (
                       <option key={f} value={f}>
                         {f}
@@ -1112,7 +1153,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   </select>
                 </div>
                 <div className="text-[10px] text-gray-500 flex items-center gap-1">
-                  <span className="font-semibold text-[#1b5e20]">Ejemplo:</span> Santa Teresa
+                  <span className="font-semibold text-[#1b5e20]">Fundo seleccionado:</span> {cuadrillaFundo || 'Todos los fundos'}
                 </div>
               </div>
 
@@ -1143,7 +1184,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     onChange={(e) => setCuadrillaModulo(e.target.value)}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-[#bfcaba] bg-white font-medium text-gray-900 focus:outline-none focus:border-[#2e7d32] focus:ring-1 focus:ring-[#2e7d32]"
                   >
-                    <option value="">Seleccionar módulo...</option>
+                    <option value="">Todos los módulos {cuadrillaFundo ? `de ${cuadrillaFundo}` : ''}</option>
                     {modulosList.map((m) => (
                       <option key={m} value={m}>
                         {m}
@@ -1152,7 +1193,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   </select>
                 </div>
                 <div className="text-[10px] text-gray-500 flex items-center gap-1">
-                  <span className="font-semibold text-[#1b5e20]">Ejemplo:</span> M01
+                  <span className="font-semibold text-[#1b5e20]">Módulo seleccionado:</span> {cuadrillaModulo || 'Todos'}
                 </div>
               </div>
 
@@ -1686,44 +1727,59 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
             {/* Listado de Tarjetas de Trabajadores con renderizado de alto rendimiento */}
             <div className="max-h-96 overflow-y-auto space-y-2 rounded-xl border border-[#e0e0e0] p-2 bg-[#fafafa]">
-              {!cuadrillaFundo && !searchTerm ? (
-                <div className="py-10 px-4 text-center">
-                  <div className="w-12 h-12 bg-[#e8f5e9] text-[#2e7d32] rounded-full flex items-center justify-center mx-auto mb-3">
-                    <Building2 className="w-6 h-6" />
+              {!cuadrillaFundo && !searchTerm && (
+                <div className="bg-[#e8f5e9]/70 border border-[#a5d6a7] rounded-lg p-2 text-xs text-[#1b5e20] flex items-center justify-between gap-2 mb-2">
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <Building2 className="w-4 h-4 text-[#2e7d32]" />
+                    <span>Nómina completa visible ({filteredTrabajadores.length} trabajadores). Puedes filtrar seleccionando tu Fundo y Módulo arriba.</span>
+                  </span>
+                </div>
+              )}
+
+              {filteredTrabajadores.length === 0 ? (
+                <div className="py-8 text-center text-gray-500 text-xs">
+                  <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-2">
+                    <Building2 className="w-5 h-5" />
                   </div>
-                  <h4 className="font-bold text-sm text-[#1b5e20] mb-1">
-                    Selecciona Supervisor, Fundo y Módulo
-                  </h4>
-                  <p className="text-xs text-gray-600 max-w-md mx-auto mb-4">
-                    Los trabajadores están amarrados a su Supervisor, Fundo y Módulo. Selecciona el Fundo arriba para listar la cuadrilla correspondiente.
+                  <p className="font-semibold text-gray-700">
+                    No se encontraron trabajadores con los filtros aplicados ({cuadrillaFundo || 'Todos los fundos'} - {cuadrillaModulo || 'Todos los módulos'}).
                   </p>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Cambia el filtro de Fundo o Módulo para ver otras cuadrillas, o registra un nuevo trabajador.
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-2 mt-3">
                     {fundosList.map((f) => (
                       <button
                         key={f}
                         type="button"
                         onClick={() => {
                           setCuadrillaFundo(f);
-                          const firstMod = (modulosPorFundo[f] && modulosPorFundo[f][0]) || 'M01';
-                          setCuadrillaModulo(firstMod);
+                          const workerInF = trabajadores.find((t) => t.fundo === f && t.modulo);
+                          setCuadrillaModulo(workerInF?.modulo || '');
                         }}
-                        className="bg-white hover:bg-[#e8f5e9] text-[#2e7d32] border border-[#2e7d32] text-xs font-bold py-1.5 px-3 rounded-lg shadow-xs cursor-pointer transition-all"
+                        className="bg-white hover:bg-[#e8f5e9] text-[#2e7d32] border border-[#2e7d32] text-xs font-bold py-1 px-2.5 rounded-lg shadow-xs cursor-pointer transition-all"
                       >
                         📍 Cargar {f}
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCuadrillaFundo('');
+                        setCuadrillaModulo('');
+                      }}
+                      className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold py-1 px-2.5 rounded-lg transition-all"
+                    >
+                      Ver Todos los Fundos
+                    </button>
                   </div>
-                </div>
-              ) : filteredTrabajadores.length === 0 ? (
-                <div className="py-8 text-center text-gray-400 text-xs">
-                  No se encontraron trabajadores con los filtros aplicados ({cuadrillaFundo || 'Sin fundo'} - {cuadrillaModulo || 'Sin módulo'}).
-                  <div className="mt-2">
+                  <div className="mt-3">
                     <button
                       type="button"
                       onClick={handleOpenNewWorkerModal}
                       className="text-[#2e7d32] font-bold underline"
                     >
-                      Haz clic aquí para registrar un nuevo trabajador
+                      + Registrar un nuevo trabajador
                     </button>
                   </div>
                 </div>

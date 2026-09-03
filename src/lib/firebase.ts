@@ -147,23 +147,29 @@ export async function syncAllDataToFirestore(data: {
   grupos?: any[];
   lideres?: any[];
   usuarios?: any[];
+  reservas?: any[];
+  modulos?: Record<string, string[]>;
   userEmail?: string;
 }) {
   const path = 'app_state/master_data';
   try {
-    await setDoc(doc(db, 'app_state', 'master_data'), {
-      trabajadores: data.trabajadores || [],
-      programas: data.programas || [],
-      programaGeneral: data.programaGeneral || [],
-      detalleJabas: data.detalleJabas || [],
-      validaciones: data.validaciones || [],
-      grupos: data.grupos || [],
-      lideres: data.lideres || [],
-      usuarios: data.usuarios || [],
-      version: 10,
+    const updateObj: Record<string, any> = {
+      version: 11,
       lastUpdated: new Date().toISOString(),
       updatedBy: data.userEmail || auth.currentUser?.email || 'App User'
-    });
+    };
+    if (Array.isArray(data.trabajadores)) updateObj.trabajadores = data.trabajadores;
+    if (Array.isArray(data.programas)) updateObj.programas = data.programas;
+    if (Array.isArray(data.programaGeneral)) updateObj.programaGeneral = data.programaGeneral;
+    if (Array.isArray(data.detalleJabas)) updateObj.detalleJabas = data.detalleJabas;
+    if (Array.isArray(data.validaciones)) updateObj.validaciones = data.validaciones;
+    if (Array.isArray(data.grupos)) updateObj.grupos = data.grupos;
+    if (Array.isArray(data.lideres)) updateObj.lideres = data.lideres;
+    if (Array.isArray(data.usuarios)) updateObj.usuarios = data.usuarios;
+    if (Array.isArray(data.reservas)) updateObj.reservas = data.reservas;
+    if (data.modulos && typeof data.modulos === 'object') updateObj.modulos = data.modulos;
+
+    await setDoc(doc(db, 'app_state', 'master_data'), updateObj, { merge: true });
     return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
