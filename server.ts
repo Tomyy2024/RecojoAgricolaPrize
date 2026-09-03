@@ -304,6 +304,90 @@ async function startServer() {
     }
   });
 
+  // Helper for normalizing supervisor name
+  function normalizeSupervisorKey(sup?: string): string {
+    if (!sup) return '';
+    return sup
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ');
+  }
+
+  // Merge reservas by supervisor, date, and module (never wiping out other supervisors)
+  function mergeReservas(existing: any[] = [], incoming: any[] = []): any[] {
+    const map = new Map<string, any>();
+    const all = [...existing, ...incoming];
+    for (const item of all) {
+      if (!item || !item.id) continue;
+      if (map.has(item.id)) {
+        const prev = map.get(item.id);
+        if ((item.timestamp || '') >= (prev?.timestamp || '')) {
+          map.set(item.id, item);
+        }
+        continue;
+      }
+      const normSup = normalizeSupervisorKey(item.supervisor);
+      const existingMatch = Array.from(map.values()).find(
+        (e: any) =>
+          e.fecha === item.fecha &&
+          normalizeSupervisorKey(e.supervisor) === normSup &&
+          e.fundo === item.fundo &&
+          e.modulo === item.modulo
+      );
+      if (existingMatch) {
+        if ((item.timestamp || '') >= (existingMatch.timestamp || '')) {
+          map.delete(existingMatch.id);
+          map.set(item.id, item);
+        }
+      } else {
+        map.set(item.id, item);
+      }
+    }
+    return Array.from(map.values()).sort((a: any, b: any) =>
+      (b.timestamp || '').localeCompare(a.timestamp || '')
+    );
+  }
+
+  // Save or update reservation(s) by supervisor
+  app.post('/api/reservas', (req, res) => {
+    try {
+      const { reserva, reservas } = req.body;
+      const incomingList = reserva ? [reserva] : Array.isArray(reservas) ? reservas : [];
+      if (incomingList.length === 0) {
+        return res.status(400).json({ status: 'error', message: 'No se envió reserva válida' });
+      }
+
+      db.reservas = mergeReservas(db.reservas || [], incomingList);
+      db.version = (db.version || 1) + 1;
+      db.lastUpdated = new Date().toISOString();
+      saveDatabase(db);
+
+      notifyClients({ type: 'sync', version: db.version, data: db });
+      res.json({ status: 'ok', count: db.reservas.length, reservas: db.reservas });
+    } catch (err: any) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
+  // Delete a specific reservation
+  app.delete('/api/reservas/:id', (req, res) => {
+    try {
+      const { id } = req.params;
+      const prevCount = (db.reservas || []).length;
+      db.reservas = (db.reservas || []).filter((r: any) => r.id !== id);
+      db.version = (db.version || 1) + 1;
+      db.lastUpdated = new Date().toISOString();
+      saveDatabase(db);
+
+      notifyClients({ type: 'sync', version: db.version, data: db });
+      res.json({ status: 'ok', deleted: prevCount !== db.reservas.length, reservas: db.reservas });
+    } catch (err: any) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
   // Sync data from any client
   app.post('/api/sync', (req, res) => {
     try {
@@ -319,7 +403,9 @@ async function startServer() {
         if (Array.isArray(incoming.usuarios) && incoming.usuarios.length > 0) db.usuarios = incoming.usuarios;
         if (Array.isArray(incoming.lideres)) db.lideres = incoming.lideres;
         if (Array.isArray(incoming.grupos)) db.grupos = incoming.grupos;
-        if (Array.isArray(incoming.reservas)) db.reservas = incoming.reservas;
+        if (Array.isArray(incoming.reservas)) {
+          db.reservas = mergeReservas(db.reservas || [], incoming.reservas);
+        }
         if (incoming.modulos && typeof incoming.modulos === 'object') {
           db.modulos = { ...(db.modulos || {}), ...incoming.modulos };
         }

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Trabajador, Lider, UserSession, DetalleJaba, Usuario, ReservaCuadrilla } from '../types';
 import { ScannerModal } from './ScannerModal';
-import { getLocalToday, getLocalISO, getReservas, saveReservas } from '../utils/storage';
+import { getLocalToday, getLocalISO, getReservas, saveReservas, mergeReservasArrays } from '../utils/storage';
 import { 
   Users, 
   Crown, 
@@ -18,6 +18,7 @@ import {
   MapPin,
   Layers,
   UserCheck,
+  UserCog,
   Plus,
   Minus,
   Info,
@@ -32,7 +33,9 @@ import {
   History,
   CheckCircle2,
   Clock,
-  RotateCcw
+  RotateCcw,
+  SlidersHorizontal,
+  X
 } from 'lucide-react';
 
 interface TrabajadoresTabProps {
@@ -44,12 +47,14 @@ interface TrabajadoresTabProps {
   modulosPorFundo?: Record<string, string[]>;
   reservas?: ReservaCuadrilla[];
   onSaveReserva?: (reserva: ReservaCuadrilla) => void;
+  onDeleteReserva?: (reservaId: string) => void;
   onSaveModulo?: (fundo: string, modulo: string) => void;
   onUpdateTrabajadores?: (updated: Trabajador[]) => void;
   onSaveTrabajador?: (worker: Trabajador) => void;
   onSaveLider: (lider: Lider) => void;
   onDeleteLider?: (liderNameOrDni: string) => void;
   onSaveSupervisor?: (supervisorName: string) => void;
+  onDeleteSupervisor?: (supervisorName: string) => void;
   onSaveGrupo?: (grupo: string) => void;
   onSaveAvance?: (avanceMap: Record<string, number>, detalleList: DetalleJaba[]) => void;
   onToast: (msg: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
@@ -64,12 +69,14 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   modulosPorFundo = {},
   reservas = [],
   onSaveReserva,
+  onDeleteReserva,
   onSaveModulo,
   onUpdateTrabajadores,
   onSaveTrabajador,
   onSaveLider,
   onDeleteLider,
   onSaveSupervisor,
+  onDeleteSupervisor,
   onSaveGrupo,
   onSaveAvance,
   onToast
@@ -82,12 +89,15 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   );
   useEffect(() => {
     if (reservas && reservas.length > 0) {
-      setReservasState(reservas);
+      setReservasState((prev) => mergeReservasArrays(prev, reservas));
     }
   }, [reservas]);
 
   const [lastSavedReserva, setLastSavedReserva] = useState<ReservaCuadrilla | null>(null);
   const [showReservasModal, setShowReservasModal] = useState(false);
+  const [reservaModalSupervisorFilter, setReservaModalSupervisorFilter] = useState<string>('todos');
+  const [reservaModalDateFilter, setReservaModalDateFilter] = useState<'hoy' | 'todas'>('hoy');
+  const [reservaModalSearch, setReservaModalSearch] = useState<string>('');
   const [filtroTipoAsignacion, setFiltroTipoAsignacion] = useState<'todos' | 'mis_asignados' | 'general'>('todos');
 
   // Supervisor checking
@@ -121,6 +131,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   // Supervisor registration state
   const [showSupervisorForm, setShowSupervisorForm] = useState(false);
   const [newSupervisorNombre, setNewSupervisorNombre] = useState('');
+  const [showGestionSupervisoresModal, setShowGestionSupervisoresModal] = useState(false);
+  const [filtroGestionSupervisorSearch, setFiltroGestionSupervisorSearch] = useState('');
+  const [nuevoSupervisorInput, setNuevoSupervisorInput] = useState('');
 
   // Modulo registration state
   const [showModuloForm, setShowModuloForm] = useState(false);
@@ -299,6 +312,70 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     if (matches.length >= Math.min(2, words1.length)) return true;
     return false;
   }, []);
+
+  const hoyStr = useMemo(() => getLocalToday(), []);
+
+  // Reservas del día de hoy
+  const reservasHoy = useMemo(() => {
+    return reservasState.filter((r) => r.fecha === hoyStr);
+  }, [reservasState, hoyStr]);
+
+  // Lista de supervisores con su estado de reserva de hoy
+  const supervisoresEstadoHoy = useMemo(() => {
+    return supervisoresList.map((sup) => {
+      const res = reservasHoy.find((r) => matchesSupervisor(r.supervisor, sup));
+      return {
+        supervisor: sup,
+        hasReserva: !!res,
+        reserva: res || null,
+        totalTrabajadores: res?.totalTrabajadores || 0,
+        fundo: res?.fundo || '',
+        modulo: res?.modulo || '',
+        hora: res?.hora || ''
+      };
+    });
+  }, [supervisoresList, reservasHoy, matchesSupervisor]);
+
+  // Cantidad de supervisores con reserva hoy
+  const countSupervisoresConReservaHoy = useMemo(() => {
+    return supervisoresEstadoHoy.filter((s) => s.hasReserva).length;
+  }, [supervisoresEstadoHoy]);
+
+  // Reserva de hoy para el supervisor actualmente seleccionado
+  const currentSupervisorReservaHoy = useMemo(() => {
+    const targetSup = cuadrillaSupervisor || (isSupervisorUser ? sessionSupervisorName : '');
+    if (!targetSup) return null;
+    return reservasHoy.find((r) => matchesSupervisor(r.supervisor, targetSup)) || null;
+  }, [reservasHoy, cuadrillaSupervisor, isSupervisorUser, sessionSupervisorName, matchesSupervisor]);
+
+  // Reservas filtradas para el modal de Reservas por Supervisor
+  const filteredModalReservas = useMemo(() => {
+    return reservasState.filter((r) => {
+      if (reservaModalDateFilter === 'hoy' && r.fecha !== hoyStr) {
+        return false;
+      }
+      if (reservaModalSupervisorFilter !== 'todos') {
+        if (!matchesSupervisor(r.supervisor, reservaModalSupervisorFilter)) {
+          return false;
+        }
+      }
+      if (reservaModalSearch.trim()) {
+        const query = normalizeStr(reservaModalSearch);
+        const matchSup = normalizeStr(r.supervisor).includes(query);
+        const matchFundo = normalizeStr(r.fundo).includes(query);
+        const matchMod = normalizeStr(r.modulo).includes(query);
+        const matchTrabajador = (r.trabajadores || []).some(
+          (t) =>
+            t.dni.includes(query) ||
+            normalizeStr(t.nombres).includes(query)
+        );
+        if (!matchSup && !matchFundo && !matchMod && !matchTrabajador) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [reservasState, reservaModalDateFilter, reservaModalSupervisorFilter, reservaModalSearch, hoyStr, matchesSupervisor, normalizeStr]);
 
   // Pre-indexed workers for sub-millisecond search and strict binding
   const indexedTrabajadores = useMemo(() => {
@@ -525,6 +602,63 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     setShowSupervisorForm(false);
     onToast(`✅ Supervisor "${clean}" registrado y seleccionado`, 'success');
   };
+
+  // Delete Supervisor handler
+  const handleDeleteSupervisorClick = (supName: string) => {
+    const clean = supName.trim();
+    if (!clean) return;
+
+    const assignedCount = trabajadores.filter((t) => matchesSupervisor(t.supervisor, clean)).length;
+    const confirmMsg = assignedCount > 0
+      ? `¿Estás seguro de eliminar al supervisor "${clean}"?\n\nTiene ${assignedCount} trabajador(es) asignado(s) que quedarán desvinculados de este supervisor. Esta acción se sincronizará en todos los dispositivos.`
+      : `¿Estás seguro de eliminar al supervisor "${clean}"? Se eliminará del sistema para todos los dispositivos.`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    if (cuadrillaSupervisor && matchesSupervisor(cuadrillaSupervisor, clean)) {
+      setCuadrillaSupervisor('');
+    }
+
+    if (onDeleteSupervisor) {
+      onDeleteSupervisor(clean);
+    } else {
+      onToast(`🗑️ Supervisor "${clean}" eliminado`);
+    }
+
+    // Actualizar trabajadores localmente si corresponde
+    if (onUpdateTrabajadores && assignedCount > 0) {
+      const updated = trabajadores.map((t) =>
+        matchesSupervisor(t.supervisor, clean) ? { ...t, supervisor: '' } : t
+      );
+      onUpdateTrabajadores(updated);
+    }
+
+    // Quitar de reservas locales
+    setReservasState((prev) => prev.filter((r) => !matchesSupervisor(r.supervisor, clean)));
+  };
+
+  // Quick add from Modal
+  const handleModalAddSupervisor = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = nuevoSupervisorInput.trim();
+    if (!clean) {
+      onToast('⚠️ Ingresa el nombre del supervisor', 'warning');
+      return;
+    }
+    if (onSaveSupervisor) {
+      onSaveSupervisor(clean);
+    }
+    setCuadrillaSupervisor(clean);
+    setNuevoSupervisorInput('');
+    onToast(`✅ Supervisor "${clean}" registrado y seleccionado`, 'success');
+  };
+
+  // Filtered supervisors for management modal
+  const filteredGestionSupervisores = useMemo(() => {
+    if (!filtroGestionSupervisorSearch.trim()) return supervisoresList;
+    const q = filtroGestionSupervisorSearch.toLowerCase().trim();
+    return supervisoresList.filter((s) => s.toLowerCase().includes(q));
+  }, [supervisoresList, filtroGestionSupervisorSearch]);
 
   // Register new Modulo
   const handleRegisterModulo = (e: React.FormEvent) => {
@@ -766,10 +900,29 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       onUpdateTrabajadores(updated);
     }
 
-    // 2. Construir objeto de Reserva de Cuadrilla
+    // 2. Construir objeto de Reserva de Cuadrilla vinculada al Supervisor
+    const cleanSupSlug = targetSupervisor
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '_')
+      .slice(0, 20);
+
+    const existingMatch = reservasState.find(
+      (r) =>
+        r.fecha === targetDate &&
+        matchesSupervisor(r.supervisor, targetSupervisor) &&
+        r.fundo === targetFundo &&
+        r.modulo === targetModulo
+    );
+
+    const reservaId = existingMatch
+      ? existingMatch.id
+      : `RES_${targetDate}_${cleanSupSlug}_${targetModulo}_${Date.now().toString().slice(-4)}`;
+
     const selectedWorkers = trabajadores.filter((t) => selectedDnis.has(String(t.dni).trim()));
     const newReserva: ReservaCuadrilla = {
-      id: `RES_${targetDate}_${targetModulo}_${Date.now().toString().slice(-4)}`,
+      id: reservaId,
       fecha: targetDate,
       hora: horaStr,
       supervisor: targetSupervisor,
@@ -786,7 +939,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       timestamp: getLocalISO()
     };
 
-    const updatedReservas = [newReserva, ...reservasState.filter((r) => r.id !== newReserva.id)];
+    const updatedReservas = mergeReservasArrays(reservasState, [newReserva]);
     setReservasState(updatedReservas);
     saveReservas(updatedReservas);
     if (onSaveReserva) {
@@ -795,7 +948,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     setLastSavedReserva(newReserva);
 
     onToast(
-      `💾 Reserva guardada con éxito: ${selectedDnis.size} trabajadores amarrados a ${targetSupervisor} (${targetFundo} - ${targetModulo}). Ahora puedes continuar al registro de jabas cuando lo desees.`,
+      `💾 Reserva guardada para ${targetSupervisor}: ${selectedDnis.size} trabajadores amarrados a ${targetFundo} - ${targetModulo}.`,
       'success'
     );
   };
@@ -827,6 +980,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     const updated = reservasState.filter((r) => r.id !== reservaId);
     setReservasState(updated);
     saveReservas(updated);
+    if (onDeleteReserva) {
+      onDeleteReserva(reservaId);
+    }
     if (lastSavedReserva?.id === reservaId) {
       setLastSavedReserva(null);
     }
@@ -1071,16 +1227,107 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 </div>
               </div>
 
-              {reservasState.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setShowGestionSupervisoresModal(true)}
+                  className="bg-white hover:bg-[#e8f5e9] text-[#1b5e20] border border-[#a5d6a7] text-xs font-bold py-1.5 px-3 rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                  title="Gestionar y eliminar supervisores registrados"
+                >
+                  <UserCog className="w-3.5 h-3.5 text-[#2e7d32]" />
+                  <span>Gestionar Supervisores ({supervisoresList.length})</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setShowReservasModal(true)}
-                  className="bg-white hover:bg-[#e8f5e9] text-[#1b5e20] border border-[#a5d6a7] text-xs font-bold py-1.5 px-3 rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer transition-all self-start sm:self-auto"
+                  className="bg-white hover:bg-[#e8f5e9] text-[#1b5e20] border border-[#a5d6a7] text-xs font-bold py-1.5 px-3 rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                  title="Ver y gestionar reservas de cuadrilla por supervisor"
                 >
                   <Bookmark className="w-3.5 h-3.5 text-[#2e7d32]" />
-                  <span>Ver Reservas Guardadas ({reservasState.length})</span>
+                  <span>
+                    Reservas por Supervisor ({countSupervisoresConReservaHoy} hoy / {reservasState.length} total)
+                  </span>
                 </button>
-              )}
+              </div>
+            </div>
+
+            {/* Barra de Supervisores del Día (Soporte para 10+ supervisores por día) */}
+            <div className="mb-4 bg-[#f1f8e9]/60 border border-[#c8e6c9] rounded-xl p-3 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-2">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-[#2e7d32]" />
+                  <span className="text-xs font-bold text-[#1b5e20]">
+                    Supervisores del Día ({hoyStr}):
+                  </span>
+                  <span className="text-[11px] font-bold text-[#1b5e20] bg-white border border-[#a5d6a7] px-2 py-0.5 rounded-full shadow-2xs">
+                    {countSupervisoresConReservaHoy} de {supervisoresList.length} con reserva guardada
+                  </span>
+                </div>
+                <span className="text-[10px] text-gray-500 italic">
+                  💡 Haz clic en cualquier supervisor para cargar o configurar su reserva individual
+                </span>
+              </div>
+
+              {/* Pills horizontales scrolleables de cada supervisor */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1.5 pt-0.5 scrollbar-thin">
+                {supervisoresEstadoHoy.map((item) => {
+                  const isCurrent = matchesSupervisor(item.supervisor, cuadrillaSupervisor);
+                  return (
+                    <button
+                      key={item.supervisor}
+                      type="button"
+                      onClick={() => {
+                        setCuadrillaSupervisor(item.supervisor);
+                        if (item.hasReserva && item.reserva) {
+                          handleLoadReserva(item.reserva);
+                        } else {
+                          const prevWorker = trabajadores.find((t) => matchesSupervisor(t.supervisor, item.supervisor));
+                          if (prevWorker?.fundo) setCuadrillaFundo(prevWorker.fundo);
+                          if (prevWorker?.modulo) setCuadrillaModulo(prevWorker.modulo);
+                          setSelectedDnis(new Set());
+                          setLastSavedReserva(null);
+                          onToast(`👤 Supervisor seleccionado: ${item.supervisor}. Selecciona a sus trabajadores para guardar su reserva.`, 'info');
+                        }
+                      }}
+                      className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer border ${
+                        isCurrent
+                          ? 'border-[#2e7d32] bg-[#2e7d32] text-white shadow-sm ring-2 ring-[#a5d6a7]'
+                          : item.hasReserva
+                          ? 'border-[#a5d6a7] bg-white text-[#1b5e20] hover:bg-[#e8f5e9] shadow-2xs'
+                          : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                      title={
+                        item.hasReserva
+                          ? `${item.supervisor}: ${item.totalTrabajadores} trabajadores guardados (${item.fundo} - ${item.modulo}). Clic para cargar.`
+                          : `${item.supervisor}: Sin reserva hoy. Clic para seleccionar y armar cuadrilla.`
+                      }
+                    >
+                      {item.hasReserva ? (
+                        <CheckCircle2 className={`w-3.5 h-3.5 ${isCurrent ? 'text-white' : 'text-[#2e7d32]'}`} />
+                      ) : (
+                        <Clock className={`w-3.5 h-3.5 ${isCurrent ? 'text-white' : 'text-gray-400'}`} />
+                      )}
+                      <span className="font-semibold">{item.supervisor}</span>
+                      {item.hasReserva ? (
+                        <span
+                          className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                            isCurrent
+                              ? 'bg-white/20 text-white'
+                              : 'bg-[#e8f5e9] text-[#1b5e20] border border-[#c8e6c9]'
+                          }`}
+                        >
+                          {item.totalTrabajadores} trab.
+                        </span>
+                      ) : (
+                        <span className={`text-[10px] ${isCurrent ? 'text-white/80' : 'text-gray-400'}`}>
+                          pendiente
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Formulario Secuencial con Ejemplos Visuales */}
@@ -1092,17 +1339,29 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     <UserCheck className="w-3.5 h-3.5" />
                     <span>1. Supervisor</span>
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowSupervisorForm(!showSupervisorForm);
-                      setShowGrupoForm(false);
-                      setShowLeaderForm(false);
-                    }}
-                    className="text-[10px] text-[#2e7d32] hover:underline font-normal cursor-pointer"
-                  >
-                    {showSupervisorForm ? 'Cerrar' : '+ Registrar'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowGestionSupervisoresModal(true)}
+                      className="text-[10px] text-[#2e7d32] hover:underline font-semibold cursor-pointer flex items-center gap-0.5"
+                      title="Gestionar y eliminar supervisores"
+                    >
+                      <UserCog className="w-3 h-3" />
+                      <span>Gestionar</span>
+                    </button>
+                    <span className="text-gray-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowSupervisorForm(!showSupervisorForm);
+                        setShowGrupoForm(false);
+                        setShowLeaderForm(false);
+                      }}
+                      className="text-[10px] text-[#2e7d32] hover:underline font-normal cursor-pointer"
+                    >
+                      {showSupervisorForm ? 'Cerrar' : '+ Registrar'}
+                    </button>
+                  </div>
                 </label>
                 <div className="relative">
                   <select
@@ -1280,55 +1539,140 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               </div>
             </div>
 
-            {/* Sub-Panel Opcional: Registro de Nuevo Supervisor */}
+            {/* Sub-Panel Opcional: Registro y Gestión de Supervisores */}
             {showSupervisorForm && (
-              <form
-                onSubmit={handleRegisterSupervisor}
-                className="mb-5 p-4 bg-[#e8f5e9]/80 rounded-xl border border-[#a5d6a7] space-y-3 animate-in fade-in"
-              >
-                <div className="flex items-center justify-between pb-2 border-b border-[#a5d6a7]">
-                  <div className="flex items-center gap-2">
-                    <UserCheck className="w-4 h-4 text-[#2e7d32]" />
-                    <h3 className="text-xs font-bold text-[#1b5e20] uppercase tracking-wide">
-                      Registrar Nuevo Supervisor
-                    </h3>
+              <div className="mb-5 p-4 bg-[#e8f5e9]/80 rounded-xl border border-[#a5d6a7] space-y-4 animate-in fade-in">
+                <form
+                  onSubmit={handleRegisterSupervisor}
+                  className="space-y-3"
+                >
+                  <div className="flex items-center justify-between pb-2 border-b border-[#a5d6a7]">
+                    <div className="flex items-center gap-2">
+                      <UserCheck className="w-4 h-4 text-[#2e7d32]" />
+                      <h3 className="text-xs font-bold text-[#1b5e20] uppercase tracking-wide">
+                        Registrar Nuevo Supervisor
+                      </h3>
+                    </div>
+                    <span className="text-[11px] text-[#757575]">Se registrará y seleccionará automáticamente</span>
                   </div>
-                  <span className="text-[11px] text-[#757575]">Se registrará y seleccionará automáticamente</span>
-                </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-[#40493d] mb-1">
-                      Nombre Completo del Supervisor *
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ej: Carlos Solar, Maria Quispe..."
-                      value={newSupervisorNombre}
-                      onChange={(e) => setNewSupervisorNombre(e.target.value)}
-                      required
-                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white text-gray-900 focus:outline-none focus:border-[#2e7d32]"
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#40493d] mb-1">
+                        Nombre Completo del Supervisor *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ej: Carlos Solar, Maria Quispe..."
+                        value={newSupervisorNombre}
+                        onChange={(e) => setNewSupervisorNombre(e.target.value)}
+                        required
+                        className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#bfcaba] bg-white text-gray-900 focus:outline-none focus:border-[#2e7d32]"
+                      />
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex justify-end gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowSupervisorForm(false)}
-                    className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Guardar Supervisor</span>
-                  </button>
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowSupervisorForm(false)}
+                      className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Guardar Supervisor</span>
+                    </button>
+                  </div>
+                </form>
+
+                {/* Sección de Gestión / Eliminación de Supervisores */}
+                <div className="pt-3 border-t border-[#a5d6a7]">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <UserCog className="w-3.5 h-3.5 text-[#2e7d32]" />
+                      <span className="text-xs font-bold text-[#1b5e20] uppercase">
+                        Supervisores Registrados en el Sistema ({supervisoresList.length})
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-gray-500">Puedes eliminar supervisores obsoletos o duplicados</span>
+                  </div>
+
+                  {supervisoresList.length === 0 ? (
+                    <div className="text-center py-3 text-xs text-gray-500 bg-white/60 rounded-lg border border-dashed border-[#a5d6a7]">
+                      No hay supervisores registrados actualmente.
+                    </div>
+                  ) : (
+                    <div className="max-h-52 overflow-y-auto space-y-1.5 bg-white/80 p-2 rounded-lg border border-[#a5d6a7]">
+                      {supervisoresList.map((sup) => {
+                        const countWorkers = trabajadores.filter((t) => matchesSupervisor(t.supervisor, sup)).length;
+                        const resHoy = reservasHoy.find((r) => matchesSupervisor(r.supervisor, sup));
+                        const isCurrent = matchesSupervisor(sup, cuadrillaSupervisor);
+                        return (
+                          <div
+                            key={sup}
+                            className={`flex items-center justify-between px-3 py-2 bg-white rounded-md border text-xs transition-colors ${
+                              isCurrent ? 'border-[#2e7d32] ring-1 ring-[#a5d6a7]' : 'border-gray-200 hover:border-[#a5d6a7]'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm">👤</span>
+                              <div>
+                                <span className="font-bold text-gray-900">{sup}</span>
+                                <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                    countWorkers > 0 ? 'bg-[#e8f5e9] text-[#1b5e20]' : 'bg-gray-100 text-gray-500'
+                                  }`}>
+                                    {countWorkers} {countWorkers === 1 ? 'trabajador' : 'trabajadores'}
+                                  </span>
+                                  {resHoy && (
+                                    <span className="text-[10px] bg-[#e8f5e9] text-[#1b5e20] font-semibold px-1.5 py-0.5 rounded border border-[#c8e6c9]">
+                                      ✓ Reserva hoy ({resHoy.modulo})
+                                    </span>
+                                  )}
+                                  {isCurrent && (
+                                    <span className="text-[10px] bg-[#2e7d32] text-white font-bold px-1.5 py-0.5 rounded">
+                                      Seleccionado
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              {!isCurrent && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCuadrillaSupervisor(sup);
+                                    onToast(`👤 Supervisor "${sup}" seleccionado`);
+                                  }}
+                                  className="text-[#2e7d32] hover:bg-[#e8f5e9] px-2 py-1 rounded text-[11px] font-semibold cursor-pointer transition-colors"
+                                >
+                                  Seleccionar
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteSupervisorClick(sup)}
+                                className="text-red-600 hover:text-red-800 hover:bg-red-50 p-1.5 rounded-md flex items-center gap-1 transition-colors cursor-pointer"
+                                title={`Eliminar supervisor ${sup}`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span className="text-[11px] font-semibold">Eliminar</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-              </form>
+              </div>
             )}
 
             {/* Sub-Panel Opcional: Registro de Nuevo Módulo */}
@@ -1908,21 +2252,36 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               )}
             </div>
 
-            {/* Status bar if reservation was just saved */}
-            {lastSavedReserva && (
+            {/* Status bar if reservation is active for current supervisor */}
+            {(lastSavedReserva || currentSupervisorReservaHoy) && (
               <div className="bg-[#e8f5e9] border border-[#81c784] rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mt-4 animate-in fade-in">
                 <div className="flex items-center gap-2.5 text-xs text-[#1b5e20]">
                   <CheckCircle2 className="w-4 h-4 text-[#2e7d32] shrink-0" />
                   <div>
-                    <span className="font-bold">Reserva Activa: </span>
+                    <span className="font-bold">Reserva Activa de Hoy: </span>
                     <span>
-                      <b>{lastSavedReserva.totalTrabajadores}</b> trabajadores amarrados a <b>{lastSavedReserva.supervisor}</b> ({lastSavedReserva.fundo} - {lastSavedReserva.modulo}) a las {lastSavedReserva.hora}.
+                      <b>{(lastSavedReserva || currentSupervisorReservaHoy)?.totalTrabajadores}</b> trabajadores reservados para <b>{(lastSavedReserva || currentSupervisorReservaHoy)?.supervisor}</b> ({(lastSavedReserva || currentSupervisorReservaHoy)?.fundo} - {(lastSavedReserva || currentSupervisorReservaHoy)?.modulo}) a las {(lastSavedReserva || currentSupervisorReservaHoy)?.hora || '07:00'}.
                     </span>
                   </div>
                 </div>
-                <span className="text-[11px] font-semibold bg-white text-[#2e7d32] px-2.5 py-1 rounded-full border border-[#a5d6a7]">
-                  Listo para asignar jabas
-                </span>
+                <div className="flex items-center gap-2 self-end sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => handleLoadReserva((lastSavedReserva || currentSupervisorReservaHoy)!)}
+                    className="text-[11px] font-bold bg-white hover:bg-[#c8e6c9] text-[#1b5e20] px-2.5 py-1 rounded-lg border border-[#a5d6a7] cursor-pointer transition-colors flex items-center gap-1 shadow-2xs"
+                    title="Cargar esta reserva para continuar al registro de jabas"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Recargar Cuadrilla</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowReservasModal(true)}
+                    className="text-[11px] font-bold bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-2.5 py-1 rounded-lg cursor-pointer transition-colors shadow-2xs"
+                  >
+                    Ver Todas ({countSupervisoresConReservaHoy})
+                  </button>
+                </div>
               </div>
             )}
 
@@ -2574,112 +2933,231 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         </div>
       )}
 
-      {/* Modal de Reservas Guardadas de Cuadrilla */}
+      {/* Modal de Reservas Guardadas de Cuadrilla por Supervisor */}
       {showReservasModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-xl w-full p-5 shadow-2xl border border-gray-200 max-h-[90vh] flex flex-col">
+          <div className="bg-white rounded-2xl max-w-3xl w-full p-5 sm:p-6 shadow-2xl border border-gray-200 max-h-[92vh] flex flex-col">
+            {/* Header del Modal */}
             <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-[#e8f5e9] flex items-center justify-center text-[#1b5e20]">
-                  <Bookmark className="w-4 h-4" />
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-[#e8f5e9] flex items-center justify-center text-[#1b5e20] shadow-2xs">
+                  <Bookmark className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-gray-900">
-                    Reservas Guardadas de Cuadrilla
+                  <h3 className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <span>Reservas de Cuadrilla por Supervisor</span>
+                    <span className="text-xs bg-[#e8f5e9] text-[#1b5e20] px-2 py-0.5 rounded-full font-bold border border-[#c8e6c9]">
+                      {countSupervisoresConReservaHoy} de {supervisoresList.length} hoy
+                    </span>
                   </h3>
                   <p className="text-xs text-gray-500">
-                    {reservasState.length} reserva(s) guardada(s) antes de asignar jabas
+                    Cada supervisor mantiene su cuadrilla guardada de forma independiente para el día
                   </p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowReservasModal(false)}
-                className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 cursor-pointer"
+                className="text-gray-400 hover:text-gray-700 p-1.5 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
               >
                 ✕
               </button>
             </div>
 
+            {/* Barra de Filtros: Fecha, Supervisor y Búsqueda */}
+            <div className="pt-3 pb-2 space-y-2.5 border-b border-gray-100">
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                {/* Selector de Rango de Fecha */}
+                <div className="sm:col-span-4 flex items-center bg-gray-100 p-1 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setReservaModalDateFilter('hoy')}
+                    className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer text-center ${
+                      reservaModalDateFilter === 'hoy'
+                        ? 'bg-white text-[#1b5e20] shadow-xs'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    Hoy ({hoyStr})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReservaModalDateFilter('todas')}
+                    className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer text-center ${
+                      reservaModalDateFilter === 'todas'
+                        ? 'bg-white text-[#1b5e20] shadow-xs'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    Todas ({reservasState.length})
+                  </button>
+                </div>
+
+                {/* Filtro por Supervisor */}
+                <div className="sm:col-span-4">
+                  <select
+                    value={reservaModalSupervisorFilter}
+                    onChange={(e) => setReservaModalSupervisorFilter(e.target.value)}
+                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-gray-200 bg-white font-medium text-gray-900 focus:outline-none focus:border-[#2e7d32]"
+                  >
+                    <option value="todos">Todos los Supervisores ({supervisoresList.length})</option>
+                    {supervisoresList.map((sup) => {
+                      const hasRes = reservasHoy.some((r) => matchesSupervisor(r.supervisor, sup));
+                      return (
+                        <option key={sup} value={sup}>
+                          {hasRes ? '✓ ' : ''}{sup} {hasRes ? '(Con reserva)' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {/* Buscador de texto */}
+                <div className="sm:col-span-4 relative">
+                  <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={reservaModalSearch}
+                    onChange={(e) => setReservaModalSearch(e.target.value)}
+                    placeholder="Buscar trabajador, DNI, módulo..."
+                    className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-gray-200 bg-white focus:outline-none focus:border-[#2e7d32]"
+                  />
+                  {reservaModalSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setReservaModalSearch('')}
+                      className="absolute right-2.5 top-2 text-gray-400 hover:text-gray-600 text-xs"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Chips rápidos de Supervisores */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin text-xs">
+                <span className="text-[11px] font-bold text-gray-400 shrink-0 mr-1">Filtrar:</span>
+                <button
+                  type="button"
+                  onClick={() => setReservaModalSupervisorFilter('todos')}
+                  className={`shrink-0 px-2 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all ${
+                    reservaModalSupervisorFilter === 'todos'
+                      ? 'bg-[#2e7d32] text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  Todos ({filteredModalReservas.length})
+                </button>
+                {supervisoresEstadoHoy.map((item) => (
+                  <button
+                    key={item.supervisor}
+                    type="button"
+                    onClick={() => setReservaModalSupervisorFilter(item.supervisor)}
+                    className={`shrink-0 px-2 py-1 rounded-lg text-xs font-medium cursor-pointer transition-all flex items-center gap-1 border ${
+                      reservaModalSupervisorFilter === item.supervisor
+                        ? 'bg-[#1b5e20] text-white border-[#1b5e20]'
+                        : item.hasReserva
+                        ? 'bg-[#f1f8e9] text-[#2e7d32] border-[#c8e6c9] hover:bg-[#e8f5e9]'
+                        : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    <span>{item.supervisor.split(' ')[0]}</span>
+                    {item.hasReserva && (
+                      <span className="text-[10px] bg-white text-[#2e7d32] px-1 py-0.2 rounded font-bold">
+                        {item.totalTrabajadores}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Listado de Reservas Filtradas */}
             <div className="overflow-y-auto flex-1 my-3 space-y-3 pr-1">
-              {reservasState.length === 0 ? (
+              {filteredModalReservas.length === 0 ? (
                 <div className="py-12 text-center text-gray-400 text-xs">
-                  No hay reservas guardadas aún.
-                  <div className="mt-1 text-gray-500">
-                    En el Paso 1, selecciona a los trabajadores y presiona <b>Guardar Reserva</b>.
+                  <Bookmark className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                  <div className="font-semibold text-gray-600">No se encontraron reservas con los filtros seleccionados</div>
+                  <div className="mt-1 text-gray-400">
+                    En el Paso 1, selecciona a los trabajadores de un supervisor y presiona <b>Guardar Reserva</b>.
                   </div>
                 </div>
               ) : (
-                reservasState.map((res) => (
+                filteredModalReservas.map((res) => (
                   <div
                     key={res.id}
-                    className="p-3.5 rounded-xl border border-gray-200 hover:border-[#a5d6a7] bg-[#fcfdfc] transition-all flex flex-col gap-2.5"
+                    className="p-4 rounded-xl border border-gray-200 hover:border-[#81c784] bg-[#fcfdfc] transition-all flex flex-col gap-2.5 shadow-2xs"
                   >
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                      <div className="flex items-center gap-2">
-                        <span className="bg-[#e8f5e9] text-[#1b5e20] text-[11px] font-bold px-2 py-0.5 rounded border border-[#c8e6c9]">
-                          {res.fecha} • {res.hora}
+                    {/* Fila Principal: Supervisor + Info + Acciones */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="bg-[#2e7d32] text-white text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs">
+                          <UserCheck className="w-3.5 h-3.5" />
+                          <span>{res.supervisor}</span>
                         </span>
-                        <span className="text-xs font-bold text-gray-800">
-                          {res.totalTrabajadores} trabajadores
+                        <span className="bg-[#e8f5e9] text-[#1b5e20] text-xs font-bold px-2.5 py-1 rounded-lg border border-[#c8e6c9]">
+                          👥 {res.totalTrabajadores} trabajadores
+                        </span>
+                        <span className="text-[11px] text-gray-500 font-medium flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {res.fecha} • {res.hora || '07:00'}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1.5 self-end sm:self-auto">
+
+                      <div className="flex items-center gap-2 self-end sm:self-auto">
                         <button
                           type="button"
                           onClick={() => handleLoadReserva(res)}
-                          className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition-all shadow-xs"
-                          title="Cargar esta reserva para continuar al registro de jabas"
+                          className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-xs active:scale-95"
+                          title="Cargar esta cuadrilla de trabajadores al panel principal"
                         >
-                          <RotateCcw className="w-3 h-3" />
+                          <RotateCcw className="w-3.5 h-3.5" />
                           <span>Cargar en Cuadrilla</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => handleDeleteReserva(res.id)}
-                          className="text-gray-400 hover:text-red-600 p-1 rounded-md hover:bg-red-50 cursor-pointer transition-colors"
-                          title="Eliminar reserva"
+                          className="text-gray-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 cursor-pointer transition-colors"
+                          title="Eliminar esta reserva"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
-                      <span className="bg-white px-2 py-0.5 rounded border border-gray-200">
-                        👤 <b>Sup:</b> {res.supervisor}
-                      </span>
-                      <span className="bg-white px-2 py-0.5 rounded border border-gray-200">
+                    {/* Metadatos de Localización */}
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-gray-700">
+                      <span className="bg-white px-2.5 py-0.5 rounded-md border border-gray-200">
                         📍 <b>Fundo:</b> {res.fundo}
                       </span>
-                      <span className="bg-white px-2 py-0.5 rounded border border-gray-200 font-bold text-[#1b5e20]">
+                      <span className="bg-white px-2.5 py-0.5 rounded-md border border-[#c8e6c9] font-bold text-[#1b5e20]">
                         🌱 <b>Módulo:</b> {res.modulo}
                       </span>
                       {res.grupo && (
-                        <span className="bg-white px-2 py-0.5 rounded border border-gray-200">
-                          👥 {res.grupo}
+                        <span className="bg-white px-2.5 py-0.5 rounded-md border border-gray-200">
+                          👥 <b>Grupo:</b> {res.grupo}
                         </span>
                       )}
                       {res.lider && (
-                        <span className="bg-[#fff8e1] px-2 py-0.5 rounded border border-[#ffe082] text-[#e65100]">
-                          👑 {res.lider}
+                        <span className="bg-[#fff8e1] px-2.5 py-0.5 rounded-md border border-[#ffe082] text-[#e65100] font-medium">
+                          👑 <b>Líder:</b> {res.lider}
                         </span>
                       )}
                     </div>
 
-                    {/* Preview de trabajadores */}
-                    <div className="flex flex-wrap gap-1 pt-1 border-t border-gray-100 max-h-24 overflow-y-auto">
-                      {res.trabajadores.slice(0, 10).map((w) => (
+                    {/* Preview de Trabajadores Reservados */}
+                    <div className="flex flex-wrap gap-1 pt-2 border-t border-gray-100 max-h-24 overflow-y-auto">
+                      {(res.trabajadores || []).slice(0, 16).map((w) => (
                         <span
                           key={w.dni}
-                          className="text-[10px] bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded font-mono"
+                          className="text-[10px] bg-white text-gray-700 px-2 py-0.5 rounded-md font-mono border border-gray-200 shadow-2xs"
                         >
-                          {w.nombres.split(' ')[0]} ({w.dni})
+                          {w.nombres.split(' ')[0]} <span className="text-gray-400">({w.dni})</span>
                         </span>
                       ))}
-                      {res.trabajadores.length > 10 && (
-                        <span className="text-[10px] text-gray-400 self-center">
-                          +{res.trabajadores.length - 10} más...
+                      {(res.trabajadores || []).length > 16 && (
+                        <span className="text-[10px] text-gray-500 font-semibold self-center px-1.5">
+                          +{(res.trabajadores || []).length - 16} trabajadores más...
                         </span>
                       )}
                     </div>
@@ -2688,11 +3166,202 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               )}
             </div>
 
-            <div className="pt-2 border-t border-gray-100 flex justify-end">
+            {/* Footer con Resumen y Botón de Cierre */}
+            <div className="pt-3 border-t border-gray-100 flex items-center justify-between">
+              <div className="text-xs text-gray-600">
+                Total en vista:{' '}
+                <b>
+                  {filteredModalReservas.reduce((acc, r) => acc + (r.totalTrabajadores || 0), 0)}
+                </b>{' '}
+                trabajadores en <b>{filteredModalReservas.length}</b> reservas
+              </div>
               <button
                 type="button"
                 onClick={() => setShowReservasModal(false)}
-                className="px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 rounded-xl cursor-pointer"
+                className="px-5 py-2 text-xs font-bold text-gray-700 hover:bg-gray-100 rounded-xl cursor-pointer transition-colors"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Gestión de Supervisores */}
+      {showGestionSupervisoresModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl border border-gray-200 max-h-[92vh] flex flex-col">
+            {/* Header del Modal */}
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-[#e8f5e9] flex items-center justify-center text-[#1b5e20] shadow-2xs">
+                  <UserCog className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <span>Gestión de Supervisores</span>
+                    <span className="text-xs bg-[#e8f5e9] text-[#1b5e20] px-2.5 py-0.5 rounded-full font-bold border border-[#c8e6c9]">
+                      {supervisoresList.length} registrados
+                    </span>
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Administra, busca o elimina supervisores del sistema para todos los dispositivos
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGestionSupervisoresModal(false)}
+                className="text-gray-400 hover:text-gray-700 p-1.5 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Barra de Búsqueda y Agregar Rápido */}
+            <div className="pt-3 pb-3 space-y-3 border-b border-gray-100">
+              {/* Buscador */}
+              <div className="relative">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  value={filtroGestionSupervisorSearch}
+                  onChange={(e) => setFiltroGestionSupervisorSearch(e.target.value)}
+                  placeholder="Buscar supervisor por nombre..."
+                  className="w-full pl-9 pr-8 py-2 text-xs rounded-xl border border-gray-200 bg-white focus:outline-none focus:border-[#2e7d32] focus:ring-1 focus:ring-[#2e7d32]"
+                />
+                {filtroGestionSupervisorSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setFiltroGestionSupervisorSearch('')}
+                    className="absolute right-2.5 top-2.5 text-gray-400 hover:text-gray-600 text-xs"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Formulario rápido para nuevo supervisor */}
+              <form onSubmit={handleModalAddSupervisor} className="flex gap-2">
+                <input
+                  type="text"
+                  value={nuevoSupervisorInput}
+                  onChange={(e) => setNuevoSupervisorInput(e.target.value)}
+                  placeholder="+ Registrar nuevo supervisor (Ej: Juan Mendoza)..."
+                  className="flex-1 px-3 py-1.5 text-xs rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2e7d32]"
+                />
+                <button
+                  type="submit"
+                  className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-2xs flex items-center gap-1 cursor-pointer transition-all shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Agregar</span>
+                </button>
+              </form>
+            </div>
+
+            {/* Listado de Supervisores */}
+            <div className="overflow-y-auto flex-1 my-3 space-y-2 pr-1">
+              {filteredGestionSupervisores.length === 0 ? (
+                <div className="py-12 text-center text-gray-400 text-xs">
+                  <UserCheck className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                  <div className="font-semibold text-gray-600">No se encontraron supervisores</div>
+                  <div className="mt-1 text-gray-400">
+                    {filtroGestionSupervisorSearch ? 'Intenta con otro término de búsqueda' : 'Registra un supervisor arriba para comenzar'}
+                  </div>
+                </div>
+              ) : (
+                filteredGestionSupervisores.map((sup) => {
+                  const countWorkers = trabajadores.filter((t) => matchesSupervisor(t.supervisor, sup)).length;
+                  const resHoy = reservasHoy.find((r) => matchesSupervisor(r.supervisor, sup));
+                  const isCurrent = matchesSupervisor(sup, cuadrillaSupervisor);
+                  const userAccount = usuarios.find((u) => u.rol === 'Supervisor' && matchesSupervisor(u.nombre || u.user, sup));
+
+                  return (
+                    <div
+                      key={sup}
+                      className={`p-3.5 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        isCurrent
+                          ? 'border-[#2e7d32] bg-[#f1f8e9]/50 shadow-xs'
+                          : 'border-gray-200 hover:border-[#a5d6a7] bg-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 ${
+                          isCurrent ? 'bg-[#2e7d32] text-white' : 'bg-gray-100 text-gray-700'
+                        }`}>
+                          {sup.slice(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-gray-900 text-sm">{sup}</span>
+                            {isCurrent && (
+                              <span className="text-[10px] bg-[#2e7d32] text-white px-2 py-0.5 rounded-full font-bold">
+                                Activo en Cuadrilla
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1 text-xs">
+                            <span className={`px-2 py-0.5 rounded-md font-medium text-[11px] ${
+                              countWorkers > 0
+                                ? 'bg-[#e8f5e9] text-[#1b5e20] border border-[#c8e6c9]'
+                                : 'bg-gray-100 text-gray-500'
+                            }`}>
+                              👥 {countWorkers} {countWorkers === 1 ? 'trabajador asignado' : 'trabajadores asignados'}
+                            </span>
+                            {resHoy && (
+                              <span className="bg-[#fff8e1] text-[#b26a00] border border-[#ffe082] px-2 py-0.5 rounded-md font-medium text-[11px]">
+                                📅 Reserva hoy: {resHoy.modulo} ({resHoy.totalTrabajadores} trab.)
+                              </span>
+                            )}
+                            {userAccount && (
+                              <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-md text-[11px]">
+                                🔐 Cuenta: {userAccount.user}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                        {!isCurrent && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCuadrillaSupervisor(sup);
+                              setShowGestionSupervisoresModal(false);
+                              onToast(`👤 Supervisor "${sup}" seleccionado para armar cuadrilla`);
+                            }}
+                            className="bg-gray-100 hover:bg-[#e8f5e9] text-[#1b5e20] px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors"
+                          >
+                            Seleccionar
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSupervisorClick(sup)}
+                          className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors border border-red-200 active:scale-95"
+                          title={`Eliminar al supervisor ${sup} del sistema`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                          <span>Eliminar</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="pt-3 border-t border-gray-100 flex items-center justify-between">
+              <span className="text-xs text-gray-500">
+                Mostrando <b>{filteredGestionSupervisores.length}</b> de <b>{supervisoresList.length}</b> supervisores
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowGestionSupervisoresModal(false)}
+                className="px-5 py-2 text-xs font-bold text-gray-700 hover:bg-gray-100 rounded-xl cursor-pointer transition-colors"
               >
                 Cerrar
               </button>

@@ -47,13 +47,16 @@ import {
   saveSingleValidacion,
   getReservas,
   saveReservas,
+  saveSingleReserva,
+  mergeReservasArrays,
   getGsheetUrl, 
   isAutoSyncEnabled, 
   getLastSyncTime, 
   setLastSyncTime, 
   getFirebaseConfig,
   cleanValidacionesList,
-  purgeAllEmptyRecords
+  purgeAllEmptyRecords,
+  normalizeSupervisorKey
 } from './utils/storage';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
@@ -233,8 +236,9 @@ export default function App() {
       saveGrupos(d.grupos);
     }
     if (Array.isArray(d.reservas)) {
-      setReservasState(d.reservas);
-      saveReservas(d.reservas);
+      const merged = mergeReservasArrays(getReservas(), d.reservas);
+      setReservasState(merged);
+      saveReservas(merged);
     }
     if (d.modulos && typeof d.modulos === 'object') {
       const mergedMods = { ...getModulosPorFundo(), ...d.modulos };
@@ -805,6 +809,61 @@ export default function App() {
     triggerAutoSync('Registro Supervisor', { usuarios: updatedUsuarios });
   };
 
+  const handleDeleteSupervisor = (supervisorName: string) => {
+    const clean = (supervisorName || '').trim();
+    if (!clean) return;
+    const cleanNorm = normalizeSupervisorKey(clean);
+
+    // 1. Quitar supervisor de la lista de usuarios (si tiene rol Supervisor)
+    const updatedUsuarios = usuarios.filter((u) => {
+      if (u.rol !== 'Supervisor') return true;
+      const uNameNorm = normalizeSupervisorKey(u.nombre);
+      const uUserNorm = normalizeSupervisorKey(u.user);
+      return uNameNorm !== cleanNorm && uUserNorm !== cleanNorm;
+    });
+    setUsuariosState(updatedUsuarios);
+    saveUsuarios(updatedUsuarios);
+
+    // 2. Desvincular supervisor de los trabajadores asociados
+    let workersUpdated = false;
+    const updatedTrabajadores = trabajadores.map((t) => {
+      if (t.supervisor && normalizeSupervisorKey(t.supervisor) === cleanNorm) {
+        workersUpdated = true;
+        return { ...t, supervisor: '' };
+      }
+      return t;
+    });
+    if (workersUpdated) {
+      setTrabajadoresState(updatedTrabajadores);
+      saveTrabajadores(updatedTrabajadores);
+    }
+
+    // 3. Eliminar reservas vinculadas a este supervisor
+    const currentReservas = getReservas();
+    const updatedReservas = currentReservas.filter(
+      (r) => normalizeSupervisorKey(r.supervisor) !== cleanNorm
+    );
+    if (updatedReservas.length !== currentReservas.length) {
+      setReservasState(updatedReservas);
+      saveReservas(updatedReservas);
+    }
+
+    // 4. Actualizar servidor central mediante POST directo para sincronización inmediata
+    fetch('/api/usuarios', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuarios: updatedUsuarios })
+    }).catch(() => {});
+
+    addLog(`🗑️ Supervisor eliminado del sistema: ${clean}`, 'warn');
+    triggerAutoSync('Eliminar Supervisor', {
+      usuarios: updatedUsuarios,
+      ...(workersUpdated ? { trabajadores: updatedTrabajadores } : {}),
+      reservas: updatedReservas
+    });
+    addToast(`🗑️ Supervisor "${clean}" eliminado del sistema`);
+  };
+
   const handleSaveValidacion = (newValidacion: ValidacionSupervisor) => {
     const updated = saveSingleValidacion(newValidacion);
     setValidacionesState(updated);
@@ -822,13 +881,33 @@ export default function App() {
   };
 
   const handleSaveReserva = (newReserva: ReservaCuadrilla) => {
+    const updated = saveSingleReserva(newReserva);
+    setReservasState(updated);
+    addLog(`💾 Reserva guardada por Supervisor: ${newReserva.totalTrabajadores} trabajadores para ${newReserva.supervisor} (${newReserva.fundo} - ${newReserva.modulo})`, 'ok');
+
+    // Direct server POST to immediately persist and broadcast to other devices
+    fetch('/api/reservas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reserva: newReserva })
+    }).catch(() => {});
+
+    triggerAutoSync('Guardar Reserva por Supervisor', { reservas: updated });
+    addToast(`💾 Reserva guardada para ${newReserva.supervisor} (${newReserva.totalTrabajadores} trabajadores en ${newReserva.fundo} - ${newReserva.modulo})`, 'success');
+  };
+
+  const handleDeleteReserva = (reservaId: string) => {
     const current = getReservas();
-    const updated = [newReserva, ...current.filter((r) => r.id !== newReserva.id)];
+    const updated = current.filter((r) => r.id !== reservaId);
     setReservasState(updated);
     saveReservas(updated);
-    addLog(`💾 Reserva guardada: ${newReserva.totalTrabajadores} trabajadores para ${newReserva.supervisor} (${newReserva.fundo} - ${newReserva.modulo})`, 'ok');
-    triggerAutoSync('Guardar Reserva', { reservas: updated });
-    addToast(`💾 Reserva guardada con éxito (${newReserva.totalTrabajadores} trabajadores amarrados a ${newReserva.supervisor})`, 'success');
+
+    fetch(`/api/reservas/${encodeURIComponent(reservaId)}`, {
+      method: 'DELETE'
+    }).catch(() => {});
+
+    triggerAutoSync('Eliminar Reserva', { reservas: updated });
+    addToast(`🗑️ Reserva eliminada del sistema`);
   };
 
   const handleImportTrabajadores = (newWorkers: Trabajador[]) => {
@@ -1040,10 +1119,12 @@ export default function App() {
             onSaveLider={handleSaveLider}
             onDeleteLider={handleDeleteLider}
             onSaveSupervisor={handleSaveSupervisor}
+            onDeleteSupervisor={handleDeleteSupervisor}
             onSaveGrupo={handleSaveGrupo}
             onSaveAvance={handleSaveAvance}
             reservas={reservas}
             onSaveReserva={handleSaveReserva}
+            onDeleteReserva={handleDeleteReserva}
             onToast={addToast}
           />
         )}

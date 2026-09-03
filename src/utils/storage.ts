@@ -454,7 +454,60 @@ export function addModuloToFundo(fundo: string, modulo: string): Record<string, 
   return current;
 }
 
-// Reservas de Cuadrilla
+// Reservas de Cuadrilla por Supervisor
+export function normalizeSupervisorKey(sup?: string): string {
+  if (!sup) return '';
+  return sup
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+export function mergeReservasArrays(
+  listA: ReservaCuadrilla[] = [],
+  listB: ReservaCuadrilla[] = []
+): ReservaCuadrilla[] {
+  const map = new Map<string, ReservaCuadrilla>();
+  const all = [...(listA || []), ...(listB || [])];
+
+  for (const item of all) {
+    if (!item || !item.id) continue;
+
+    if (map.has(item.id)) {
+      const prev = map.get(item.id)!;
+      if ((item.timestamp || '') >= (prev.timestamp || '')) {
+        map.set(item.id, item);
+      }
+      continue;
+    }
+
+    // Check if there is an existing reservation with the same date, supervisor, fundo, and modulo
+    const normSup = normalizeSupervisorKey(item.supervisor);
+    const existingMatch = Array.from(map.values()).find(
+      (e) =>
+        e.fecha === item.fecha &&
+        normalizeSupervisorKey(e.supervisor) === normSup &&
+        e.fundo === item.fundo &&
+        e.modulo === item.modulo
+    );
+
+    if (existingMatch) {
+      if ((item.timestamp || '') >= (existingMatch.timestamp || '')) {
+        map.delete(existingMatch.id);
+        map.set(item.id, item);
+      }
+    } else {
+      map.set(item.id, item);
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) =>
+    (b.timestamp || '').localeCompare(a.timestamp || '')
+  );
+}
+
 export function getReservas(): ReservaCuadrilla[] {
   try {
     const raw = localStorage.getItem(KEYS.RESERVAS);
@@ -470,6 +523,13 @@ export function saveReservas(reservas: ReservaCuadrilla[]) {
   } catch (e) {
     console.warn('Error saving reservas:', e);
   }
+}
+
+export function saveSingleReserva(newReserva: ReservaCuadrilla): ReservaCuadrilla[] {
+  const current = getReservas();
+  const merged = mergeReservasArrays(current, [newReserva]);
+  saveReservas(merged);
+  return merged;
 }
 
 // Google Sheets Web App Config
