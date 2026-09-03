@@ -85,10 +85,16 @@ export default function App() {
 
   // State
   const [session, setSession] = useState<UserSession | null>(() => {
-    // If opened via shared link or explicit login param, enforce authentication screen
-    if (typeof window !== 'undefined' && window.location.search) {
+    // If opened via shared link, preview link or explicit login param, strictly enforce login screen
+    if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      if (params.get('shared') === '1' || params.get('login') === '1' || params.get('auth') === '1') {
+      const isSharedOrPreview = 
+        params.get('shared') === '1' || 
+        params.get('login') === '1' || 
+        params.get('auth') === '1' ||
+        window.location.hostname.includes('ais-pre-');
+
+      if (isSharedOrPreview) {
         clearSession();
         return null;
       }
@@ -484,9 +490,9 @@ export default function App() {
     setValidacionesState([]);
     setUsuariosState(getUsuarios());
 
-    // Clear central node server
+    // Clear central node server and wipe all backups
     try {
-      await fetch('/api/reset', { method: 'POST' });
+      await fetch('/api/wipe-backups', { method: 'POST' });
     } catch (e) {
       console.warn('Reset server api error:', e);
     }

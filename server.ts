@@ -392,6 +392,11 @@ async function startServer() {
     try {
       const incoming = req.body;
       if (incoming && typeof incoming === 'object') {
+        // If client specifies an older version, ignore outdated overwrites
+        if (typeof incoming.version === 'number' && db.version && incoming.version < db.version) {
+          return res.json({ status: 'ok', data: db, version: db.version, ignoredStale: true });
+        }
+
         if (Array.isArray(incoming.programas)) db.programas = incoming.programas;
         if (Array.isArray(incoming.programaGeneral)) db.programaGeneral = incoming.programaGeneral;
         if (Array.isArray(incoming.trabajadores)) db.trabajadores = incoming.trabajadores;
@@ -399,7 +404,12 @@ async function startServer() {
         if (Array.isArray(incoming.validaciones)) {
           db.validaciones = sanitizeValidaciones(incoming.validaciones);
         }
-        if (Array.isArray(incoming.usuarios) && incoming.usuarios.length > 0) db.usuarios = incoming.usuarios;
+        if (Array.isArray(incoming.usuarios) && incoming.usuarios.length > 0) {
+          // Always ensure admin exists
+          const adminUser = (incoming.usuarios || []).find((u: any) => u.user?.toLowerCase() === 'admin') || DEFAULT_USUARIOS[0];
+          const otherUsers = (incoming.usuarios || []).filter((u: any) => u.user?.toLowerCase() !== 'admin');
+          db.usuarios = [adminUser, ...otherUsers];
+        }
         if (Array.isArray(incoming.lideres)) db.lideres = incoming.lideres;
         if (Array.isArray(incoming.grupos)) db.grupos = incoming.grupos;
         if (Array.isArray(incoming.reservas)) {
@@ -422,6 +432,23 @@ async function startServer() {
     }
   });
 
+  // Wipe all backup and test data completely
+  app.post('/api/wipe-backups', (req, res) => {
+    try {
+      db = {
+        ...getInitialData(),
+        usuarios: DEFAULT_USUARIOS,
+        version: (db.version || 100) + 10,
+        lastUpdated: new Date().toISOString()
+      };
+      saveDatabase(db);
+      notifyClients({ type: 'sync', version: db.version, data: db });
+      res.json({ status: 'ok', message: 'Todos los datos de backup eliminados', data: db });
+    } catch (err: any) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
   // Clean all test/mock data
   app.post('/api/reset', (req, res) => {
     try {
@@ -431,7 +458,7 @@ async function startServer() {
       db = {
         ...getInitialData(),
         usuarios: preservedUsers.length > 0 ? preservedUsers : DEFAULT_USUARIOS,
-        version: (db.version || 1) + 1,
+        version: (db.version || 100) + 10,
         lastUpdated: new Date().toISOString()
       };
       saveDatabase(db);

@@ -1,5 +1,5 @@
 {
-  "version": 100,
+  "version": 105,
   "usuarios": [
     {
       "user": "admin",
@@ -60,5 +60,5 @@
   "validaciones": [],
   "lideres": [],
   "reservas": [],
-  "lastUpdated": "2026-09-03T19:30:00.000Z"
+  "lastUpdated": "2026-09-03T20:00:00.000Z"
 }

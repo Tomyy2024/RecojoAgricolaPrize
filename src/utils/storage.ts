@@ -124,27 +124,30 @@ export function formatDateDDMMAAAA(d?: string): string {
   return trimmed;
 }
 
-// Auto-repair & sanity check
+// Auto-repair, wipe backup data & sanity check
 export function initializeStorage() {
   try {
     const WIPE_VERSION_KEY = 'recojoFrutosDataVersion';
-    const TARGET_VERSION = 'v100_clean_wipe';
+    const TARGET_VERSION = 'v105_clean_wipe_all_backups_require_login';
+    
+    // Check if this browser needs a clean wipe of all backup and cached data
     if (typeof localStorage !== 'undefined' && localStorage.getItem(WIPE_VERSION_KEY) !== TARGET_VERSION) {
-      resetAllData();
-      const sess = getSession();
-      if (sess && (sess.rol === 'Supervisor' || sess.rol === 'Trabajador')) {
-        clearSession();
-      }
+      wipeAllBackupData();
+      clearSession();
       localStorage.setItem(WIPE_VERSION_KEY, TARGET_VERSION);
     }
 
-    // Check URL parameters for instant Cloud Sync setup & shared link login requirement
-    if (typeof window !== 'undefined' && window.location.search) {
+    // Always ensure login screen is required on shared links or when login parameter is present
+    if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
-      const isShared = urlParams.get('shared') === '1' || urlParams.get('login') === '1' || urlParams.get('auth') === '1';
-      if (isShared) {
-        // Enforce login for shared links: clear existing cached session
-        localStorage.removeItem(KEYS.SESSION);
+      const isSharedOrExplicitLogin = 
+        urlParams.get('shared') === '1' || 
+        urlParams.get('login') === '1' || 
+        urlParams.get('auth') === '1' ||
+        window.location.hostname.includes('ais-pre-');
+        
+      if (isSharedOrExplicitLogin) {
+        clearSession();
       }
 
       const cloudUrl = urlParams.get('cloud') || urlParams.get('gsheet');
@@ -159,9 +162,19 @@ export function initializeStorage() {
       }
     }
 
-    // Check & Seed Usuarios
-    if (!localStorage.getItem(KEYS.USUARIOS)) {
+    // Check & Seed Usuarios (Clean Admin Only)
+    const rawUsers = localStorage.getItem(KEYS.USUARIOS);
+    if (!rawUsers) {
       localStorage.setItem(KEYS.USUARIOS, JSON.stringify(INITIAL_USUARIOS));
+    } else {
+      try {
+        const parsed = JSON.parse(rawUsers);
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          localStorage.setItem(KEYS.USUARIOS, JSON.stringify(INITIAL_USUARIOS));
+        }
+      } catch {
+        localStorage.setItem(KEYS.USUARIOS, JSON.stringify(INITIAL_USUARIOS));
+      }
     }
 
     // Check & Seed Trabajadores
@@ -208,9 +221,12 @@ export function initializeStorage() {
   }
 }
 
-// Reset all test records to a completely clean state
-export function resetAllData() {
+// Completely wipe all backup, test, and historical data from localStorage
+export function wipeAllBackupData() {
   try {
+    if (typeof localStorage === 'undefined') return;
+
+    // 1. Reset standard app datasets to clean empty arrays
     localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify([]));
     localStorage.setItem(KEYS.PROGRAMAS, JSON.stringify([]));
     localStorage.setItem(KEYS.PROGRAMA_GENERAL, JSON.stringify([]));
@@ -220,31 +236,87 @@ export function resetAllData() {
     localStorage.setItem(KEYS.LIDERES, JSON.stringify([]));
     localStorage.setItem(KEYS.GRUPOS, JSON.stringify([]));
     localStorage.setItem(KEYS.RESERVAS, JSON.stringify([]));
-    const currentUsers = getUsuarios();
-    const cleanUsers = currentUsers.filter(u => u.rol !== 'Supervisor');
-    localStorage.setItem(KEYS.USUARIOS, JSON.stringify(cleanUsers.length > 0 ? cleanUsers : INITIAL_USUARIOS));
+    localStorage.setItem(KEYS.AUTO_SYNC_QUEUE, JSON.stringify([]));
+    localStorage.setItem(KEYS.USUARIOS, JSON.stringify(INITIAL_USUARIOS));
+
+    // 2. Remove any old sheet URLs or sync caches that might re-import backups
+    localStorage.removeItem(KEYS.GSHEET_URL);
+    localStorage.removeItem(KEYS.AUTO_SYNC);
+    localStorage.removeItem(KEYS.LAST_SYNC);
+
+    // 3. Scan and delete any ad-hoc backup keys in localStorage
+    const keysToDelete: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k) {
+        const lower = k.toLowerCase();
+        if (
+          lower.includes('backup') || 
+          lower.includes('bak') || 
+          lower.includes('temp') || 
+          lower.includes('historial') ||
+          lower.includes('old')
+        ) {
+          keysToDelete.push(k);
+        }
+      }
+    }
+    keysToDelete.forEach(k => localStorage.removeItem(k));
+
+    // 4. Also clear session so authentication is freshly required
+    clearSession();
   } catch (e) {
-    console.error('Reset all data error:', e);
+    console.error('Error wiping backup data:', e);
   }
 }
 
+// Reset all test records to a completely clean state
+export function resetAllData() {
+  wipeAllBackupData();
+}
 
-// Session Management
+
+// Session Management (Uses sessionStorage to strictly require login on shared links & new browser tabs)
 export function getSession(): UserSession | null {
   try {
-    const raw = localStorage.getItem(KEYS.SESSION);
-    return raw ? JSON.parse(raw) : null;
+    // 1. Check sessionStorage (active tab session)
+    if (typeof sessionStorage !== 'undefined') {
+      const raw = sessionStorage.getItem(KEYS.SESSION);
+      if (raw) {
+        return JSON.parse(raw);
+      }
+    }
+    // Shared or fresh links do not inherit sessions from localStorage
+    return null;
   } catch {
     return null;
   }
 }
 
 export function saveSession(session: UserSession) {
-  localStorage.setItem(KEYS.SESSION, JSON.stringify(session));
+  try {
+    // Active session stored in sessionStorage for current tab
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(KEYS.SESSION, JSON.stringify(session));
+    }
+    // Clean any persistent localStorage session to guarantee that shared links ask for login
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(KEYS.SESSION);
+    }
+  } catch (e) {
+    console.error('Error saving session:', e);
+  }
 }
 
 export function clearSession() {
-  localStorage.removeItem(KEYS.SESSION);
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(KEYS.SESSION);
+    }
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(KEYS.SESSION);
+    }
+  } catch {}
 }
 
 // Usuarios

@@ -228,43 +228,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onToast }) =>
           </button>
         </form>
 
-        {/* Quick Demo Access Accords */}
+        {/* Security & Access Info Footer */}
         <div className="mt-5 pt-4 border-t border-[#e0e0e0] text-left">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-[11px] font-bold text-[#5f6368] uppercase tracking-wider">
-              Accesos rápidos por rol:
-            </p>
-            <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">
-              {userList.length} cuentas sincronizadas
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-gray-500 font-medium">
+              Acceso seguro con credenciales
+            </span>
+            <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+              {userList.length} {userList.length === 1 ? 'cuenta activa' : 'cuentas activas'}
             </span>
           </div>
-
-          <div className="grid grid-cols-3 gap-1.5 text-xs">
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('admin', 'admin123')}
-              className="p-1.5 rounded-lg bg-[#f5f5f5] hover:bg-[#e8f5e9] hover:border-[#2e7d32] border border-[#e0e0e0] text-center transition-all cursor-pointer"
-            >
-              <div className="font-bold text-[#1b5e20] text-xs">Admin</div>
-              <div className="text-[9px] text-[#757575] truncate">admin123</div>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('supervisor1', 'super123')}
-              className="p-1.5 rounded-lg bg-[#f5f5f5] hover:bg-[#e8f5e9] hover:border-[#2e7d32] border border-[#e0e0e0] text-center transition-all cursor-pointer"
-            >
-              <div className="font-bold text-[#1b5e20] text-xs">Supervisor</div>
-              <div className="text-[9px] text-[#757575] truncate">super123</div>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('trabajador1', 'campo123')}
-              className="p-1.5 rounded-lg bg-[#f5f5f5] hover:bg-[#e8f5e9] hover:border-[#2e7d32] border border-[#e0e0e0] text-center transition-all cursor-pointer"
-            >
-              <div className="font-bold text-[#1b5e20] text-xs">Trabajador</div>
-              <div className="text-[9px] text-[#757575] truncate">campo123</div>
-            </button>
-          </div>
+          <p className="text-[11px] text-gray-400 mt-1">
+            Para registrar nuevos supervisores o trabajadores, accede con la cuenta de <b>Administrador</b>.
+          </p>
         </div>
       </motion.div>
     </div>
