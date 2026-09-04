@@ -100,7 +100,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const [reservaModalSupervisorFilter, setReservaModalSupervisorFilter] = useState<string>('todos');
   const [reservaModalDateFilter, setReservaModalDateFilter] = useState<'hoy' | 'todas'>('hoy');
   const [reservaModalSearch, setReservaModalSearch] = useState<string>('');
-  const [vistaAsignacion, setVistaAsignacion] = useState<'todos' | 'pendientes' | 'asignados'>('todos');
+  const [vistaAsignacion, setVistaAsignacion] = useState<'todos' | 'pendientes' | 'asignados'>('pendientes');
 
   // Supervisor checking
   const isSupervisorUser = session.rol === 'Supervisor';
@@ -2078,11 +2078,29 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             {/* Listado de Tarjetas de Trabajadores con renderizado de alto rendimiento */}
             <div className="max-h-96 overflow-y-auto space-y-2 rounded-xl border border-[#e0e0e0] p-2 bg-[#fafafa]">
               {!cuadrillaFundo && !cuadrillaSupervisor && !cuadrillaModulo && !searchTerm && (
-                <div className="bg-[#e8f5e9]/70 border border-[#a5d6a7] rounded-lg p-2 text-xs text-[#1b5e20] flex items-center justify-between gap-2 mb-2">
+                <div
+                  className={`border rounded-lg p-2 text-xs flex items-center justify-between gap-2 mb-2 ${
+                    vistaAsignacion === 'pendientes'
+                      ? 'bg-amber-50/90 border-amber-300 text-amber-950'
+                      : vistaAsignacion === 'asignados'
+                      ? 'bg-purple-50/90 border-purple-200 text-purple-950'
+                      : 'bg-[#e8f5e9]/70 border-[#a5d6a7] text-[#1b5e20]'
+                  }`}
+                >
                   <span className="flex items-center gap-1.5 font-medium">
-                    <Building2 className="w-4 h-4 text-[#2e7d32]" />
+                    {vistaAsignacion === 'pendientes' ? (
+                      <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+                    ) : vistaAsignacion === 'asignados' ? (
+                      <Users className="w-4 h-4 text-purple-600 shrink-0" />
+                    ) : (
+                      <Building2 className="w-4 h-4 text-[#2e7d32] shrink-0" />
+                    )}
                     <span>
-                      Nómina completa ({filteredTrabajadores.length} trabajadores). Activa filtros seleccionando Supervisor, Fundo o Módulo arriba.
+                      {vistaAsignacion === 'pendientes'
+                        ? `Mostrando trabajadores sin asignar (${filteredTrabajadores.length} pendientes). Selecciona Supervisor, Fundo o Módulo para filtrar tu cuadrilla.`
+                        : vistaAsignacion === 'asignados'
+                        ? `Mostrando trabajadores ya asignados (${filteredTrabajadores.length} asignados).`
+                        : `Nómina completa (${filteredTrabajadores.length} trabajadores). Activa filtros seleccionando Supervisor, Fundo o Módulo arriba.`}
                     </span>
                   </span>
                 </div>
