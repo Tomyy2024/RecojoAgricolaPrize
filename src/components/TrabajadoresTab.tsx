@@ -914,6 +914,78 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     );
   };
 
+  // Desasignar un trabajador individualmente: Quita Grupo y Líder para regresarlo a 'Sin Grupo ni Líder'
+  const handleDesasignarWorker = (t: Trabajador) => {
+    const normTargetDni = normalizeDni(t.dni);
+    const rawTargetDni = String(t.dni || '').trim();
+    const targetId = t.id;
+
+    if (onUpdateTrabajadores) {
+      const updated = trabajadores.map((w) => {
+        const normD = normalizeDni(w.dni);
+        const rawD = String(w.dni || '').trim();
+        const matches =
+          (targetId && w.id && w.id === targetId) ||
+          (normTargetDni && normD && normD === normTargetDni) ||
+          (rawTargetDni && rawD && rawD === rawTargetDni);
+
+        if (matches) {
+          return {
+            ...w,
+            grupo: '',
+            lider: ''
+          };
+        }
+        return w;
+      });
+      onUpdateTrabajadores(updated);
+    }
+
+    // Limpiar cualquier grupo temporal en memoria
+    if (normTargetDni) {
+      setWorkerAssignedGrupos((prev) => {
+        const copy = { ...prev };
+        delete copy[normTargetDni];
+        delete copy[rawTargetDni];
+        if (targetId) delete copy[targetId];
+        return copy;
+      });
+    }
+
+    onToast(`ℹ️ ${t.nombres} ahora está en "Sin Grupo ni Líder" (Pendiente)`, 'info');
+  };
+
+  // Desasignar todos los trabajadores asignados: Permite reiniciar la nómina a "Sin Grupo ni Líder"
+  const handleDesasignarTodos = () => {
+    if (countAsignados === 0) {
+      onToast('No hay trabajadores asignados para desasignar', 'info');
+      return;
+    }
+
+    const confirmMsg = `¿Estás seguro de desasignar a los ${countAsignados} trabajadores asignados?\n\nSe removerán sus Grupos y Líderes para que queden todos como "Sin Grupo ni Líder" (Pendientes) listos para una nueva asignación.`;
+    if (!window.confirm(confirmMsg)) {
+      return;
+    }
+
+    if (onUpdateTrabajadores) {
+      const updated = trabajadores.map((w) => {
+        if (isWorkerAsignado(w)) {
+          return {
+            ...w,
+            grupo: '',
+            lider: ''
+          };
+        }
+        return w;
+      });
+      onUpdateTrabajadores(updated);
+    }
+
+    setWorkerAssignedGrupos({});
+    setVistaAsignacion('pendientes');
+    onToast(`✅ Se desasignaron ${countAsignados} trabajadores. Toda la nómina está ahora como "Sin Grupo ni Líder".`, 'success');
+  };
+
   // Guardar Reserva: amarra a los trabajadores seleccionados al Supervisor, Fundo, Módulo, Grupo y Líder
   // y guarda la reserva antes de pasar a la asignación de jabas, permitiendo continuar todo el flujo normalmente
   const handleGuardarReserva = () => {
@@ -2217,13 +2289,25 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   {countTodos}
                 </span>
               </button>
+
+              {countAsignados > 0 && (
+                <button
+                  type="button"
+                  onClick={handleDesasignarTodos}
+                  className="px-2.5 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 cursor-pointer ml-auto transition-all active:scale-95 whitespace-nowrap"
+                  title="Quitar grupo y líder a todos los asignados para reiniciar la nómina a 'Sin Grupo ni Líder'"
+                >
+                  <RotateCcw className="w-3 h-3 text-red-600" />
+                  <span>Desasignar Todos ({countAsignados})</span>
+                </button>
+              )}
             </div>
 
             {/* Listado de Tarjetas de Trabajadores con renderizado de alto rendimiento */}
             <div className="max-h-96 overflow-y-auto space-y-2 rounded-xl border border-[#e0e0e0] p-2 bg-[#fafafa]">
               {!cuadrillaFundo && !cuadrillaSupervisor && !cuadrillaModulo && !searchTerm && (
                 <div
-                  className={`border rounded-lg p-2 text-xs flex items-center justify-between gap-2 mb-2 ${
+                  className={`border rounded-lg p-2 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-2 ${
                     vistaAsignacion === 'pendientes'
                       ? 'bg-amber-50/90 border-amber-300 text-amber-950'
                       : vistaAsignacion === 'asignados'
@@ -2243,10 +2327,21 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       {vistaAsignacion === 'pendientes'
                         ? `Mostrando trabajadores sin asignar (${filteredTrabajadores.length} pendientes). Selecciona Supervisor, Fundo o Módulo para filtrar tu cuadrilla.`
                         : vistaAsignacion === 'asignados'
-                        ? `Mostrando trabajadores ya asignados (${filteredTrabajadores.length} asignados).`
+                        ? `Mostrando trabajadores con Grupo o Líder guardado previamente (${filteredTrabajadores.length} asignados). Si aún no has asignado nada, puedes pulsar 'Desasignar Todos' para empezar desde cero.`
                         : `Nómina completa (${filteredTrabajadores.length} trabajadores). Activa filtros seleccionando Supervisor, Fundo o Módulo arriba.`}
                     </span>
                   </span>
+                  {vistaAsignacion === 'asignados' && countAsignados > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleDesasignarTodos}
+                      className="text-[10px] bg-red-600 hover:bg-red-700 text-white font-bold px-2 py-1 rounded-md shadow-2xs flex items-center gap-1 cursor-pointer shrink-0 transition-all active:scale-95 self-end sm:self-auto"
+                      title="Quitar asignación a todos los trabajadores"
+                    >
+                      <RotateCcw className="w-2.5 h-2.5" />
+                      <span>Desasignar Todos ({countAsignados})</span>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -2439,10 +2534,24 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                               <span>Seleccionado</span>
                             </span>
                           ) : isAsignado ? (
-                            <span className="text-[10px] bg-purple-100 text-purple-800 px-2.5 py-1 rounded-full font-bold border border-purple-200 flex items-center gap-1">
-                              <Users className="w-2.5 h-2.5 text-purple-600" />
-                              <span>Asignado</span>
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] bg-purple-100 text-purple-800 px-2.5 py-1 rounded-full font-bold border border-purple-200 flex items-center gap-1">
+                                <Users className="w-2.5 h-2.5 text-purple-600" />
+                                <span>Asignado</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDesasignarWorker(t);
+                                }}
+                                className="text-[10px] text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 border border-red-200 px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                                title={`Quitar Grupo y Líder a ${t.nombres}`}
+                              >
+                                <X className="w-2.5 h-2.5" />
+                                <span>Desasignar</span>
+                              </button>
+                            </div>
                           ) : (
                             <span className="text-[10px] bg-amber-100 text-amber-900 px-2.5 py-1 rounded-full font-bold border border-amber-300 flex items-center gap-1">
                               <Clock className="w-2.5 h-2.5 text-amber-700" />
