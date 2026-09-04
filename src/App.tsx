@@ -56,7 +56,10 @@ import {
   getFirebaseConfig,
   cleanValidacionesList,
   purgeAllEmptyRecords,
-  normalizeSupervisorKey
+  normalizeSupervisorKey,
+  getAuditoriaIngresos,
+  saveAuditoriaIngresos,
+  mergeAuditoriasArrays
 } from './utils/storage';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
@@ -216,6 +219,10 @@ export default function App() {
     if (Array.isArray(d.usuarios) && d.usuarios.length > 0) {
       setUsuariosState(d.usuarios);
       saveUsuarios(d.usuarios);
+    }
+    if (Array.isArray(d.auditoriaIngresos)) {
+      const mergedAudit = mergeAuditoriasArrays(getAuditoriaIngresos(), d.auditoriaIngresos);
+      saveAuditoriaIngresos(mergedAudit);
     }
     if (Array.isArray(d.lideres)) {
       const uniqueLideresMap = new Map<string, Lider>();
@@ -1182,6 +1189,7 @@ export default function App() {
             usuarios={usuarios}
             onSaveUsuarios={handleSaveUsuarios}
             onToast={addToast}
+            session={session}
           />
         )}
 

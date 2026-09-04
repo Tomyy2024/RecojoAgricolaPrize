@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserSession, DeviceViewMode } from '../types';
-import { LogOut, User, Sprout, Cloud, RefreshCw, QrCode, Smartphone, Monitor } from 'lucide-react';
+import { LogOut, User, Sprout, Cloud, RefreshCw, QrCode, Smartphone, Monitor, Clock } from 'lucide-react';
 
 interface HeaderProps {
   session: UserSession;
@@ -41,13 +41,25 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="sticky top-0 z-40 shadow-md bg-gradient-to-r from-[#1b5e20] via-[#2e7d32] to-[#388e3c] text-white">
       {/* Top Session & Status Bar */}
       <div className="bg-black/25 border-b border-white/15 px-3 sm:px-4 py-1.5 flex flex-wrap justify-between items-center gap-2 text-xs">
-        <div className="flex items-center gap-2">
-          <User className="w-3.5 h-3.5 text-[#a5d6a7]" />
-          <span className="font-semibold">{session.nombre}</span>
-          <span className="text-white/60">|</span>
-          <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider text-[#cbffc2]">
-            {session.rol}
-          </span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <User className="w-3.5 h-3.5 text-[#a5d6a7]" />
+            <span className="font-semibold">{session.nombre}</span>
+            <span className="text-white/60">|</span>
+            <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider text-[#cbffc2]">
+              {session.rol}
+            </span>
+          </div>
+
+          {(session.horaLogin || session.horaIngreso) && (
+            <div
+              className="bg-black/35 border border-white/25 px-2.5 py-0.5 rounded-lg text-[11px] font-mono text-[#cbffc2] flex items-center gap-1.5 shadow-inner"
+              title={`Hora de Login al sistema: ${session.horaLogin || session.horaIngreso}`}
+            >
+              <Clock className="w-3.5 h-3.5 text-[#a5d6a7]" />
+              <span>Login: <strong>{session.horaLogin || session.horaIngreso}</strong></span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2.5 flex-wrap">

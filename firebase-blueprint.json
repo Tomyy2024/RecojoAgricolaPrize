@@ -32,6 +32,16 @@
           "description": "Creation date",
           "maxLength": 32
         },
+        "horaIngreso": {
+          "type": "string",
+          "description": "Assigned entry time for audit",
+          "maxLength": 16
+        },
+        "ultimoIngreso": {
+          "type": "string",
+          "description": "Last login timestamp",
+          "maxLength": 64
+        },
         "updatedAt": {
           "type": "string",
           "description": "Last update ISO timestamp",

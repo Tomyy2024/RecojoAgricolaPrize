@@ -9,7 +9,8 @@ import {
   SyncLogEntry, 
   FirebaseConfig,
   ValidacionSupervisor,
-  ReservaCuadrilla
+  ReservaCuadrilla,
+  AuditoriaIngreso
 } from '../types';
 import { 
   INITIAL_USUARIOS, 
@@ -37,7 +38,8 @@ const KEYS = {
   LAST_SYNC: 'recojoFrutosLastSync',
   FIREBASE_CONFIG: 'recojoFrutosFirebaseConfig',
   VALIDACIONES: 'recojoFrutosValidaciones',
-  RESERVAS: 'recojoFrutosReservas'
+  RESERVAS: 'recojoFrutosReservas',
+  AUDITORIA_INGRESOS: 'recojoFrutosAuditoriaIngresos'
 };
 
 // Date helpers
@@ -336,6 +338,50 @@ export function getUsuarios(): Usuario[] {
 
 export function saveUsuarios(usuarios: Usuario[]) {
   localStorage.setItem(KEYS.USUARIOS, JSON.stringify(usuarios));
+}
+
+// Auditoría de Ingresos
+export function getAuditoriaIngresos(): AuditoriaIngreso[] {
+  try {
+    const raw = localStorage.getItem(KEYS.AUDITORIA_INGRESOS);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveAuditoriaIngresos(auditoria: AuditoriaIngreso[]) {
+  try {
+    localStorage.setItem(KEYS.AUDITORIA_INGRESOS, JSON.stringify(auditoria));
+  } catch (e) {
+    console.error('Error saving auditoria de ingresos:', e);
+  }
+}
+
+export function addAuditoriaIngreso(entry: AuditoriaIngreso) {
+  try {
+    const current = getAuditoriaIngresos();
+    // Prepend new audit entry, limit to last 1000 items
+    const updated = [entry, ...current.filter((item) => item.id !== entry.id)].slice(0, 1000);
+    saveAuditoriaIngresos(updated);
+  } catch (e) {
+    console.error('Error adding auditoria de ingreso:', e);
+  }
+}
+
+export function mergeAuditoriasArrays(base: AuditoriaIngreso[], incoming: AuditoriaIngreso[]): AuditoriaIngreso[] {
+  const map = new Map<string, AuditoriaIngreso>();
+  (base || []).forEach((item) => {
+    if (item && item.id) map.set(item.id, item);
+  });
+  (incoming || []).forEach((item) => {
+    if (item && item.id) map.set(item.id, item);
+  });
+  return Array.from(map.values()).sort((a, b) => {
+    return new Date(b.timestamp || b.fecha).getTime() - new Date(a.timestamp || a.fecha).getTime();
+  });
 }
 
 // Trabajadores

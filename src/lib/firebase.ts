@@ -148,6 +148,7 @@ export async function syncAllDataToFirestore(data: {
   lideres?: any[];
   usuarios?: any[];
   reservas?: any[];
+  auditoriaIngresos?: any[];
   modulos?: Record<string, string[]>;
   userEmail?: string;
 }) {
@@ -167,6 +168,7 @@ export async function syncAllDataToFirestore(data: {
     if (Array.isArray(data.lideres)) updateObj.lideres = data.lideres;
     if (Array.isArray(data.usuarios)) updateObj.usuarios = data.usuarios;
     if (Array.isArray(data.reservas)) updateObj.reservas = data.reservas;
+    if (Array.isArray(data.auditoriaIngresos)) updateObj.auditoriaIngresos = data.auditoriaIngresos;
     if (data.modulos && typeof data.modulos === 'object') updateObj.modulos = data.modulos;
 
     await setDoc(doc(db, 'app_state', 'master_data'), updateObj, { merge: true });

@@ -42,6 +42,7 @@ function getInitialData() {
     validaciones: [],
     lideres: [],
     reservas: [],
+    auditoriaIngresos: [],
     lastUpdated: new Date().toISOString()
   };
 }
@@ -214,9 +215,9 @@ async function startServer() {
     });
   });
 
-  // Direct login verification against server database
+  // Direct login verification against server database with audit recording
   app.post('/api/login', (req, res) => {
-    const { user, pass } = req.body || {};
+    const { user, pass, dispositivo } = req.body || {};
     const uTrim = String(user || '').trim().toLowerCase();
     const pTrim = String(pass || '').trim();
 
@@ -234,14 +235,96 @@ async function startServer() {
       return res.status(401).json({ status: 'error', message: 'Usuario o contraseña incorrectos' });
     }
 
+    // Capture exact login time and date
+    const now = new Date();
+    const fecha = now.toISOString().slice(0, 10);
+    const horaIngreso = now.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    const disp = dispositivo || (String(req.headers['user-agent'] || '').includes('Mobi') ? 'Celular' : 'PC');
+
+    // Update user's last login timestamps
+    found.ultimoLogin = now.toISOString();
+    found.ultimaHoraLogin = horaIngreso;
+    found.ultimaFechaLogin = fecha;
+    found.ultimaHoraAcceso = horaIngreso;
+    found.ultimaFechaAcceso = fecha;
+    found.ultimoIngreso = now.toISOString();
+
+    // Register login event in database
+    if (!Array.isArray(db.auditoriaIngresos)) {
+      db.auditoriaIngresos = [];
+    }
+
+    const auditEntry = {
+      id: `LOG_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      user: found.user,
+      nombre: found.nombre,
+      rol: found.rol,
+      fecha,
+      horaIngreso,
+      horaLogin: horaIngreso,
+      dispositivo: disp,
+      timestamp: now.toISOString()
+    };
+
+    db.auditoriaIngresos.unshift(auditEntry);
+    if (db.auditoriaIngresos.length > 1000) {
+      db.auditoriaIngresos = db.auditoriaIngresos.slice(0, 1000);
+    }
+
+    saveDatabase(db);
+    notifyClients({ type: 'sync', version: db.version, data: db });
+
     res.json({
       status: 'ok',
       user: {
         user: found.user,
         nombre: found.nombre,
-        rol: found.rol
-      }
+        rol: found.rol,
+        horaLogin: horaIngreso,
+        fechaLogin: fecha,
+        horaIngreso,
+        fechaIngreso: fecha,
+        ultimoIngreso: found.ultimoIngreso
+      },
+      auditEntry
     });
+  });
+
+  // Get audit log entries
+  app.get('/api/auditoria-ingresos', (req, res) => {
+    res.json({
+      status: 'ok',
+      auditoria: db.auditoriaIngresos || []
+    });
+  });
+
+  // Add / Sync audit log entries
+  app.post('/api/auditoria-ingresos', (req, res) => {
+    try {
+      const { entry, entries } = req.body || {};
+      if (!Array.isArray(db.auditoriaIngresos)) {
+        db.auditoriaIngresos = [];
+      }
+
+      if (entry && entry.id) {
+        db.auditoriaIngresos = [entry, ...db.auditoriaIngresos.filter((x: any) => x.id !== entry.id)].slice(0, 1000);
+      } else if (Array.isArray(entries)) {
+        const map = new Map<string, any>();
+        db.auditoriaIngresos.forEach((x: any) => { if (x && x.id) map.set(x.id, x); });
+        entries.forEach((x: any) => { if (x && x.id) map.set(x.id, x); });
+        db.auditoriaIngresos = Array.from(map.values())
+          .sort((a: any, b: any) => new Date(b.timestamp || b.fecha).getTime() - new Date(a.timestamp || a.fecha).getTime())
+          .slice(0, 1000);
+      }
+
+      db.version = (db.version || 1) + 1;
+      db.lastUpdated = new Date().toISOString();
+      saveDatabase(db);
+      notifyClients({ type: 'sync', version: db.version, data: db });
+      return res.json({ status: 'ok', data: db.auditoriaIngresos });
+    } catch (err: any) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
   });
 
   // Update users specifically
