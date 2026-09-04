@@ -35,6 +35,8 @@ import {
   Clock,
   RotateCcw,
   SlidersHorizontal,
+  Filter,
+  ListFilter,
   X
 } from 'lucide-react';
 
@@ -98,16 +100,14 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const [reservaModalSupervisorFilter, setReservaModalSupervisorFilter] = useState<string>('todos');
   const [reservaModalDateFilter, setReservaModalDateFilter] = useState<'hoy' | 'todas'>('hoy');
   const [reservaModalSearch, setReservaModalSearch] = useState<string>('');
-  const [filtroTipoAsignacion, setFiltroTipoAsignacion] = useState<'todos' | 'mis_asignados' | 'general'>('todos');
+  const [vistaAsignacion, setVistaAsignacion] = useState<'todos' | 'pendientes' | 'asignados'>('todos');
 
   // Supervisor checking
   const isSupervisorUser = session.rol === 'Supervisor';
   const sessionSupervisorName = session.nombre;
 
-  // Paso 1: Configuración de Cuadrilla Secuencial (Limpio sin datos de prueba)
-  const [cuadrillaSupervisor, setCuadrillaSupervisor] = useState(
-    isSupervisorUser ? sessionSupervisorName : ''
-  );
+  // Paso 1: Configuración de Cuadrilla Secuencial (Limpio y sin pre-filtrar supervisor, fundo, módulo, grupo ni líder)
+  const [cuadrillaSupervisor, setCuadrillaSupervisor] = useState('');
   const [cuadrillaFundo, setCuadrillaFundo] = useState('');
   const [cuadrillaModulo, setCuadrillaModulo] = useState('');
   const [cuadrillaGrupo, setCuadrillaGrupo] = useState('');
@@ -405,69 +405,22 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return list;
   }, [trabajadores]);
 
-  // Auto-detect supervisor's default fundo & modulo, or default gracefully so workers are immediately visible
-  useEffect(() => {
-    if (!cuadrillaFundo) {
-      if (cuadrillaSupervisor) {
-        // Look for workers already assigned to this supervisor
-        const matchingWorker = trabajadores.find((t) => matchesSupervisor(cuadrillaSupervisor, t.supervisor));
-        if (matchingWorker && matchingWorker.fundo) {
-          setCuadrillaFundo(matchingWorker.fundo);
-          if (matchingWorker.modulo) {
-            setCuadrillaModulo(matchingWorker.modulo);
-          }
-          return;
-        }
-      }
-      // If admin or no supervisor match yet, default to first available fundo with workers
-      const firstFundoWithWorkers = fundosList.find((f) => trabajadores.some((t) => t.fundo === f));
-      if (firstFundoWithWorkers) {
-        setCuadrillaFundo(firstFundoWithWorkers);
-        const firstWorkerInFundo = trabajadores.find((t) => t.fundo === firstFundoWithWorkers && t.modulo);
-        if (firstWorkerInFundo?.modulo) {
-          setCuadrillaModulo(firstWorkerInFundo.modulo);
-        }
-      }
-    }
-  }, [cuadrillaSupervisor, cuadrillaFundo, fundosList, trabajadores, matchesSupervisor]);
+  // Helper para verificar si un trabajador ya cuenta con Grupo o Líder asignados
+  const isWorkerAsignado = useCallback((t: { grupo?: string; lider?: string }) => {
+    const g = (t.grupo || '').trim().toLowerCase();
+    const l = (t.lider || '').trim().toLowerCase();
+    const hasGrupo = g !== '' && g !== 'sin grupo' && g !== 'sin asignar' && g !== 'ninguno';
+    const hasLider = l !== '' && l !== 'sin asignar' && l !== 'sin lider' && l !== 'sin líder' && l !== 'ninguno';
+    return hasGrupo || hasLider;
+  }, []);
 
-  // Counts of workers in current Fundo & Modulo
-  const moduloWorkerCounts = useMemo(() => {
-    const normF = cuadrillaFundo ? normalizeStr(cuadrillaFundo) : '';
-    const normM = cuadrillaModulo ? normalizeModulo(cuadrillaModulo) : '';
-
-    let total = 0;
-    let misAsignados = 0;
-    let general = 0;
-
-    for (const t of indexedTrabajadores) {
-      if (normF && t._normFundo && t._normFundo !== normF) continue;
-      if (normM && t._normModulo && t._normModulo !== normM) continue;
-
-      total++;
-      const isMyWorker = cuadrillaSupervisor && matchesSupervisor(cuadrillaSupervisor, t.supervisor);
-      const isGeneral =
-        !t.supervisor ||
-        normalizeStr(t.supervisor) === 'general' ||
-        normalizeStr(t.supervisor) === 'sin asignar' ||
-        normalizeStr(t.supervisor) === '';
-
-      if (isMyWorker) {
-        misAsignados++;
-      }
-      if (isGeneral) {
-        general++;
-      }
-    }
-
-    return { total, misAsignados, general };
-  }, [indexedTrabajadores, cuadrillaFundo, cuadrillaModulo, cuadrillaSupervisor, matchesSupervisor]);
-
-  // Filtered workers list - strictly tied to Supervisor, Fundo y Módulo
-  const filteredTrabajadores = useMemo(() => {
+  // Nómina de trabajadores con filtro dinámico:
+  // Se activa el filtro ÚNICAMENTE cuando el usuario selecciona Supervisor, Fundo o Módulo.
+  // Si no se selecciona ninguno, no queda pre-filtrado ningún supervisor, fundo, módulo, grupo o líder.
+  const scopedTrabajadores = useMemo(() => {
     const term = normalizeStr(searchTerm);
 
-    // If searching by name or DNI, search globally across the database so supervisor can find and re-bind any worker
+    // Búsqueda por DNI o Nombre busca globalmente
     if (term) {
       return indexedTrabajadores.filter(
         (t) => t._cleanDni.includes(term) || t._normName.includes(term)
@@ -476,37 +429,52 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
     const normF = cuadrillaFundo ? normalizeStr(cuadrillaFundo) : '';
     const normM = cuadrillaModulo ? normalizeModulo(cuadrillaModulo) : '';
+    const sup = cuadrillaSupervisor ? cuadrillaSupervisor.trim() : '';
 
     return indexedTrabajadores.filter((t) => {
-      // 1. Amarrado a Fundo (Estricto si se seleccionó fundo específico)
+      // 1. Filtrar por Supervisor SOLO si el usuario seleccionó uno
+      if (sup && !matchesSupervisor(sup, t.supervisor)) {
+        return false;
+      }
+
+      // 2. Filtrar por Fundo SOLO si el usuario seleccionó uno
       if (normF && t._normFundo && t._normFundo !== normF) {
         return false;
       }
 
-      // 2. Amarrado a Módulo (Estricto si se seleccionó módulo específico)
+      // 3. Filtrar por Módulo SOLO si el usuario seleccionó uno
       if (normM && t._normModulo && t._normModulo !== normM) {
         return false;
       }
 
-      // 3. Filtro por tipo de asignación
-      const isMyWorker = cuadrillaSupervisor && matchesSupervisor(cuadrillaSupervisor, t.supervisor);
-      const isGeneralWorker =
-        !t.supervisor ||
-        normalizeStr(t.supervisor) === 'general' ||
-        normalizeStr(t.supervisor) === 'sin asignar' ||
-        normalizeStr(t.supervisor) === '';
-
-      if (filtroTipoAsignacion === 'mis_asignados') {
-        return Boolean(isMyWorker);
-      }
-      if (filtroTipoAsignacion === 'general') {
-        return isGeneralWorker;
-      }
-
-      // 'todos': show all workers in this Fundo & Módulo scope
       return true;
     });
-  }, [indexedTrabajadores, searchTerm, cuadrillaFundo, cuadrillaModulo, cuadrillaSupervisor, filtroTipoAsignacion, matchesSupervisor]);
+  }, [indexedTrabajadores, searchTerm, cuadrillaSupervisor, cuadrillaFundo, cuadrillaModulo, matchesSupervisor]);
+
+  // Contadores dinámicos en tiempo real para el selector de estado de asignación
+  const countPendientes = useMemo(
+    () => scopedTrabajadores.filter((t) => !isWorkerAsignado(t)).length,
+    [scopedTrabajadores, isWorkerAsignado]
+  );
+  const countAsignados = useMemo(
+    () => scopedTrabajadores.filter((t) => isWorkerAsignado(t)).length,
+    [scopedTrabajadores, isWorkerAsignado]
+  );
+  const countTodos = scopedTrabajadores.length;
+
+  // Lista final de trabajadores según la vista de asignación seleccionada:
+  // - 'pendientes': Solo sin Grupo ni Líder asignados
+  // - 'asignados': Ya Asignados (cuentan con Grupo o Líder)
+  // - 'todos': Ver Todos (nómina completa del ámbito)
+  const filteredTrabajadores = useMemo(() => {
+    if (vistaAsignacion === 'pendientes') {
+      return scopedTrabajadores.filter((t) => !isWorkerAsignado(t));
+    }
+    if (vistaAsignacion === 'asignados') {
+      return scopedTrabajadores.filter((t) => isWorkerAsignado(t));
+    }
+    return scopedTrabajadores;
+  }, [scopedTrabajadores, vistaAsignacion, isWorkerAsignado]);
 
   // Handle changing group for an individual worker
   const handleWorkerGroupChange = (dni: string, newGroup: string) => {
@@ -824,6 +792,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       return;
     }
 
+    const countAssigned = selectedDnis.size;
+
     if (onUpdateTrabajadores) {
       const updated = trabajadores.map((t) => {
         const cleanDni = String(t.dni).trim();
@@ -843,8 +813,14 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       onUpdateTrabajadores(updated);
     }
 
+    // Limpiar selección de personal asignado
+    setSelectedDnis(new Set());
+
+    // Activar automáticamente la vista de pendientes (Solo sin Grupo ni Líder)
+    setVistaAsignacion('pendientes');
+
     onToast(
-      `✅ Cuadrilla asignada a ${selectedDnis.size} trabajadores (Supervisor: ${targetSupervisor}, Fundo: ${targetFundo}, Módulo: ${targetModulo}, Grupo: ${targetGrupo}, Líder: ${targetLider || 'Sin asignar'})`,
+      `✅ Cuadrilla asignada a ${countAssigned} trabajadores (${targetGrupo}${targetLider ? ` · Líder: ${targetLider}` : ''}). Mostrando solo pendientes sin Grupo ni Líder.`,
       'success'
     );
   };
@@ -947,8 +923,14 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     }
     setLastSavedReserva(newReserva);
 
+    const countSaved = selectedDnis.size;
+
+    // Limpiar selección de personal asignado y cambiar a pendientes
+    setSelectedDnis(new Set());
+    setVistaAsignacion('pendientes');
+
     onToast(
-      `💾 Reserva guardada para ${targetSupervisor}: ${selectedDnis.size} trabajadores amarrados a ${targetFundo} - ${targetModulo}.`,
+      `💾 Reserva guardada para ${targetSupervisor}: ${countSaved} trabajadores asignados a ${targetFundo} - ${targetModulo} (${targetGrupo}). Mostrando pendientes sin Grupo ni Líder.`,
       'success'
     );
   };
@@ -1394,12 +1376,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     onChange={(e) => {
                       const newFundo = e.target.value;
                       setCuadrillaFundo(newFundo);
-                      if (!newFundo) {
-                        setCuadrillaModulo('');
-                      } else {
-                        const workerInFundo = trabajadores.find((t) => t.fundo === newFundo && t.modulo);
-                        setCuadrillaModulo(workerInFundo?.modulo || '');
-                      }
+                      setCuadrillaModulo('');
                     }}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-[#bfcaba] bg-white font-medium text-gray-900 focus:outline-none focus:border-[#2e7d32] focus:ring-1 focus:ring-[#2e7d32]"
                   >
@@ -2027,111 +2004,179 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               </div>
             </div>
 
-            {/* Filtros de Tipo de Asignación si Fundo está seleccionado */}
-            {cuadrillaFundo && !searchTerm && (
-              <div className="flex items-center gap-2 mb-3 text-xs overflow-x-auto pb-1">
-                <span className="text-gray-500 text-[11px] font-semibold whitespace-nowrap">Ver trabajadores:</span>
-                <button
-                  type="button"
-                  onClick={() => setFiltroTipoAsignacion('todos')}
-                  className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer whitespace-nowrap ${
-                    filtroTipoAsignacion === 'todos'
-                      ? 'bg-[#1b5e20] text-white shadow-xs'
-                      : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+            {/* Selector de Vista de Asignación en Pantalla */}
+            <div className="flex items-center gap-2 mb-3 text-xs overflow-x-auto pb-1">
+              <span className="text-gray-500 text-[11px] font-semibold whitespace-nowrap flex items-center gap-1">
+                <Filter className="w-3.5 h-3.5 text-[#2e7d32]" />
+                <span>Estado de asignación:</span>
+              </span>
+
+              {/* 1. Solo sin Grupo ni Líder */}
+              <button
+                type="button"
+                onClick={() => setVistaAsignacion('pendientes')}
+                className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                  vistaAsignacion === 'pendientes'
+                    ? 'bg-amber-500 text-white shadow-xs ring-1 ring-amber-600'
+                    : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>Solo sin Grupo ni Líder</span>
+                <span
+                  className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
+                    vistaAsignacion === 'pendientes' ? 'bg-amber-700 text-white' : 'bg-amber-200 text-amber-900'
                   }`}
                 >
-                  Todos en este Módulo ({moduloWorkerCounts.total})
-                </button>
-                {cuadrillaSupervisor && (
-                  <button
-                    type="button"
-                    onClick={() => setFiltroTipoAsignacion('mis_asignados')}
-                    className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer whitespace-nowrap ${
-                      filtroTipoAsignacion === 'mis_asignados'
-                        ? 'bg-[#1b5e20] text-white shadow-xs'
-                        : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    👤 Mis Asignados ({moduloWorkerCounts.misAsignados})
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setFiltroTipoAsignacion('general')}
-                  className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer whitespace-nowrap ${
-                    filtroTipoAsignacion === 'general'
-                      ? 'bg-[#1b5e20] text-white shadow-xs'
-                      : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                  {countPendientes}
+                </span>
+              </button>
+
+              {/* 2. Ya Asignados */}
+              <button
+                type="button"
+                onClick={() => setVistaAsignacion('asignados')}
+                className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                  vistaAsignacion === 'asignados'
+                    ? 'bg-purple-600 text-white shadow-xs ring-1 ring-purple-700'
+                    : 'bg-purple-50 text-purple-900 border border-purple-200 hover:bg-purple-100'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Ya Asignados</span>
+                <span
+                  className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
+                    vistaAsignacion === 'asignados' ? 'bg-purple-800 text-white' : 'bg-purple-200 text-purple-900'
                   }`}
                 >
-                  👥 Disponibles de General ({moduloWorkerCounts.general})
-                </button>
-              </div>
-            )}
+                  {countAsignados}
+                </span>
+              </button>
+
+              {/* 3. Ver Todos */}
+              <button
+                type="button"
+                onClick={() => setVistaAsignacion('todos')}
+                className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                  vistaAsignacion === 'todos'
+                    ? 'bg-[#1b5e20] text-white shadow-xs ring-1 ring-[#1b5e20]'
+                    : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <ListFilter className="w-3.5 h-3.5" />
+                <span>Ver Todos</span>
+                <span
+                  className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
+                    vistaAsignacion === 'todos' ? 'bg-emerald-800 text-white' : 'bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  {countTodos}
+                </span>
+              </button>
+            </div>
 
             {/* Listado de Tarjetas de Trabajadores con renderizado de alto rendimiento */}
             <div className="max-h-96 overflow-y-auto space-y-2 rounded-xl border border-[#e0e0e0] p-2 bg-[#fafafa]">
-              {!cuadrillaFundo && !searchTerm && (
+              {!cuadrillaFundo && !cuadrillaSupervisor && !cuadrillaModulo && !searchTerm && (
                 <div className="bg-[#e8f5e9]/70 border border-[#a5d6a7] rounded-lg p-2 text-xs text-[#1b5e20] flex items-center justify-between gap-2 mb-2">
                   <span className="flex items-center gap-1.5 font-medium">
                     <Building2 className="w-4 h-4 text-[#2e7d32]" />
-                    <span>Nómina completa visible ({filteredTrabajadores.length} trabajadores). Puedes filtrar seleccionando tu Fundo y Módulo arriba.</span>
+                    <span>
+                      Nómina completa ({filteredTrabajadores.length} trabajadores). Activa filtros seleccionando Supervisor, Fundo o Módulo arriba.
+                    </span>
                   </span>
                 </div>
               )}
 
               {filteredTrabajadores.length === 0 ? (
-                <div className="py-8 text-center text-gray-500 text-xs">
-                  <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-2">
-                    <Building2 className="w-5 h-5" />
-                  </div>
-                  <p className="font-semibold text-gray-700">
-                    No se encontraron trabajadores con los filtros aplicados ({cuadrillaFundo || 'Todos los fundos'} - {cuadrillaModulo || 'Todos los módulos'}).
-                  </p>
-                  <p className="text-[11px] text-gray-400 mt-1">
-                    Cambia el filtro de Fundo o Módulo para ver otras cuadrillas, o registra un nuevo trabajador.
-                  </p>
-                  <div className="flex flex-wrap items-center justify-center gap-2 mt-3">
-                    {fundosList.map((f) => (
+                vistaAsignacion === 'pendientes' && countAsignados > 0 ? (
+                  /* Estado de Finalización: Cuando todos los trabajadores han sido asignados */
+                  <div className="py-8 px-4 text-center bg-white rounded-xl border border-emerald-200 my-2 shadow-xs">
+                    <div className="w-12 h-12 bg-emerald-100 text-[#1b5e20] rounded-full flex items-center justify-center mx-auto mb-3 shadow-xs">
+                      <CheckCircle2 className="w-6 h-6" />
+                    </div>
+                    <h4 className="text-sm font-bold text-gray-900">
+                      ¡Todos los trabajadores han sido asignados!
+                    </h4>
+                    <p className="text-xs text-gray-600 mt-1 max-w-md mx-auto">
+                      No quedan trabajadores pendientes de Grupo ni Líder en{' '}
+                      {cuadrillaModulo
+                        ? `el Módulo ${cuadrillaModulo}`
+                        : cuadrillaFundo
+                        ? `el Fundo ${cuadrillaFundo}`
+                        : cuadrillaSupervisor
+                        ? `el Supervisor ${cuadrillaSupervisor}`
+                        : 'el ámbito seleccionado'}
+                      .
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-2.5 mt-4">
                       <button
-                        key={f}
                         type="button"
-                        onClick={() => {
-                          setCuadrillaFundo(f);
-                          const workerInF = trabajadores.find((t) => t.fundo === f && t.modulo);
-                          setCuadrillaModulo(workerInF?.modulo || '');
-                        }}
-                        className="bg-white hover:bg-[#e8f5e9] text-[#2e7d32] border border-[#2e7d32] text-xs font-bold py-1 px-2.5 rounded-lg shadow-xs cursor-pointer transition-all"
+                        onClick={() => setVistaAsignacion('asignados')}
+                        className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold py-2 px-3.5 rounded-lg shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
                       >
-                        📍 Cargar {f}
+                        <Users className="w-3.5 h-3.5" />
+                        <span>Revisar Asignados ({countAsignados})</span>
                       </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCuadrillaFundo('');
-                        setCuadrillaModulo('');
-                      }}
-                      className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold py-1 px-2.5 rounded-lg transition-all"
-                    >
-                      Ver Todos los Fundos
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => setVistaAsignacion('todos')}
+                        className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold py-2 px-3.5 rounded-lg transition-all cursor-pointer"
+                      >
+                        <span>Ver Toda la Nómina ({countTodos})</span>
+                      </button>
+                    </div>
                   </div>
-                  <div className="mt-3">
-                    <button
-                      type="button"
-                      onClick={handleOpenNewWorkerModal}
-                      className="text-[#2e7d32] font-bold underline"
-                    >
-                      + Registrar un nuevo trabajador
-                    </button>
+                ) : vistaAsignacion === 'asignados' && countPendientes > 0 ? (
+                  <div className="py-8 px-4 text-center bg-white rounded-xl border border-purple-200 my-2 shadow-xs">
+                    <div className="w-12 h-12 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center mx-auto mb-3 shadow-xs">
+                      <Clock className="w-6 h-6" />
+                    </div>
+                    <h4 className="text-sm font-bold text-gray-900">
+                      Aún no hay trabajadores asignados
+                    </h4>
+                    <p className="text-xs text-gray-600 mt-1 max-w-md mx-auto">
+                      Hay {countPendientes} trabajadores pendientes sin Grupo ni Líder disponibles para asignar.
+                    </p>
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={() => setVistaAsignacion('pendientes')}
+                        className="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold py-2 px-3.5 rounded-lg shadow-xs flex items-center gap-1.5 mx-auto transition-all cursor-pointer"
+                      >
+                        <Clock className="w-3.5 h-3.5" />
+                        <span>Ver Pendientes sin Grupo ni Líder ({countPendientes})</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="py-8 text-center text-gray-500 text-xs">
+                    <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-2">
+                      <Building2 className="w-5 h-5" />
+                    </div>
+                    <p className="font-semibold text-gray-700">
+                      No se encontraron trabajadores con los filtros aplicados ({cuadrillaFundo || 'Todos los fundos'} - {cuadrillaModulo || 'Todos los módulos'}).
+                    </p>
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      Cambia los filtros de Supervisor, Fundo o Módulo para ver otros trabajadores, o registra un nuevo personal.
+                    </p>
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={handleOpenNewWorkerModal}
+                        className="text-[#2e7d32] font-bold underline"
+                      >
+                        + Registrar un nuevo trabajador
+                      </button>
+                    </div>
+                  </div>
+                )
               ) : (
                 <>
                   {filteredTrabajadores.slice(0, visibleLimit).map((t) => {
                     const isChecked = selectedDnis.has(t.dni);
                     const assignedGrupo = workerAssignedGrupos[t.dni] || cuadrillaGrupo;
+                    const isAsignado = isWorkerAsignado(t);
 
                     return (
                       <div
@@ -2151,16 +2196,29 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                             className="w-4 h-4 mt-0.5 sm:mt-0 rounded text-[#2e7d32] accent-[#2e7d32] pointer-events-none shrink-0"
                           />
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-bold text-xs sm:text-sm text-[#212121]">
                                 {t.nombres}
                               </span>
                               <span className="font-mono text-[11px] font-bold text-[#1b5e20] bg-white px-1.5 py-0.2 rounded border border-[#c8e6c9]">
                                 DNI: {t.dni}
                               </span>
+
+                              {/* Identificación visual requerida: Ámbar para pendientes, Morado para asignados */}
+                              {isAsignado ? (
+                                <span className="text-[10px] bg-purple-50 text-purple-800 border border-purple-200 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                                  <CheckCircle2 className="w-3 h-3 text-purple-600" />
+                                  <span>Asignado ({t.grupo || 'Grupo'}{t.lider ? ` · ${t.lider}` : ''})</span>
+                                </span>
+                              ) : (
+                                <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                                  <Clock className="w-3 h-3 text-amber-600" />
+                                  <span>Sin Grupo ni Líder</span>
+                                </span>
+                              )}
                             </div>
 
-                            {/* Estado de Vinculación: Solo cuando el usuario selecciona el trabajador se amarra a la cuadrilla */}
+                            {/* Estado de Vinculación: Contexto de cuadrilla al seleccionar o datos actuales */}
                             {isChecked ? (
                               <div className="text-[11px] text-[#555] flex flex-wrap items-center gap-1.5 mt-1.5 animate-in fade-in">
                                 <span className="bg-white px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
@@ -2193,12 +2251,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                                   🌱 <b>Módulo:</b> {t.modulo || 'Sin asignar'}
                                 </span>
                                 {t.grupo && (
-                                  <span className="bg-gray-50 px-1.5 py-0.5 rounded text-gray-600 text-[10px]">
+                                  <span className="bg-purple-50 px-1.5 py-0.5 rounded text-purple-700 border border-purple-200 text-[10px] font-semibold">
                                     👥 {t.grupo}
                                   </span>
                                 )}
                                 {t.lider && (
-                                  <span className="bg-[#fff8e1] px-1.5 py-0.5 rounded text-[#e65100] text-[10px]">
+                                  <span className="bg-[#fff8e1] px-1.5 py-0.5 rounded text-[#e65100] border border-[#ffe082] text-[10px] font-semibold">
                                     👑 {t.lider}
                                   </span>
                                 )}
@@ -2211,12 +2269,17 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                           {isChecked ? (
                             <span className="text-[10px] bg-[#2e7d32] text-white px-2.5 py-1 rounded-full font-bold shadow-xs flex items-center gap-1">
                               <Check className="w-3 h-3" />
-                              <span>En Cuadrilla</span>
+                              <span>Seleccionado</span>
+                            </span>
+                          ) : isAsignado ? (
+                            <span className="text-[10px] bg-purple-100 text-purple-800 px-2.5 py-1 rounded-full font-bold border border-purple-200 flex items-center gap-1">
+                              <Users className="w-2.5 h-2.5 text-purple-600" />
+                              <span>Asignado</span>
                             </span>
                           ) : (
-                            <span className="text-[10px] bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full font-medium border border-gray-200 flex items-center gap-1">
-                              <Users className="w-2.5 h-2.5 text-gray-400" />
-                              <span>Disponible</span>
+                            <span className="text-[10px] bg-amber-100 text-amber-900 px-2.5 py-1 rounded-full font-bold border border-amber-300 flex items-center gap-1">
+                              <Clock className="w-2.5 h-2.5 text-amber-700" />
+                              <span>Pendiente</span>
                             </span>
                           )}
                         </div>
