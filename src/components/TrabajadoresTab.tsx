@@ -37,6 +37,7 @@ import {
   SlidersHorizontal,
   Filter,
   ListFilter,
+  AlertTriangle,
   X
 } from 'lucide-react';
 
@@ -293,7 +294,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   // Helper to normalize DNI stripping all spaces and non-printable characters
   const normalizeDni = useCallback((dni?: string | number | null): string => {
     if (dni === null || dni === undefined) return '';
-    return String(dni).replace(/\s+/g, '').trim();
+    let str = String(dni).replace(/\s+/g, '').trim();
+    // Strip trailing .0 from Excel float representations (e.g. 74839201.0 -> 74839201)
+    str = str.replace(/\.0+$/, '');
+    return str;
   }, []);
 
   // Matches supervisor taking into account Peruvian naming conventions (Apellidos / Nombres order)
@@ -497,33 +501,37 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       const raw = String(worker.dni ?? '').trim();
       const direct = String(worker.dni ?? '');
       const id = worker.id || '';
+      const nameKey = worker.nombres ? `NAME_${normalizeStr(worker.nombres)}` : '';
 
       return (
         (norm !== '' && selectedDnis.has(norm)) ||
         (raw !== '' && selectedDnis.has(raw)) ||
         (direct !== '' && selectedDnis.has(direct)) ||
         (id !== '' && selectedDnis.has(id)) ||
-        (typeof worker.dni === 'number' && selectedDnis.has(worker.dni as any))
+        (nameKey !== '' && selectedDnis.has(nameKey)) ||
+        (typeof worker.dni === 'number' && selectedDnis.has(String(worker.dni)))
       );
     },
-    [selectedDnis, normalizeDni]
+    [selectedDnis, normalizeDni, normalizeStr]
   );
 
   // Handle changing group for an individual worker
-  const handleWorkerGroupChange = (dni: string, newGroup: string) => {
+  const handleWorkerGroupChange = (dni: string, newGroup: string, workerName?: string) => {
     const norm = normalizeDni(dni);
     const raw = String(dni || '').trim();
+    const nameKey = workerName ? `NAME_${normalizeStr(workerName)}` : '';
     setWorkerAssignedGrupos((prev) => ({
       ...prev,
       [dni]: newGroup,
       ...(norm ? { [norm]: newGroup } : {}),
-      ...(raw ? { [raw]: newGroup } : {})
+      ...(raw ? { [raw]: newGroup } : {}),
+      ...(nameKey ? { [nameKey]: newGroup } : {})
     }));
   };
 
   // Toggle single worker selection (dynamically binds to cuadrillaGrupo on select)
   const toggleWorker = (workerOrDni: Trabajador | { dni: string; id?: string; nombres?: string } | string) => {
-    const worker: { dni?: string | number; id?: string } =
+    const worker: { dni?: string | number; id?: string; nombres?: string } =
       typeof workerOrDni === 'string'
         ? { dni: workerOrDni }
         : workerOrDni;
@@ -531,6 +539,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     const norm = normalizeDni(worker.dni);
     const raw = String(worker.dni ?? '').trim();
     const id = worker.id || '';
+    const nameKey = worker.nombres ? `NAME_${normalizeStr(worker.nombres)}` : '';
     const isSelected = isDniSelected(worker);
 
     setSelectedDnis((prev) => {
@@ -539,11 +548,13 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         if (norm) next.delete(norm);
         if (raw) next.delete(raw);
         if (id) next.delete(id);
+        if (nameKey) next.delete(nameKey);
       } else {
         if (norm) next.add(norm);
         if (raw) next.add(raw);
         if (id) next.add(id);
-        const key = norm || raw || id;
+        if (nameKey) next.add(nameKey);
+        const key = norm || raw || id || nameKey;
         if (key) {
           setWorkerAssignedGrupos((prevGrp) => ({
             ...prevGrp,
@@ -563,10 +574,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       filteredTrabajadores.forEach((t) => {
         const norm = normalizeDni(t.dni);
         const raw = String(t.dni ?? '').trim();
+        const nameKey = t.nombres ? `NAME_${normalizeStr(t.nombres)}` : '';
         if (norm) next.add(norm);
         if (raw) next.add(raw);
         if (t.id) next.add(t.id);
-        const key = norm || raw || t.id;
+        if (nameKey) next.add(nameKey);
+        const key = norm || raw || t.id || nameKey;
         if (key) {
           newGroups[key] = workerAssignedGrupos[key] || cuadrillaGrupo;
         }
@@ -577,7 +590,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     onToast(`✅ ${filteredTrabajadores.length} trabajadores seleccionados y asignados al ${cuadrillaGrupo}`);
   };
 
-  // Select all workers in the scoped cuadrilla (all 96 workers)
+  // Select all workers in the scoped cuadrilla
   const selectAllCuadrilla = () => {
     setSelectedDnis((prev) => {
       const next = new Set(prev);
@@ -585,10 +598,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       scopedTrabajadores.forEach((t) => {
         const norm = normalizeDni(t.dni);
         const raw = String(t.dni ?? '').trim();
+        const nameKey = t.nombres ? `NAME_${normalizeStr(t.nombres)}` : '';
         if (norm) next.add(norm);
         if (raw) next.add(raw);
         if (t.id) next.add(t.id);
-        const key = norm || raw || t.id;
+        if (nameKey) next.add(nameKey);
+        const key = norm || raw || t.id || nameKey;
         if (key) {
           newGroups[key] = workerAssignedGrupos[key] || cuadrillaGrupo;
         }
@@ -962,14 +977,34 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       return;
     }
 
-    const confirmMsg = `¿Estás seguro de desasignar a los ${countAsignados} trabajadores asignados?\n\nSe removerán sus Grupos y Líderes para que queden todos como "Sin Grupo ni Líder" (Pendientes) listos para una nueva asignación.`;
+    const confirmMsg = `¿Estás seguro de desasignar a los ${countAsignados} trabajadores asignados en ${cuadrillaFundo || 'el Fundo'} - Módulo ${cuadrillaModulo || 'actual'}?\n\nSe removerán sus Grupos y Líderes para que queden todos como "Sin Grupo ni Líder" (Pendientes) listos para una nueva asignación.`;
     if (!window.confirm(confirmMsg)) {
       return;
     }
 
     if (onUpdateTrabajadores) {
+      const scopedKeys = new Set<string>();
+      scopedTrabajadores.forEach((st) => {
+        const norm = normalizeDni(st.dni);
+        const raw = String(st.dni || '').trim();
+        const nName = normalizeStr(st.nombres);
+        if (norm) scopedKeys.add(norm);
+        if (raw) scopedKeys.add(raw);
+        if (st.id) scopedKeys.add(st.id);
+        if (nName) scopedKeys.add(`NAME_${nName}`);
+      });
+
       const updated = trabajadores.map((w) => {
-        if (isWorkerAsignado(w)) {
+        const norm = normalizeDni(w.dni);
+        const raw = String(w.dni || '').trim();
+        const nName = normalizeStr(w.nombres);
+        const isScoped =
+          (norm && scopedKeys.has(norm)) ||
+          (raw && scopedKeys.has(raw)) ||
+          (w.id && scopedKeys.has(w.id)) ||
+          (nName && scopedKeys.has(`NAME_${nName}`));
+
+        if (isScoped && isWorkerAsignado(w)) {
           return {
             ...w,
             grupo: '',
@@ -983,7 +1018,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
     setWorkerAssignedGrupos({});
     setVistaAsignacion('pendientes');
-    onToast(`✅ Se desasignaron ${countAsignados} trabajadores. Toda la nómina está ahora como "Sin Grupo ni Líder".`, 'success');
+    onToast(`✅ Se desasignaron ${countAsignados} trabajadores. Quedan como "Sin Grupo ni Líder".`, 'success');
   };
 
   // Guardar Reserva: amarra a los trabajadores seleccionados al Supervisor, Fundo, Módulo, Grupo y Líder
@@ -1023,10 +1058,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         if (isDniSelected(t)) {
           const normDni = normalizeDni(t.dni);
           const rawDni = String(t.dni || '').trim();
+          const nameKey = t.nombres ? `NAME_${normalizeStr(t.nombres)}` : '';
           const assignedGrp =
             workerAssignedGrupos[normDni] ||
             workerAssignedGrupos[rawDni] ||
             (t.id && workerAssignedGrupos[t.id]) ||
+            (nameKey && workerAssignedGrupos[nameKey]) ||
             targetGrupo;
 
           return {
@@ -1078,10 +1115,17 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       trabajadores: selectedWorkers.map((w) => {
         const normDni = normalizeDni(w.dni);
         const rawDni = String(w.dni || '').trim();
+        const nameKey = w.nombres ? `NAME_${normalizeStr(w.nombres)}` : '';
         return {
-          dni: normDni || rawDni,
+          id: w.id,
+          dni: normDni || rawDni || w.id || '',
           nombres: w.nombres,
-          grupo: workerAssignedGrupos[normDni] || workerAssignedGrupos[rawDni] || (w.id && workerAssignedGrupos[w.id]) || targetGrupo
+          grupo:
+            workerAssignedGrupos[normDni] ||
+            workerAssignedGrupos[rawDni] ||
+            (w.id && workerAssignedGrupos[w.id]) ||
+            (nameKey && workerAssignedGrupos[nameKey]) ||
+            targetGrupo
         };
       }),
       timestamp: getLocalISO()
@@ -1097,17 +1141,16 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
     const countSaved = selectedWorkers.length;
 
-    // Limpiar selección de personal asignado y cambiar a pendientes
-    setSelectedDnis(new Set());
-    setVistaAsignacion('pendientes');
+    // Mantener la selección para continuar fluidamente al Registro de Avance
+    setVistaAsignacion('todos');
 
     onToast(
-      `💾 Reserva guardada para ${targetSupervisor}: ${countSaved} trabajadores asignados a ${targetFundo} - ${targetModulo} (${targetGrupo}). Mostrando pendientes sin Grupo ni Líder.`,
+      `💾 Reserva guardada para ${targetSupervisor}: ${countSaved} trabajadores asignados a ${targetFundo} - ${targetModulo} (${targetGrupo}). Cuadrilla lista para registrar avance de jabas.`,
       'success'
     );
   };
 
-  // Cargar una reserva guardada
+  // Cargar una reserva guardada y sincronizar todos sus trabajadores con el Fundo, Módulo y Supervisor
   const handleLoadReserva = (reserva: ReservaCuadrilla) => {
     setCuadrillaSupervisor(reserva.supervisor);
     setCuadrillaFundo(reserva.fundo);
@@ -1115,18 +1158,112 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     if (reserva.grupo) setCuadrillaGrupo(reserva.grupo);
     if (reserva.lider) setCuadrillaLider(reserva.lider);
 
+    const targetSupervisor = reserva.supervisor;
+    const targetFundo = reserva.fundo;
+    const targetModulo = reserva.modulo;
+    const targetGrupo = reserva.grupo || 'Grupo 01';
+    const targetLider = reserva.lider || '';
+    const targetFecha = reserva.fecha || getLocalToday();
+
+    // Map existing workers by clean DNI, raw DNI, and normalized name
+    const existingByCleanDni = new Map<string, number>();
+    const existingByRawDni = new Map<string, number>();
+    const existingByName = new Map<string, number>();
+
+    trabajadores.forEach((t, index) => {
+      const clean = normalizeDni(t.dni);
+      const raw = String(t.dni || '').trim();
+      const nName = normalizeStr(t.nombres);
+      if (clean) existingByCleanDni.set(clean, index);
+      if (raw) existingByRawDni.set(raw, index);
+      if (nName) existingByName.set(nName, index);
+    });
+
+    const updatedTrabajadores = [...trabajadores];
     const newSelected = new Set<string>();
     const newGroups: Record<string, string> = {};
-    reserva.trabajadores.forEach((item) => {
-      newSelected.add(item.dni);
-      if (item.grupo) newGroups[item.dni] = item.grupo;
+
+    const missingInNomina: { dni: string; nombres: string; grupo?: string }[] = [];
+
+    (reserva.trabajadores || []).forEach((item) => {
+      const cleanItemDni = normalizeDni(item.dni);
+      const rawItemDni = String(item.dni || '').trim();
+      const normItemName = normalizeStr(item.nombres);
+      const grp = item.grupo || targetGrupo;
+
+      if (cleanItemDni) newSelected.add(cleanItemDni);
+      if (rawItemDni) newSelected.add(rawItemDni);
+      if (normItemName) newSelected.add(`NAME_${normItemName}`);
+
+      if (cleanItemDni) newGroups[cleanItemDni] = grp;
+      if (rawItemDni) newGroups[rawItemDni] = grp;
+      if (normItemName) newGroups[`NAME_${normItemName}`] = grp;
+
+      let foundIndex = -1;
+      if (cleanItemDni && existingByCleanDni.has(cleanItemDni)) {
+        foundIndex = existingByCleanDni.get(cleanItemDni)!;
+      } else if (rawItemDni && existingByRawDni.has(rawItemDni)) {
+        foundIndex = existingByRawDni.get(rawItemDni)!;
+      } else if (normItemName && existingByName.has(normItemName)) {
+        foundIndex = existingByName.get(normItemName)!;
+      }
+
+      if (foundIndex >= 0) {
+        const existing = updatedTrabajadores[foundIndex];
+        updatedTrabajadores[foundIndex] = {
+          ...existing,
+          supervisor: targetSupervisor,
+          fundo: targetFundo,
+          modulo: targetModulo,
+          grupo: grp,
+          lider: targetLider || existing.lider || '',
+          fecha: targetFecha
+        };
+      } else {
+        missingInNomina.push(item);
+      }
     });
+
+    // Si algún trabajador de la reserva no existía en nómina, restaurarlo para que no falte nadie
+    if (missingInNomina.length > 0) {
+      missingInNomina.forEach((item, idx) => {
+        const cleanItemDni = normalizeDni(item.dni);
+        const grp = item.grupo || targetGrupo;
+        const newWorker: Trabajador = {
+          id: `RES_RESTORE_${Date.now()}_${idx}`,
+          fecha: targetFecha,
+          dni: item.dni || `TEMP_${Date.now()}_${idx}`,
+          nombres: item.nombres || `TRABAJADOR ${item.dni}`,
+          fundo: targetFundo,
+          modulo: targetModulo,
+          supervisor: targetSupervisor,
+          grupo: grp,
+          lider: targetLider,
+          tipo: 'Cosechador',
+          jabas: 0
+        };
+        updatedTrabajadores.push(newWorker);
+        if (cleanItemDni) newSelected.add(cleanItemDni);
+        if (newWorker.id) newSelected.add(newWorker.id);
+        if (item.nombres) newSelected.add(`NAME_${normalizeStr(item.nombres)}`);
+      });
+    }
+
+    if (onUpdateTrabajadores) {
+      onUpdateTrabajadores(updatedTrabajadores);
+    }
 
     setSelectedDnis(newSelected);
     setWorkerAssignedGrupos((prev) => ({ ...prev, ...newGroups }));
     setLastSavedReserva(reserva);
+    setVistaAsignacion('todos');
     setShowReservasModal(false);
-    onToast(`✅ Reserva cargada: ${reserva.totalTrabajadores} trabajadores de ${reserva.supervisor} (${reserva.fundo} - ${reserva.modulo})`, 'info');
+
+    const totalRes = reserva.totalTrabajadores || (reserva.trabajadores || []).length;
+    onToast(
+      `✅ Cuadrilla sincronizada: Los ${totalRes} trabajadores de ${reserva.supervisor} (${reserva.fundo} - ${reserva.modulo}) están cargados y listos para asignar jabas.`,
+      'info'
+    );
   };
 
   // Eliminar una reserva guardada
@@ -1213,6 +1350,19 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       return;
     }
 
+    const activeRes = lastSavedReserva || currentSupervisorReservaHoy;
+    const resCount = activeRes ? (activeRes.totalTrabajadores || (activeRes.trabajadores || []).length) : 0;
+    if (activeRes && resCount > selectedWorkersList.length) {
+      const confirmSync = window.confirm(
+        `Tu reserva activa para ${activeRes.supervisor} tiene ${resCount} trabajadores, pero actualmente tienes ${selectedWorkersList.length} seleccionados.\n\n¿Deseas sincronizar y cuadrar a los ${resCount} trabajadores de la reserva para asignarles jabas?`
+      );
+      if (confirmSync) {
+        handleLoadReserva(activeRes);
+        setStep(2);
+        return;
+      }
+    }
+
     const targetSupervisor = (cuadrillaSupervisor || (isSupervisorUser ? sessionSupervisorName : '')).trim();
     const targetFundo = cuadrillaFundo.trim();
     const targetModulo = cuadrillaModulo.trim().toUpperCase();
@@ -1225,10 +1375,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         if (isDniSelected(t)) {
           const normDni = normalizeDni(t.dni);
           const rawDni = String(t.dni || '').trim();
+          const nameKey = t.nombres ? `NAME_${normalizeStr(t.nombres)}` : '';
           const assignedGrp =
             workerAssignedGrupos[normDni] ||
             workerAssignedGrupos[rawDni] ||
             (t.id && workerAssignedGrupos[t.id]) ||
+            (nameKey && workerAssignedGrupos[nameKey]) ||
             targetGrupo;
 
           return {
@@ -2127,7 +2279,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="bg-[#e8f5e9] text-[#1b5e20] font-bold text-xs px-2.5 py-1 rounded-full border border-[#a5d6a7]">
-                  {selectedWorkersList.length} de {filteredTrabajadores.length} seleccionados
+                  {selectedWorkersList.length} seleccionados{countTodos > 0 ? ` (de ${countTodos} en cuadrilla)` : ''}
                 </span>
                 {selectedWorkersList.length > 0 && (
                   <>
@@ -2592,37 +2744,62 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             </div>
 
             {/* Status bar if reservation is active for current supervisor */}
-            {(lastSavedReserva || currentSupervisorReservaHoy) && (
-              <div className="bg-[#e8f5e9] border border-[#81c784] rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mt-4 animate-in fade-in">
-                <div className="flex items-center gap-2.5 text-xs text-[#1b5e20]">
-                  <CheckCircle2 className="w-4 h-4 text-[#2e7d32] shrink-0" />
-                  <div>
-                    <span className="font-bold">Reserva Activa de Hoy: </span>
-                    <span>
-                      <b>{(lastSavedReserva || currentSupervisorReservaHoy)?.totalTrabajadores}</b> trabajadores reservados para <b>{(lastSavedReserva || currentSupervisorReservaHoy)?.supervisor}</b> ({(lastSavedReserva || currentSupervisorReservaHoy)?.fundo} - {(lastSavedReserva || currentSupervisorReservaHoy)?.modulo}) a las {(lastSavedReserva || currentSupervisorReservaHoy)?.hora || '07:00'}.
-                    </span>
+            {(lastSavedReserva || currentSupervisorReservaHoy) && (() => {
+              const activeRes = (lastSavedReserva || currentSupervisorReservaHoy)!;
+              const resCount = activeRes.totalTrabajadores || (activeRes.trabajadores || []).length;
+              const hasDiff = resCount !== selectedWorkersList.length;
+
+              return (
+                <div className={`border rounded-xl p-3 flex flex-col gap-2 mt-4 animate-in fade-in ${
+                  hasDiff ? 'bg-amber-50 border-amber-300' : 'bg-[#e8f5e9] border-[#81c784]'
+                }`}>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 text-xs text-[#1b5e20]">
+                      {hasDiff ? (
+                        <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                      ) : (
+                        <CheckCircle2 className="w-5 h-5 text-[#2e7d32] shrink-0" />
+                      )}
+                      <div>
+                        <span className="font-bold">
+                          {hasDiff ? 'Reserva Activa (Diferencia de Cuadrilla Detectada): ' : 'Reserva Activa de Hoy: '}
+                        </span>
+                        <span>
+                          <b>{resCount}</b> trabajadores reservados para <b>{activeRes.supervisor}</b> ({activeRes.fundo} - {activeRes.modulo}) a las {activeRes.hora || '07:00'}.
+                        </span>
+                        {hasDiff && (
+                          <div className="text-amber-800 font-medium text-[11px] mt-0.5">
+                            ⚠️ Hay {resCount} trabajadores en tu reserva pero actualmente tienes {selectedWorkersList.length} seleccionados para asignar jabas. Presiona <b>"Cuadrar Cuadrilla ({resCount})"</b> para cargar a todos los {resCount} automáticamente.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleLoadReserva(activeRes)}
+                        className={`text-[11px] font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 shadow-xs active:scale-95 ${
+                          hasDiff
+                            ? 'bg-[#1b5e20] hover:bg-[#2e7d32] text-white animate-pulse'
+                            : 'bg-white hover:bg-[#c8e6c9] text-[#1b5e20] border border-[#a5d6a7]'
+                        }`}
+                        title="Sincronizar y cargar la cuadrilla completa de trabajadores"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>{hasDiff ? `⚡ Cuadrar Cuadrilla (${resCount})` : 'Recargar Cuadrilla'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowReservasModal(true)}
+                        className="text-[11px] font-bold bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors shadow-2xs"
+                      >
+                        Ver Todas ({countSupervisoresConReservaHoy})
+                      </button>
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 self-end sm:self-auto">
-                  <button
-                    type="button"
-                    onClick={() => handleLoadReserva((lastSavedReserva || currentSupervisorReservaHoy)!)}
-                    className="text-[11px] font-bold bg-white hover:bg-[#c8e6c9] text-[#1b5e20] px-2.5 py-1 rounded-lg border border-[#a5d6a7] cursor-pointer transition-colors flex items-center gap-1 shadow-2xs"
-                    title="Cargar esta reserva para continuar al registro de jabas"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    <span>Recargar Cuadrilla</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowReservasModal(true)}
-                    className="text-[11px] font-bold bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-2.5 py-1 rounded-lg cursor-pointer transition-colors shadow-2xs"
-                  >
-                    Ver Todas ({countSupervisoresConReservaHoy})
-                  </button>
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Botones de Acción Paso 1: Guardar Reserva y Continuar al Registro de Avance */}
             <div className="flex flex-col sm:flex-row items-stretch gap-3 mt-4">

@@ -95,6 +95,7 @@ export interface Lider {
 }
 
 export interface ReservaItemTrabajador {
+  id?: string;
   dni: string;
   nombres: string;
   grupo?: string;
