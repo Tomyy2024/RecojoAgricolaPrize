@@ -345,11 +345,15 @@ export function getTrabajadores(): Trabajador[] {
     const list: Trabajador[] = raw ? JSON.parse(raw) : INITIAL_TRABAJADORES;
     const seen = new Set<string>();
     const unique: Trabajador[] = [];
-    list.forEach((t) => {
-      const cleanDni = String(t.dni || '').trim();
-      if (cleanDni && !seen.has(cleanDni)) {
-        seen.add(cleanDni);
-        unique.push(t);
+    list.forEach((t, i) => {
+      const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
+      const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push({
+          ...t,
+          dni: cleanDni || String(t.dni || '').trim()
+        });
       }
     });
     return unique;
@@ -361,11 +365,15 @@ export function getTrabajadores(): Trabajador[] {
 export function saveTrabajadores(trabajadores: Trabajador[]) {
   const seen = new Set<string>();
   const unique: Trabajador[] = [];
-  trabajadores.forEach((t) => {
-    const cleanDni = String(t.dni || '').trim();
-    if (cleanDni && !seen.has(cleanDni)) {
-      seen.add(cleanDni);
-      unique.push(t);
+  trabajadores.forEach((t, i) => {
+    const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
+    const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push({
+        ...t,
+        dni: cleanDni || String(t.dni || '').trim()
+      });
     }
   });
   localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(unique));

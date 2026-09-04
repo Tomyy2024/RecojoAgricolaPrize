@@ -188,13 +188,17 @@ export default function App() {
       saveProgramaGeneral(d.programaGeneral);
     }
     if (Array.isArray(d.trabajadores)) {
-      const seenDni = new Set<string>();
+      const seen = new Set<string>();
       const uniqueWorkers: Trabajador[] = [];
-      d.trabajadores.forEach((t: Trabajador) => {
-        const cleanDni = String(t.dni || '').trim();
-        if (cleanDni && !seenDni.has(cleanDni)) {
-          seenDni.add(cleanDni);
-          uniqueWorkers.push(t);
+      d.trabajadores.forEach((t: Trabajador, i: number) => {
+        const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
+        const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueWorkers.push({
+            ...t,
+            dni: cleanDni || String(t.dni || '').trim()
+          });
         }
       });
       setTrabajadoresState(uniqueWorkers);

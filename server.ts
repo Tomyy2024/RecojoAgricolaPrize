@@ -269,23 +269,29 @@ async function startServer() {
       if (Array.isArray(trabajadores)) {
         if (append) {
           const map = new Map<string, any>();
-          (db.trabajadores || []).forEach((t: any) => {
-            const dni = String(t.dni || '').trim();
-            if (dni) map.set(dni, t);
+          (db.trabajadores || []).forEach((t: any, i: number) => {
+            const dni = String(t.dni || '').replace(/\s+/g, '').trim();
+            const key = t.id || (dni ? `${dni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+            map.set(key, { ...t, dni: dni || String(t.dni || '').trim() });
           });
-          trabajadores.forEach((t: any) => {
-            const dni = String(t.dni || '').trim();
-            if (dni) map.set(dni, t);
+          trabajadores.forEach((t: any, i: number) => {
+            const dni = String(t.dni || '').replace(/\s+/g, '').trim();
+            const key = t.id || (dni ? `${dni}__${t.nombres}` : `new_idx_${i}__${t.nombres}`);
+            map.set(key, { ...t, dni: dni || String(t.dni || '').trim() });
           });
           db.trabajadores = Array.from(map.values());
         } else {
           const seen = new Set<string>();
           const unique: any[] = [];
-          trabajadores.forEach((t: any) => {
-            const dni = String(t.dni || '').trim();
-            if (dni && !seen.has(dni)) {
-              seen.add(dni);
-              unique.push(t);
+          trabajadores.forEach((t: any, i: number) => {
+            const dni = String(t.dni || '').replace(/\s+/g, '').trim();
+            const key = t.id || (dni ? `${dni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+            if (!seen.has(key)) {
+              seen.add(key);
+              unique.push({
+                ...t,
+                dni: dni || String(t.dni || '').trim()
+              });
             }
           });
           db.trabajadores = unique;

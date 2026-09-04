@@ -290,6 +290,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return n.replace(/^modulo/, 'm').replace(/^m0*(\d+)/, 'm$1');
   };
 
+  // Helper to normalize DNI stripping all spaces and non-printable characters
+  const normalizeDni = useCallback((dni?: string | number | null): string => {
+    if (dni === null || dni === undefined) return '';
+    return String(dni).replace(/\s+/g, '').trim();
+  }, []);
+
   // Matches supervisor taking into account Peruvian naming conventions (Apellidos / Nombres order)
   const matchesSupervisor = useCallback((s1Raw?: string, s2Raw?: string): boolean => {
     if (!s1Raw || !s2Raw) return false;
@@ -379,7 +385,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
   // Pre-indexed workers for sub-millisecond search and strict binding
   const indexedTrabajadores = useMemo(() => {
-    const seenDni = new Set<string>();
+    const seenKey = new Set<string>();
     const list: (Trabajador & { 
       _normName: string; 
       _cleanDni: string;
@@ -389,11 +395,13 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     })[] = [];
     for (let i = 0; i < trabajadores.length; i++) {
       const t = trabajadores[i];
-      const cleanDni = String(t.dni || '').trim();
-      if (cleanDni && !seenDni.has(cleanDni)) {
-        seenDni.add(cleanDni);
+      const cleanDni = normalizeDni(t.dni);
+      const uniqueKey = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+      if (!seenKey.has(uniqueKey)) {
+        seenKey.add(uniqueKey);
         list.push({
           ...t,
+          dni: cleanDni || String(t.dni || '').trim(),
           _normName: normalizeStr(t.nombres),
           _cleanDni: cleanDni,
           _normSupervisor: normalizeStr(t.supervisor),
@@ -403,7 +411,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       }
     }
     return list;
-  }, [trabajadores]);
+  }, [trabajadores, normalizeDni, normalizeModulo, normalizeStr]);
 
   // Helper para verificar si un trabajador ya cuenta con Grupo o Líder asignados
   const isWorkerAsignado = useCallback((t: { grupo?: string; lider?: string }) => {
@@ -476,27 +484,72 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return scopedTrabajadores;
   }, [scopedTrabajadores, vistaAsignacion, isWorkerAsignado]);
 
+  // Universal helper to check if a worker is selected regardless of whitespace or key representation
+  const isDniSelected = useCallback(
+    (workerOrDni: { dni?: string | number; id?: string; nombres?: string } | string | number | undefined | null) => {
+      if (!workerOrDni) return false;
+      const worker =
+        typeof workerOrDni === 'object'
+          ? workerOrDni
+          : { dni: String(workerOrDni) };
+
+      const norm = normalizeDni(worker.dni);
+      const raw = String(worker.dni ?? '').trim();
+      const direct = String(worker.dni ?? '');
+      const id = worker.id || '';
+
+      return (
+        (norm !== '' && selectedDnis.has(norm)) ||
+        (raw !== '' && selectedDnis.has(raw)) ||
+        (direct !== '' && selectedDnis.has(direct)) ||
+        (id !== '' && selectedDnis.has(id)) ||
+        (typeof worker.dni === 'number' && selectedDnis.has(worker.dni as any))
+      );
+    },
+    [selectedDnis, normalizeDni]
+  );
+
   // Handle changing group for an individual worker
   const handleWorkerGroupChange = (dni: string, newGroup: string) => {
+    const norm = normalizeDni(dni);
+    const raw = String(dni || '').trim();
     setWorkerAssignedGrupos((prev) => ({
       ...prev,
-      [dni]: newGroup
+      [dni]: newGroup,
+      ...(norm ? { [norm]: newGroup } : {}),
+      ...(raw ? { [raw]: newGroup } : {})
     }));
   };
 
   // Toggle single worker selection (dynamically binds to cuadrillaGrupo on select)
-  const toggleWorker = (dni: string) => {
+  const toggleWorker = (workerOrDni: Trabajador | { dni: string; id?: string; nombres?: string } | string) => {
+    const worker: { dni?: string | number; id?: string } =
+      typeof workerOrDni === 'string'
+        ? { dni: workerOrDni }
+        : workerOrDni;
+
+    const norm = normalizeDni(worker.dni);
+    const raw = String(worker.dni ?? '').trim();
+    const id = worker.id || '';
+    const isSelected = isDniSelected(worker);
+
     setSelectedDnis((prev) => {
       const next = new Set(prev);
-      if (next.has(dni)) {
-        next.delete(dni);
+      if (isSelected) {
+        if (norm) next.delete(norm);
+        if (raw) next.delete(raw);
+        if (id) next.delete(id);
       } else {
-        next.add(dni);
-        // Dynamically assign to current cuadrillaGrupo
-        setWorkerAssignedGrupos((prevGrp) => ({
-          ...prevGrp,
-          [dni]: prevGrp[dni] || cuadrillaGrupo
-        }));
+        if (norm) next.add(norm);
+        if (raw) next.add(raw);
+        if (id) next.add(id);
+        const key = norm || raw || id;
+        if (key) {
+          setWorkerAssignedGrupos((prevGrp) => ({
+            ...prevGrp,
+            [key]: prevGrp[key] || cuadrillaGrupo
+          }));
+        }
       }
       return next;
     });
@@ -508,13 +561,42 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       const next = new Set(prev);
       const newGroups: Record<string, string> = {};
       filteredTrabajadores.forEach((t) => {
-        next.add(t.dni);
-        newGroups[t.dni] = workerAssignedGrupos[t.dni] || cuadrillaGrupo;
+        const norm = normalizeDni(t.dni);
+        const raw = String(t.dni ?? '').trim();
+        if (norm) next.add(norm);
+        if (raw) next.add(raw);
+        if (t.id) next.add(t.id);
+        const key = norm || raw || t.id;
+        if (key) {
+          newGroups[key] = workerAssignedGrupos[key] || cuadrillaGrupo;
+        }
       });
       setWorkerAssignedGrupos((prevGrp) => ({ ...prevGrp, ...newGroups }));
       return next;
     });
     onToast(`✅ ${filteredTrabajadores.length} trabajadores seleccionados y asignados al ${cuadrillaGrupo}`);
+  };
+
+  // Select all workers in the scoped cuadrilla (all 96 workers)
+  const selectAllCuadrilla = () => {
+    setSelectedDnis((prev) => {
+      const next = new Set(prev);
+      const newGroups: Record<string, string> = {};
+      scopedTrabajadores.forEach((t) => {
+        const norm = normalizeDni(t.dni);
+        const raw = String(t.dni ?? '').trim();
+        if (norm) next.add(norm);
+        if (raw) next.add(raw);
+        if (t.id) next.add(t.id);
+        const key = norm || raw || t.id;
+        if (key) {
+          newGroups[key] = workerAssignedGrupos[key] || cuadrillaGrupo;
+        }
+      });
+      setWorkerAssignedGrupos((prevGrp) => ({ ...prevGrp, ...newGroups }));
+      return next;
+    });
+    onToast(`✅ Todos los ${scopedTrabajadores.length} trabajadores de la cuadrilla seleccionados y asignados al ${cuadrillaGrupo}`);
   };
 
   const clearSelection = () => {
@@ -796,14 +878,21 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
     if (onUpdateTrabajadores) {
       const updated = trabajadores.map((t) => {
-        const cleanDni = String(t.dni).trim();
-        if (selectedDnis.has(cleanDni)) {
+        if (isDniSelected(t)) {
+          const normDni = normalizeDni(t.dni);
+          const rawDni = String(t.dni || '').trim();
+          const assignedGrp =
+            workerAssignedGrupos[normDni] ||
+            workerAssignedGrupos[rawDni] ||
+            (t.id && workerAssignedGrupos[t.id]) ||
+            targetGrupo;
+
           return {
             ...t,
             supervisor: targetSupervisor,
             fundo: targetFundo,
             modulo: targetModulo,
-            grupo: workerAssignedGrupos[cleanDni] || targetGrupo,
+            grupo: assignedGrp,
             lider: targetLider || t.lider || '',
             fecha: getLocalToday()
           };
@@ -828,7 +917,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   // Guardar Reserva: amarra a los trabajadores seleccionados al Supervisor, Fundo, Módulo, Grupo y Líder
   // y guarda la reserva antes de pasar a la asignación de jabas, permitiendo continuar todo el flujo normalmente
   const handleGuardarReserva = () => {
-    if (selectedDnis.size === 0) {
+    if (selectedWorkersList.length === 0) {
       onToast('⚠️ Selecciona al menos un trabajador para guardar la reserva de cuadrilla', 'warning');
       return;
     }
@@ -859,14 +948,21 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     // 1. Amarrar estrictamente a los trabajadores seleccionados a Supervisor, Fundo y Módulo
     if (onUpdateTrabajadores) {
       const updated = trabajadores.map((t) => {
-        const cleanDni = String(t.dni).trim();
-        if (selectedDnis.has(cleanDni)) {
+        if (isDniSelected(t)) {
+          const normDni = normalizeDni(t.dni);
+          const rawDni = String(t.dni || '').trim();
+          const assignedGrp =
+            workerAssignedGrupos[normDni] ||
+            workerAssignedGrupos[rawDni] ||
+            (t.id && workerAssignedGrupos[t.id]) ||
+            targetGrupo;
+
           return {
             ...t,
             supervisor: targetSupervisor,
             fundo: targetFundo,
             modulo: targetModulo,
-            grupo: workerAssignedGrupos[cleanDni] || targetGrupo,
+            grupo: assignedGrp,
             lider: targetLider || t.lider || '',
             fecha: targetDate
           };
@@ -896,7 +992,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       ? existingMatch.id
       : `RES_${targetDate}_${cleanSupSlug}_${targetModulo}_${Date.now().toString().slice(-4)}`;
 
-    const selectedWorkers = trabajadores.filter((t) => selectedDnis.has(String(t.dni).trim()));
+    const selectedWorkers = selectedWorkersList;
     const newReserva: ReservaCuadrilla = {
       id: reservaId,
       fecha: targetDate,
@@ -906,12 +1002,16 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       modulo: targetModulo,
       grupo: targetGrupo,
       lider: targetLider,
-      totalTrabajadores: selectedDnis.size,
-      trabajadores: selectedWorkers.map((w) => ({
-        dni: String(w.dni).trim(),
-        nombres: w.nombres,
-        grupo: workerAssignedGrupos[w.dni] || targetGrupo
-      })),
+      totalTrabajadores: selectedWorkers.length,
+      trabajadores: selectedWorkers.map((w) => {
+        const normDni = normalizeDni(w.dni);
+        const rawDni = String(w.dni || '').trim();
+        return {
+          dni: normDni || rawDni,
+          nombres: w.nombres,
+          grupo: workerAssignedGrupos[normDni] || workerAssignedGrupos[rawDni] || (w.id && workerAssignedGrupos[w.id]) || targetGrupo
+        };
+      }),
       timestamp: getLocalISO()
     };
 
@@ -923,7 +1023,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     }
     setLastSavedReserva(newReserva);
 
-    const countSaved = selectedDnis.size;
+    const countSaved = selectedWorkers.length;
 
     // Limpiar selección de personal asignado y cambiar a pendientes
     setSelectedDnis(new Set());
@@ -972,39 +1072,50 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   };
 
   // Step 2: Jabas Avance Handlers
-  const handleJabasChange = (dni: string, val: string) => {
+  const handleJabasChange = (workerOrDni: any, val: string) => {
+    const key =
+      typeof workerOrDni === 'object'
+        ? normalizeDni(workerOrDni.dni) || workerOrDni.id || String(workerOrDni.dni || '')
+        : normalizeDni(workerOrDni) || String(workerOrDni);
     const num = Math.max(0, parseInt(val) || 0);
     setAvanceValues((prev) => {
       const copy = { ...prev };
-      if (num > 0) copy[dni] = num;
-      else delete copy[dni];
+      if (num > 0) copy[key] = num;
+      else delete copy[key];
       return copy;
     });
   };
 
-  const adjustJabas = (dni: string, delta: number) => {
-    const current = avanceValues[dni] || 0;
-    const nextVal = Math.max(0, current + delta);
+  const adjustJabas = (workerOrDni: any, delta: number) => {
+    const key =
+      typeof workerOrDni === 'object'
+        ? normalizeDni(workerOrDni.dni) || workerOrDni.id || String(workerOrDni.dni || '')
+        : normalizeDni(workerOrDni) || String(workerOrDni);
     setAvanceValues((prev) => {
       const copy = { ...prev };
-      if (nextVal > 0) copy[dni] = nextVal;
-      else delete copy[dni];
+      const current = Number(copy[key] ?? (typeof workerOrDni === 'string' ? copy[workerOrDni] : 0) ?? 0);
+      const nextVal = Math.max(0, current + delta);
+      if (nextVal > 0) copy[key] = nextVal;
+      else delete copy[key];
       return copy;
     });
   };
 
   const selectedWorkersList = useMemo(() => {
-    const seenDni = new Set<string>();
+    const seenKey = new Set<string>();
     const list: Trabajador[] = [];
-    trabajadores.forEach((t) => {
-      const cleanDni = String(t.dni || '').trim();
-      if (cleanDni && selectedDnis.has(cleanDni) && !seenDni.has(cleanDni)) {
-        seenDni.add(cleanDni);
-        list.push(t);
+    trabajadores.forEach((t, idx) => {
+      if (isDniSelected(t)) {
+        const normDni = normalizeDni(t.dni);
+        const uniqueKey = t.id || (normDni ? `${normDni}__${t.nombres}` : `idx_${idx}__${t.nombres}`);
+        if (!seenKey.has(uniqueKey)) {
+          seenKey.add(uniqueKey);
+          list.push(t);
+        }
       }
     });
     return list.sort((a, b) => a.nombres.localeCompare(b.nombres));
-  }, [trabajadores, selectedDnis]);
+  }, [trabajadores, selectedDnis, isDniSelected, normalizeDni]);
 
   const filteredStep2WorkersList = useMemo(() => {
     if (!step2SearchTerm.trim()) return selectedWorkersList;
@@ -1012,9 +1123,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return selectedWorkersList.filter(
       (w) =>
         w.nombres.toLowerCase().includes(q) ||
-        String(w.dni).toLowerCase().includes(q)
+        normalizeDni(w.dni).includes(q) ||
+        String(w.dni || '').toLowerCase().includes(q)
     );
-  }, [selectedWorkersList, step2SearchTerm]);
+  }, [selectedWorkersList, step2SearchTerm, normalizeDni]);
 
   const totalJabasAvance = useMemo(() => {
     return (Object.values(avanceValues) as number[]).reduce(
@@ -1024,7 +1136,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   }, [avanceValues]);
 
   const handleStep1Next = () => {
-    if (selectedDnis.size === 0) {
+    if (selectedWorkersList.length === 0) {
       onToast('⚠️ Selecciona al menos un trabajador para la cuadrilla', 'warning');
       return;
     }
@@ -1038,14 +1150,21 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     // Amarrar a los trabajadores a los datos de cuadrilla al avanzar
     if (targetSupervisor && targetFundo && targetModulo && onUpdateTrabajadores) {
       const updated = trabajadores.map((t) => {
-        const cleanDni = String(t.dni).trim();
-        if (selectedDnis.has(cleanDni)) {
+        if (isDniSelected(t)) {
+          const normDni = normalizeDni(t.dni);
+          const rawDni = String(t.dni || '').trim();
+          const assignedGrp =
+            workerAssignedGrupos[normDni] ||
+            workerAssignedGrupos[rawDni] ||
+            (t.id && workerAssignedGrupos[t.id]) ||
+            targetGrupo;
+
           return {
             ...t,
             supervisor: targetSupervisor,
             fundo: targetFundo,
             modulo: targetModulo,
-            grupo: workerAssignedGrupos[cleanDni] || targetGrupo,
+            grupo: assignedGrp,
             lider: targetLider || t.lider || '',
             fecha: getLocalToday()
           };
@@ -1071,16 +1190,26 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     const nowIso = getLocalISO();
     const detalleList: DetalleJaba[] = [];
 
-    Object.keys(avanceValues).forEach((dni) => {
-      const jabas = avanceValues[dni];
+    Object.keys(avanceValues).forEach((key) => {
+      const jabas = avanceValues[key];
       if (jabas > 0) {
-        const t = trabajadores.find((x) => x.dni === dni);
-        const assignedGrupo = workerAssignedGrupos[dni] || cuadrillaGrupo;
+        const t = trabajadores.find(
+          (x) =>
+            normalizeDni(x.dni) === normalizeDni(key) ||
+            x.id === key ||
+            String(x.dni || '').trim() === String(key || '').trim()
+        );
+        const resolvedDni = t ? (normalizeDni(t.dni) || t.dni) : key;
+        const assignedGrupo =
+          workerAssignedGrupos[key] ||
+          (t ? workerAssignedGrupos[normalizeDni(t.dni)] || workerAssignedGrupos[t.dni] : undefined) ||
+          cuadrillaGrupo;
+
         detalleList.push({
-          id: `${hoy}_${dni}_${cuadrillaModulo || 'M01'}_${Date.now().toString().slice(-4)}`,
+          id: `${hoy}_${resolvedDni}_${cuadrillaModulo || 'M01'}_${Date.now().toString().slice(-4)}`,
           fecha: hoy,
-          dni,
-          trabajador: t ? t.nombres : dni,
+          dni: String(resolvedDni),
+          trabajador: t ? t.nombres : String(resolvedDni),
           fundo: cuadrillaFundo || 'Santa Teresa',
           modulo: cuadrillaModulo || 'M01',
           jabas,
@@ -1926,9 +2055,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="bg-[#e8f5e9] text-[#1b5e20] font-bold text-xs px-2.5 py-1 rounded-full border border-[#a5d6a7]">
-                  {selectedDnis.size} de {filteredTrabajadores.length} seleccionados
+                  {selectedWorkersList.length} de {filteredTrabajadores.length} seleccionados
                 </span>
-                {selectedDnis.size > 0 && (
+                {selectedWorkersList.length > 0 && (
                   <>
                     <button
                       type="button"
@@ -1937,7 +2066,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       title="Guardar reserva de los trabajadores seleccionados con Supervisor, Fundo y Módulo antes de asignar jabas"
                     >
                       <BookmarkCheck className="w-3.5 h-3.5 text-[#a5d6a7]" />
-                      <span>Guardar Reserva ({selectedDnis.size})</span>
+                      <span>Guardar Reserva ({selectedWorkersList.length})</span>
                     </button>
                     <button
                       type="button"
@@ -1946,7 +2075,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       title="Asignar los 5 campos actuales a los trabajadores seleccionados"
                     >
                       <Sparkles className="w-3 h-3 text-[#ffe082]" />
-                      <span>Asignar Cuadrilla ({selectedDnis.size})</span>
+                      <span>Asignar Cuadrilla ({selectedWorkersList.length})</span>
                     </button>
                     <button
                       type="button"
@@ -1988,8 +2117,23 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   className="bg-[#e8f5e9] hover:bg-[#c8e6c9] text-[#1b5e20] text-xs font-bold py-2 px-3 rounded-lg border border-[#a5d6a7] flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
                 >
                   <CheckSquare className="w-3.5 h-3.5" />
-                  <span>Seleccionar Todos</span>
+                  <span>
+                    {vistaAsignacion === 'pendientes' && countTodos > filteredTrabajadores.length
+                      ? `Seleccionar Pendientes (${filteredTrabajadores.length})`
+                      : `Seleccionar Todos (${filteredTrabajadores.length})`}
+                  </span>
                 </button>
+                {vistaAsignacion !== 'todos' && countTodos > filteredTrabajadores.length && (
+                  <button
+                    type="button"
+                    onClick={selectAllCuadrilla}
+                    className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white text-xs font-bold py-2 px-3 rounded-lg shadow-xs flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                    title={`Seleccionar todos los ${countTodos} trabajadores de la cuadrilla (pendientes y asignados)`}
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>Seleccionar Toda la Cuadrilla ({countTodos})</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -2191,15 +2335,20 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 )
               ) : (
                 <>
-                  {filteredTrabajadores.slice(0, visibleLimit).map((t) => {
-                    const isChecked = selectedDnis.has(t.dni);
-                    const assignedGrupo = workerAssignedGrupos[t.dni] || cuadrillaGrupo;
+                  {filteredTrabajadores.slice(0, visibleLimit).map((t, idx) => {
+                    const normDni = normalizeDni(t.dni);
+                    const isChecked = isDniSelected(t);
+                    const assignedGrupo =
+                      workerAssignedGrupos[normDni] ||
+                      workerAssignedGrupos[String(t.dni).trim()] ||
+                      (t.id && workerAssignedGrupos[t.id]) ||
+                      cuadrillaGrupo;
                     const isAsignado = isWorkerAsignado(t);
 
                     return (
                       <div
-                        key={t.dni}
-                        onClick={() => toggleWorker(t.dni)}
+                        key={t.id || normDni || `w_${idx}_${t.dni}`}
+                        onClick={() => toggleWorker(t)}
                         className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border transition-all cursor-pointer select-none gap-2 ${
                           isChecked
                             ? 'bg-[#e8f5e9] border-[#2e7d32] shadow-sm ring-1 ring-[#2e7d32]'
@@ -2375,7 +2524,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 title="Guardar la reserva de trabajadores con Supervisor, Fundo y Módulo antes de asignar jabas"
               >
                 <BookmarkCheck className="w-4 h-4 text-[#2e7d32]" />
-                <span>Guardar Reserva ({selectedDnis.size})</span>
+                <span>Guardar Reserva ({selectedWorkersList.length})</span>
               </button>
 
               <button
@@ -2383,7 +2532,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 onClick={handleStep1Next}
                 className="flex-1 bg-[#2e7d32] hover:bg-[#1b5e20] text-white py-3 px-4 rounded-xl font-bold text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
               >
-                <span>Continuar al Registro de Avance ({selectedDnis.size} trabajadores)</span>
+                <span>Continuar al Registro de Avance ({selectedWorkersList.length} trabajadores)</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -2507,93 +2656,106 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 No se encontraron trabajadores con el término "{step2SearchTerm}".
               </div>
             ) : (
-              filteredStep2WorkersList.map((t) => {
-              const currentVal = avanceValues[t.dni] !== undefined ? avanceValues[t.dni] : '';
-              const numVal = avanceValues[t.dni] || 0;
+              filteredStep2WorkersList.map((t, idx) => {
+                const normDni = normalizeDni(t.dni);
+                const workerKey = normDni || t.id || String(t.dni || '');
+                const currentVal =
+                  avanceValues[workerKey] !== undefined
+                    ? avanceValues[workerKey]
+                    : avanceValues[t.dni] !== undefined
+                    ? avanceValues[t.dni]
+                    : '';
+                const assignedGrupo =
+                  workerAssignedGrupos[workerKey] ||
+                  workerAssignedGrupos[normDni] ||
+                  workerAssignedGrupos[t.dni] ||
+                  cuadrillaGrupo ||
+                  t.grupo ||
+                  'Grupo 01';
 
-              return (
-                <div
-                  key={t.dni}
-                  className="flex flex-col md:flex-row md:items-center justify-between p-3.5 rounded-2xl border border-[#e0e0e0] bg-[#fafafa] gap-3 hover:border-[#a5d6a7] hover:bg-white transition-all shadow-2xs"
-                >
-                  {/* Datos del Trabajador vinculados contextualmente a la cuadrilla */}
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-xs sm:text-sm text-[#212121]">
-                        {t.nombres}
-                      </span>
-                      <span className="text-[10px] bg-[#e8f5e9] text-[#1b5e20] px-2 py-0.5 rounded-full font-bold border border-[#c8e6c9]">
-                        DNI: {t.dni}
-                      </span>
-                    </div>
-
-                    {/* Fila de Contexto Vinculado con los 5 campos de la cuadrilla seleccionada */}
-                    <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-600">
-                      <span className="bg-white px-2 py-0.5 rounded-md text-gray-700 border border-gray-200 text-[10px]">
-                        👤 <b>Sup:</b> {cuadrillaSupervisor || t.supervisor || session.nombre}
-                      </span>
-                      <span className="bg-[#f5f5f5] text-gray-700 px-2 py-0.5 rounded-md font-medium text-[10px]">
-                        📍 <b>Fundo:</b> {cuadrillaFundo || t.fundo || 'Santa Teresa'} · <b>Módulo:</b> {cuadrillaModulo || t.modulo || 'M01'}
-                      </span>
-                      <span className="bg-[#e8f5e9] text-[#1b5e20] px-2 py-0.5 rounded-md font-semibold text-[10px] border border-[#a5d6a7] flex items-center gap-1">
-                        <Users className="w-3 h-3 text-[#2e7d32]" />
-                        <span><b>Grupo:</b> {workerAssignedGrupos[t.dni] || cuadrillaGrupo || t.grupo || 'Grupo 01'}</span>
-                      </span>
-                      {cuadrillaLider && (
-                        <span className="bg-[#fff8e1] text-[#e65100] px-2 py-0.5 rounded-md font-semibold text-[10px] border border-[#ffe082]">
-                          👑 <b>Líder:</b> {cuadrillaLider}
+                return (
+                  <div
+                    key={t.id || normDni || `s2_${idx}_${t.dni}`}
+                    className="flex flex-col md:flex-row md:items-center justify-between p-3.5 rounded-2xl border border-[#e0e0e0] bg-[#fafafa] gap-3 hover:border-[#a5d6a7] hover:bg-white transition-all shadow-2xs"
+                  >
+                    {/* Datos del Trabajador vinculados contextualmente a la cuadrilla */}
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs sm:text-sm text-[#212121]">
+                          {t.nombres}
                         </span>
-                      )}
+                        <span className="text-[10px] bg-[#e8f5e9] text-[#1b5e20] px-2 py-0.5 rounded-full font-bold border border-[#c8e6c9]">
+                          DNI: {t.dni}
+                        </span>
+                      </div>
+
+                      {/* Fila de Contexto Vinculado con los 5 campos de la cuadrilla seleccionada */}
+                      <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-600">
+                        <span className="bg-white px-2 py-0.5 rounded-md text-gray-700 border border-gray-200 text-[10px]">
+                          👤 <b>Sup:</b> {cuadrillaSupervisor || t.supervisor || session.nombre}
+                        </span>
+                        <span className="bg-[#f5f5f5] text-gray-700 px-2 py-0.5 rounded-md font-medium text-[10px]">
+                          📍 <b>Fundo:</b> {cuadrillaFundo || t.fundo || 'Santa Teresa'} · <b>Módulo:</b> {cuadrillaModulo || t.modulo || 'M01'}
+                        </span>
+                        <span className="bg-[#e8f5e9] text-[#1b5e20] px-2 py-0.5 rounded-md font-semibold text-[10px] border border-[#a5d6a7] flex items-center gap-1">
+                          <Users className="w-3 h-3 text-[#2e7d32]" />
+                          <span><b>Grupo:</b> {assignedGrupo}</span>
+                        </span>
+                        {cuadrillaLider && (
+                          <span className="bg-[#fff8e1] text-[#e65100] px-2 py-0.5 rounded-md font-semibold text-[10px] border border-[#ffe082]">
+                            👑 <b>Líder:</b> {cuadrillaLider}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Controles Interactivos de Jabas (+ / - e Input) */}
+                    <div className="flex items-center gap-2 self-end md:self-auto bg-white p-1.5 rounded-xl border border-[#bfcaba] shadow-2xs">
+                      <button
+                        type="button"
+                        onClick={() => adjustJabas(workerKey, -5)}
+                        className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold flex items-center justify-center cursor-pointer transition-colors active:scale-95"
+                        title="Restar 5 jabas"
+                      >
+                        -5
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => adjustJabas(workerKey, -1)}
+                        className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 flex items-center justify-center cursor-pointer transition-colors active:scale-95"
+                        title="Restar 1 jaba"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        placeholder="0"
+                        value={currentVal}
+                        onChange={(e) => handleJabasChange(workerKey, e.target.value)}
+                        className="w-20 px-2 py-1 text-center font-extrabold text-sm text-[#1b5e20] rounded-md border border-gray-200 bg-white focus:outline-none focus:border-[#2e7d32]"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => adjustJabas(workerKey, 1)}
+                        className="w-7 h-7 rounded-lg bg-[#e8f5e9] hover:bg-[#c8e6c9] text-[#1b5e20] flex items-center justify-center cursor-pointer transition-colors active:scale-95"
+                        title="Sumar 1 jaba"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => adjustJabas(workerKey, 5)}
+                        className="w-7 h-7 rounded-lg bg-[#e8f5e9] hover:bg-[#c8e6c9] text-[#1b5e20] text-xs font-bold flex items-center justify-center cursor-pointer transition-colors active:scale-95"
+                        title="Sumar 5 jabas"
+                      >
+                        +5
+                      </button>
                     </div>
                   </div>
-
-                  {/* Controles Interactivos de Jabas (+ / - e Input) */}
-                  <div className="flex items-center gap-2 self-end md:self-auto bg-white p-1.5 rounded-xl border border-[#bfcaba] shadow-2xs">
-                    <button
-                      type="button"
-                      onClick={() => adjustJabas(t.dni, -5)}
-                      className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold flex items-center justify-center cursor-pointer transition-colors active:scale-95"
-                      title="Restar 5 jabas"
-                    >
-                      -5
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => adjustJabas(t.dni, -1)}
-                      className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 flex items-center justify-center cursor-pointer transition-colors active:scale-95"
-                      title="Restar 1 jaba"
-                    >
-                      <Minus className="w-3.5 h-3.5" />
-                    </button>
-
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      placeholder="0"
-                      value={currentVal}
-                      onChange={(e) => handleJabasChange(t.dni, e.target.value)}
-                      className="w-20 px-2 py-1 text-center font-extrabold text-sm text-[#1b5e20] rounded-md border border-gray-200 bg-white focus:outline-none focus:border-[#2e7d32]"
-                    />
-
-                    <button
-                      type="button"
-                      onClick={() => adjustJabas(t.dni, 1)}
-                      className="w-7 h-7 rounded-lg bg-[#e8f5e9] hover:bg-[#c8e6c9] text-[#1b5e20] flex items-center justify-center cursor-pointer transition-colors active:scale-95"
-                      title="Sumar 1 jaba"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => adjustJabas(t.dni, 5)}
-                      className="w-7 h-7 rounded-lg bg-[#e8f5e9] hover:bg-[#c8e6c9] text-[#1b5e20] text-xs font-bold flex items-center justify-center cursor-pointer transition-colors active:scale-95"
-                      title="Sumar 5 jabas"
-                    >
-                      +5
-                    </button>
-                  </div>
-                </div>
               );
             })
           )}
