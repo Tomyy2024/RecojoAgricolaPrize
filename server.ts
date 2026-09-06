@@ -364,16 +364,35 @@ async function startServer() {
           });
           db.trabajadores = Array.from(map.values());
         } else {
+          const prevMap = new Map<string, any>();
+          (db.trabajadores || []).forEach((t: any, i: number) => {
+            const dni = String(t.dni || '').replace(/\s+/g, '').trim();
+            const rawDni = String(t.dni || '').trim();
+            const key = t.id || (dni ? `${dni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+            prevMap.set(key, t);
+            if (dni) prevMap.set(dni, t);
+            if (rawDni) prevMap.set(rawDni, t);
+            if (t.id) prevMap.set(t.id, t);
+          });
+
           const seen = new Set<string>();
           const unique: any[] = [];
           trabajadores.forEach((t: any, i: number) => {
             const dni = String(t.dni || '').replace(/\s+/g, '').trim();
+            const rawDni = String(t.dni || '').trim();
             const key = t.id || (dni ? `${dni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
             if (!seen.has(key)) {
               seen.add(key);
+              const prev = prevMap.get(key) || (dni && prevMap.get(dni)) || (rawDni && prevMap.get(rawDni));
               unique.push({
                 ...t,
-                dni: dni || String(t.dni || '').trim()
+                dni: dni || rawDni || String(t.dni || '').trim(),
+                supervisor: (t.supervisor && t.supervisor.trim()) || prev?.supervisor || '',
+                fundo: (t.fundo && t.fundo.trim()) || prev?.fundo || 'Santa Teresa',
+                modulo: (t.modulo && t.modulo.trim()) || prev?.modulo || 'M01',
+                grupo: (t.grupo && t.grupo.trim()) || prev?.grupo || '',
+                lider: (t.lider && t.lider.trim()) || prev?.lider || '',
+                fecha: t.fecha || prev?.fecha || ''
               });
             }
           });

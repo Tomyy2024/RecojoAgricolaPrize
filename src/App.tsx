@@ -191,19 +191,55 @@ export default function App() {
       saveProgramaGeneral(d.programaGeneral);
     }
     if (Array.isArray(d.trabajadores)) {
+      const current = getTrabajadores();
+      const currentMap = new Map<string, Trabajador>();
+      current.forEach((w) => {
+        const cleanD = String(w.dni || '').replace(/\s+/g, '').trim();
+        const rawD = String(w.dni || '').trim();
+        if (cleanD) currentMap.set(cleanD, w);
+        if (rawD) currentMap.set(rawD, w);
+        if (w.id) currentMap.set(w.id, w);
+        if (w.nombres) currentMap.set(`NAME_${w.nombres.trim().toLowerCase()}`, w);
+      });
+
       const seen = new Set<string>();
       const uniqueWorkers: Trabajador[] = [];
       d.trabajadores.forEach((t: Trabajador, i: number) => {
         const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
+        const rawDni = String(t.dni || '').trim();
+        const nameKey = t.nombres ? `NAME_${t.nombres.trim().toLowerCase()}` : '';
         const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
         if (!seen.has(key)) {
           seen.add(key);
+          const local = (cleanDni && currentMap.get(cleanDni)) ||
+                        (rawDni && currentMap.get(rawDni)) ||
+                        (t.id && currentMap.get(t.id)) ||
+                        (nameKey && currentMap.get(nameKey));
+
+          // Estabilidad total: NUNCA sobreescribir campos asignados activos (supervisor, fundo, modulo, grupo, lider) con valores vacíos
           uniqueWorkers.push({
             ...t,
-            dni: cleanDni || String(t.dni || '').trim()
+            dni: cleanDni || rawDni || String(t.dni || '').trim(),
+            supervisor: (t.supervisor && t.supervisor.trim()) || local?.supervisor || '',
+            fundo: (t.fundo && t.fundo.trim()) || local?.fundo || 'Santa Teresa',
+            modulo: (t.modulo && t.modulo.trim()) || local?.modulo || 'M01',
+            grupo: (t.grupo && t.grupo.trim()) || local?.grupo || '',
+            lider: (t.lider && t.lider.trim()) || local?.lider || '',
+            fecha: t.fecha || local?.fecha || getLocalToday()
           });
         }
       });
+
+      // Preservar también trabajadores locales recién ingresados que no hayan llegado aún en la carga
+      current.forEach((cw) => {
+        const cleanDni = String(cw.dni || '').replace(/\s+/g, '').trim();
+        const key = cw.id || (cleanDni ? `${cleanDni}__${cw.nombres}` : `idx_${cw.nombres}`);
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueWorkers.push(cw);
+        }
+      });
+
       setTrabajadoresState(uniqueWorkers);
       saveTrabajadores(uniqueWorkers);
     }
@@ -585,7 +621,9 @@ export default function App() {
     const workerUpdates: Record<string, { supervisor?: string; fundo?: string; modulo?: string; grupo?: string; lider?: string; nombres?: string; fecha?: string }> = {};
     newDetalleList.forEach((d) => {
       if (d.dni) {
-        workerUpdates[d.dni] = {
+        const cleanD = String(d.dni).replace(/\s+/g, '').trim();
+        const rawD = String(d.dni).trim();
+        const obj = {
           supervisor: d.supervisor,
           fundo: d.fundo,
           modulo: d.modulo,
@@ -594,12 +632,21 @@ export default function App() {
           nombres: d.trabajador,
           fecha: d.fecha || getLocalToday()
         };
+        workerUpdates[rawD] = obj;
+        if (cleanD) workerUpdates[cleanD] = obj;
+        if (d.trabajador) {
+          const normName = d.trabajador.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+          workerUpdates[`NAME_${normName}`] = obj;
+        }
       }
     });
 
     let updatedWorkers = trabajadores.map((t) => {
-      if (workerUpdates[t.dni]) {
-        const u = workerUpdates[t.dni];
+      const cleanD = String(t.dni || '').replace(/\s+/g, '').trim();
+      const rawD = String(t.dni || '').trim();
+      const normName = t.nombres ? t.nombres.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '';
+      const u = (cleanD && workerUpdates[cleanD]) || (rawD && workerUpdates[rawD]) || (t.id && workerUpdates[t.id]) || (normName && workerUpdates[`NAME_${normName}`]);
+      if (u) {
         return {
           ...t,
           supervisor: u.supervisor || t.supervisor,

@@ -101,7 +101,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const [reservaModalSupervisorFilter, setReservaModalSupervisorFilter] = useState<string>('todos');
   const [reservaModalDateFilter, setReservaModalDateFilter] = useState<'hoy' | 'todas'>('hoy');
   const [reservaModalSearch, setReservaModalSearch] = useState<string>('');
-  const [vistaAsignacion, setVistaAsignacion] = useState<'todos' | 'pendientes' | 'asignados'>('pendientes');
+  const [vistaAsignacion, setVistaAsignacion] = useState<'todos' | 'pendientes' | 'asignados'>('todos');
 
   // Supervisor checking
   const isSupervisorUser = session.rol === 'Supervisor';
@@ -474,20 +474,6 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   );
   const countTodos = scopedTrabajadores.length;
 
-  // Lista final de trabajadores según la vista de asignación seleccionada:
-  // - 'pendientes': Solo sin Grupo ni Líder asignados
-  // - 'asignados': Ya Asignados (cuentan con Grupo o Líder)
-  // - 'todos': Ver Todos (nómina completa del ámbito)
-  const filteredTrabajadores = useMemo(() => {
-    if (vistaAsignacion === 'pendientes') {
-      return scopedTrabajadores.filter((t) => !isWorkerAsignado(t));
-    }
-    if (vistaAsignacion === 'asignados') {
-      return scopedTrabajadores.filter((t) => isWorkerAsignado(t));
-    }
-    return scopedTrabajadores;
-  }, [scopedTrabajadores, vistaAsignacion, isWorkerAsignado]);
-
   // Universal helper to check if a worker is selected regardless of whitespace or key representation
   const isDniSelected = useCallback(
     (workerOrDni: { dni?: string | number; id?: string; nombres?: string } | string | number | undefined | null) => {
@@ -514,6 +500,20 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     },
     [selectedDnis, normalizeDni, normalizeStr]
   );
+
+  // Lista final de trabajadores según la vista de asignación seleccionada:
+  // - 'pendientes': Solo sin Grupo ni Líder asignados (más cualquier trabajador seleccionado)
+  // - 'asignados': Ya Asignados (cuentan con Grupo o Líder, más cualquier trabajador seleccionado)
+  // - 'todos': Ver Todos (nómina completa del ámbito)
+  const filteredTrabajadores = useMemo(() => {
+    if (vistaAsignacion === 'pendientes') {
+      return scopedTrabajadores.filter((t) => !isWorkerAsignado(t) || isDniSelected(t));
+    }
+    if (vistaAsignacion === 'asignados') {
+      return scopedTrabajadores.filter((t) => isWorkerAsignado(t) || isDniSelected(t));
+    }
+    return scopedTrabajadores;
+  }, [scopedTrabajadores, vistaAsignacion, isWorkerAsignado, isDniSelected]);
 
   // Handle changing group for an individual worker
   const handleWorkerGroupChange = (dni: string, newGroup: string, workerName?: string) => {
@@ -889,17 +889,19 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       return;
     }
 
-    const countAssigned = selectedDnis.size;
+    const countAssigned = selectedWorkersList.length || selectedDnis.size;
 
     if (onUpdateTrabajadores) {
       const updated = trabajadores.map((t) => {
         if (isDniSelected(t)) {
           const normDni = normalizeDni(t.dni);
           const rawDni = String(t.dni || '').trim();
+          const nameKey = t.nombres ? `NAME_${normalizeStr(t.nombres)}` : '';
           const assignedGrp =
             workerAssignedGrupos[normDni] ||
             workerAssignedGrupos[rawDni] ||
             (t.id && workerAssignedGrupos[t.id]) ||
+            (nameKey && workerAssignedGrupos[nameKey]) ||
             targetGrupo;
 
           return {
@@ -917,14 +919,71 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       onUpdateTrabajadores(updated);
     }
 
-    // Limpiar selección de personal asignado
-    setSelectedDnis(new Set());
+    // Auto-crear y sincronizar la Reserva de la Cuadrilla de Hoy para persistencia total
+    const targetDate = getLocalToday();
+    const now = new Date();
+    const horaStr = now.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+    const cleanSupSlug = targetSupervisor
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '_')
+      .slice(0, 20);
 
-    // Activar automáticamente la vista de pendientes (Solo sin Grupo ni Líder)
-    setVistaAsignacion('pendientes');
+    const existingMatch = reservasState.find(
+      (r) =>
+        r.fecha === targetDate &&
+        matchesSupervisor(r.supervisor, targetSupervisor) &&
+        r.fundo === targetFundo &&
+        r.modulo === targetModulo
+    );
+
+    const reservaId = existingMatch
+      ? existingMatch.id
+      : `RES_${targetDate}_${cleanSupSlug}_${targetModulo}_${Date.now().toString().slice(-4)}`;
+
+    const newReserva: ReservaCuadrilla = {
+      id: reservaId,
+      fecha: targetDate,
+      hora: horaStr,
+      supervisor: targetSupervisor,
+      fundo: targetFundo,
+      modulo: targetModulo,
+      grupo: targetGrupo,
+      lider: targetLider,
+      totalTrabajadores: selectedWorkersList.length,
+      trabajadores: selectedWorkersList.map((w) => {
+        const normDni = normalizeDni(w.dni);
+        const rawDni = String(w.dni || '').trim();
+        const nameKey = w.nombres ? `NAME_${normalizeStr(w.nombres)}` : '';
+        return {
+          id: w.id,
+          dni: normDni || rawDni || w.id || '',
+          nombres: w.nombres,
+          grupo:
+            workerAssignedGrupos[normDni] ||
+            workerAssignedGrupos[rawDni] ||
+            (w.id && workerAssignedGrupos[w.id]) ||
+            (nameKey && workerAssignedGrupos[nameKey]) ||
+            targetGrupo
+        };
+      }),
+      timestamp: getLocalISO()
+    };
+
+    const updatedReservas = mergeReservasArrays(reservasState, [newReserva]);
+    setReservasState(updatedReservas);
+    saveReservas(updatedReservas);
+    if (onSaveReserva) {
+      onSaveReserva(newReserva);
+    }
+    setLastSavedReserva(newReserva);
+
+    // MANTENER a los trabajadores seleccionados y la vista en 'todos' para que no se muevan ni se borren
+    setVistaAsignacion('todos');
 
     onToast(
-      `✅ Cuadrilla asignada a ${countAssigned} trabajadores (${targetGrupo}${targetLider ? ` · Líder: ${targetLider}` : ''}). Mostrando solo pendientes sin Grupo ni Líder.`,
+      `✅ Cuadrilla asignada y guardada para ${countAssigned} trabajadores (${targetGrupo}${targetLider ? ` · Líder: ${targetLider}` : ''}). Listos para continuar al Paso 2.`,
       'success'
     );
   };
@@ -1326,16 +1385,81 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return list.sort((a, b) => a.nombres.localeCompare(b.nombres));
   }, [trabajadores, selectedDnis, isDniSelected, normalizeDni]);
 
+  // Trabajadores efectivos para el Paso 2: si selectedWorkersList tiene trabajadores, los usa;
+  // si estuviera vacío por alguna razón, recurre a la reserva activa de hoy o a los trabajadores ya asignados al supervisor
+  const step2EffectiveWorkers = useMemo(() => {
+    if (selectedWorkersList.length > 0) {
+      return selectedWorkersList;
+    }
+    const activeRes = lastSavedReserva || currentSupervisorReservaHoy;
+    if (activeRes && Array.isArray(activeRes.trabajadores) && activeRes.trabajadores.length > 0) {
+      const resDniSet = new Set(
+        activeRes.trabajadores.map((tw) => normalizeDni(tw.dni) || String(tw.dni || '').trim())
+      );
+      const resNameSet = new Set(
+        activeRes.trabajadores.map((tw) => normalizeStr(tw.nombres))
+      );
+      const matched = trabajadores.filter((t) => {
+        const normD = normalizeDni(t.dni);
+        const rawD = String(t.dni || '').trim();
+        const normN = normalizeStr(t.nombres);
+        return resDniSet.has(normD) || resDniSet.has(rawD) || resNameSet.has(normN);
+      });
+      if (matched.length > 0) return matched.sort((a, b) => a.nombres.localeCompare(b.nombres));
+    }
+    const sup = (cuadrillaSupervisor || (isSupervisorUser ? sessionSupervisorName : '')).trim();
+    if (sup) {
+      const scoped = trabajadores.filter(
+        (t) =>
+          matchesSupervisor(sup, t.supervisor) &&
+          (!cuadrillaFundo || normalizeStr(t.fundo) === normalizeStr(cuadrillaFundo)) &&
+          (!cuadrillaModulo || normalizeModulo(t.modulo) === normalizeModulo(cuadrillaModulo))
+      );
+      if (scoped.length > 0) return scoped.sort((a, b) => a.nombres.localeCompare(b.nombres));
+    }
+    return [];
+  }, [
+    selectedWorkersList,
+    lastSavedReserva,
+    currentSupervisorReservaHoy,
+    trabajadores,
+    cuadrillaSupervisor,
+    isSupervisorUser,
+    sessionSupervisorName,
+    cuadrillaFundo,
+    cuadrillaModulo,
+    normalizeDni,
+    normalizeStr,
+    normalizeModulo,
+    matchesSupervisor
+  ]);
+
+  // Sincronizar automáticamente selectedDnis si se ingresa al paso 2 o 3 con cuadrilla cargada
+  useEffect(() => {
+    if (step >= 2 && selectedDnis.size === 0 && step2EffectiveWorkers.length > 0) {
+      const newSel = new Set<string>();
+      step2EffectiveWorkers.forEach((w) => {
+        const norm = normalizeDni(w.dni);
+        const raw = String(w.dni || '').trim();
+        if (norm) newSel.add(norm);
+        if (raw) newSel.add(raw);
+        if (w.id) newSel.add(w.id);
+      });
+      setSelectedDnis(newSel);
+    }
+  }, [step, selectedDnis.size, step2EffectiveWorkers, normalizeDni]);
+
   const filteredStep2WorkersList = useMemo(() => {
-    if (!step2SearchTerm.trim()) return selectedWorkersList;
+    const baseList = step2EffectiveWorkers;
+    if (!step2SearchTerm.trim()) return baseList;
     const q = step2SearchTerm.toLowerCase().trim();
-    return selectedWorkersList.filter(
+    return baseList.filter(
       (w) =>
         w.nombres.toLowerCase().includes(q) ||
         normalizeDni(w.dni).includes(q) ||
         String(w.dni || '').toLowerCase().includes(q)
     );
-  }, [selectedWorkersList, step2SearchTerm, normalizeDni]);
+  }, [step2EffectiveWorkers, step2SearchTerm, normalizeDni]);
 
   const totalJabasAvance = useMemo(() => {
     return (Object.values(avanceValues) as number[]).reduce(
@@ -1345,22 +1469,41 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   }, [avanceValues]);
 
   const handleStep1Next = () => {
-    if (selectedWorkersList.length === 0) {
-      onToast('⚠️ Selecciona al menos un trabajador para la cuadrilla', 'warning');
-      return;
-    }
-
-    const activeRes = lastSavedReserva || currentSupervisorReservaHoy;
-    const resCount = activeRes ? (activeRes.totalTrabajadores || (activeRes.trabajadores || []).length) : 0;
-    if (activeRes && resCount > selectedWorkersList.length) {
-      const confirmSync = window.confirm(
-        `Tu reserva activa para ${activeRes.supervisor} tiene ${resCount} trabajadores, pero actualmente tienes ${selectedWorkersList.length} seleccionados.\n\n¿Deseas sincronizar y cuadrar a los ${resCount} trabajadores de la reserva para asignarles jabas?`
-      );
-      if (confirmSync) {
+    // Si la lista seleccionada está vacía, auto-recuperar de la reserva activa o del supervisor
+    let effectiveList = selectedWorkersList;
+    if (effectiveList.length === 0) {
+      const activeRes = lastSavedReserva || currentSupervisorReservaHoy;
+      if (activeRes && Array.isArray(activeRes.trabajadores) && activeRes.trabajadores.length > 0) {
         handleLoadReserva(activeRes);
         setStep(2);
         return;
       }
+
+      const targetSup = (cuadrillaSupervisor || (isSupervisorUser ? sessionSupervisorName : '')).trim();
+      if (targetSup) {
+        const assignedInScope = trabajadores.filter(
+          (t) =>
+            matchesSupervisor(targetSup, t.supervisor) &&
+            (!cuadrillaFundo || normalizeStr(t.fundo) === normalizeStr(cuadrillaFundo)) &&
+            (!cuadrillaModulo || normalizeModulo(t.modulo) === normalizeModulo(cuadrillaModulo))
+        );
+        if (assignedInScope.length > 0) {
+          const newSet = new Set<string>();
+          assignedInScope.forEach((w) => {
+            const norm = normalizeDni(w.dni);
+            const raw = String(w.dni || '').trim();
+            if (norm) newSet.add(norm);
+            if (raw) newSet.add(raw);
+            if (w.id) newSet.add(w.id);
+          });
+          setSelectedDnis(newSet);
+          setStep(2);
+          return;
+        }
+      }
+
+      onToast('⚠️ Selecciona al menos un trabajador para la cuadrilla', 'warning');
+      return;
     }
 
     const targetSupervisor = (cuadrillaSupervisor || (isSupervisorUser ? sessionSupervisorName : '')).trim();
@@ -1448,8 +1591,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     onSaveAvance(avanceValues, detalleList);
     onToast(`✅ Avance guardado exitosamente (${totalJabasAvance} jabas registradas)`);
     
-    // Reset selection & return to step 1
-    setSelectedDnis(new Set());
+    // Resetear solo los valores de jabas y regresar al paso 1, manteniendo intacta la selección de trabajadores
     setAvanceValues({});
     setStep(1);
   };
@@ -1490,7 +1632,11 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         <button
           type="button"
           onClick={() => {
-            if (selectedDnis.size > 0) setStep(2);
+            if (selectedDnis.size > 0 || step2EffectiveWorkers.length > 0) {
+              setStep(2);
+            } else {
+              handleStep1Next();
+            }
           }}
           className={`flex items-center gap-2 cursor-pointer transition-all ${
             step === 2
@@ -1617,12 +1763,27 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                         if (item.hasReserva && item.reserva) {
                           handleLoadReserva(item.reserva);
                         } else {
-                          const prevWorker = trabajadores.find((t) => matchesSupervisor(t.supervisor, item.supervisor));
-                          if (prevWorker?.fundo) setCuadrillaFundo(prevWorker.fundo);
-                          if (prevWorker?.modulo) setCuadrillaModulo(prevWorker.modulo);
-                          setSelectedDnis(new Set());
+                          const prevWorkers = trabajadores.filter((t) => matchesSupervisor(t.supervisor, item.supervisor));
+                          const firstWorker = prevWorkers[0];
+                          if (firstWorker?.fundo) setCuadrillaFundo(firstWorker.fundo);
+                          if (firstWorker?.modulo) setCuadrillaModulo(firstWorker.modulo);
+                          
+                          if (prevWorkers.length > 0) {
+                            const newSet = new Set<string>();
+                            prevWorkers.forEach((w) => {
+                              const norm = normalizeDni(w.dni);
+                              const raw = String(w.dni || '').trim();
+                              if (norm) newSet.add(norm);
+                              if (raw) newSet.add(raw);
+                              if (w.id) newSet.add(w.id);
+                            });
+                            setSelectedDnis(newSet);
+                            onToast(`👤 Supervisor: ${item.supervisor}. Se cargaron sus ${prevWorkers.length} trabajadores asignados.`, 'info');
+                          } else {
+                            setSelectedDnis(new Set());
+                            onToast(`👤 Supervisor seleccionado: ${item.supervisor}. Selecciona a sus trabajadores para armar su cuadrilla.`, 'info');
+                          }
                           setLastSavedReserva(null);
-                          onToast(`👤 Supervisor seleccionado: ${item.supervisor}. Selecciona a sus trabajadores para guardar su reserva.`, 'info');
                         }
                       }}
                       className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer border ${
@@ -2846,7 +3007,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               {/* Indicadores de Métricas en Vivo */}
               <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between sm:justify-end">
                 <div className="bg-white px-3 py-1.5 rounded-xl border border-[#a5d6a7] text-center shadow-xs">
-                  <div className="text-xs font-bold text-[#1b5e20]">{selectedWorkersList.length}</div>
+                  <div className="text-xs font-bold text-[#1b5e20]">{step2EffectiveWorkers.length}</div>
                   <div className="text-[10px] text-gray-500 uppercase font-semibold">Personal</div>
                 </div>
                 <div className="bg-[#fff8e1] px-3.5 py-1.5 rounded-xl border border-[#ffe082] text-center shadow-xs">
