@@ -191,52 +191,25 @@ export default function App() {
       saveProgramaGeneral(d.programaGeneral);
     }
     if (Array.isArray(d.trabajadores)) {
-      const current = getTrabajadores();
-      const currentMap = new Map<string, Trabajador>();
-      current.forEach((w) => {
-        const cleanD = String(w.dni || '').replace(/\s+/g, '').trim();
-        const rawD = String(w.dni || '').trim();
-        if (cleanD) currentMap.set(cleanD, w);
-        if (rawD) currentMap.set(rawD, w);
-        if (w.id) currentMap.set(w.id, w);
-        if (w.nombres) currentMap.set(`NAME_${w.nombres.trim().toLowerCase()}`, w);
-      });
-
       const seen = new Set<string>();
       const uniqueWorkers: Trabajador[] = [];
       d.trabajadores.forEach((t: Trabajador, i: number) => {
         const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
         const rawDni = String(t.dni || '').trim();
-        const nameKey = t.nombres ? `NAME_${t.nombres.trim().toLowerCase()}` : '';
         const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
         if (!seen.has(key)) {
           seen.add(key);
-          const local = (cleanDni && currentMap.get(cleanDni)) ||
-                        (rawDni && currentMap.get(rawDni)) ||
-                        (t.id && currentMap.get(t.id)) ||
-                        (nameKey && currentMap.get(nameKey));
-
-          // Estabilidad total: NUNCA sobreescribir campos asignados activos (supervisor, fundo, modulo, grupo, lider) con valores vacíos
           uniqueWorkers.push({
             ...t,
             dni: cleanDni || rawDni || String(t.dni || '').trim(),
-            supervisor: (t.supervisor && t.supervisor.trim()) || local?.supervisor || '',
-            fundo: (t.fundo && t.fundo.trim()) || local?.fundo || 'Santa Teresa',
-            modulo: (t.modulo && t.modulo.trim()) || local?.modulo || 'M01',
-            grupo: (t.grupo && t.grupo.trim()) || local?.grupo || '',
-            lider: (t.lider && t.lider.trim()) || local?.lider || '',
-            fecha: t.fecha || local?.fecha || getLocalToday()
+            nombres: t.nombres ? String(t.nombres).trim() : '',
+            supervisor: t.supervisor ? String(t.supervisor).trim() : '',
+            fundo: t.fundo ? String(t.fundo).trim() : '',
+            modulo: t.modulo ? String(t.modulo).trim() : '',
+            grupo: t.grupo ? String(t.grupo).trim() : '',
+            lider: t.lider ? String(t.lider).trim() : '',
+            fecha: t.fecha || ''
           });
-        }
-      });
-
-      // Preservar también trabajadores locales recién ingresados que no hayan llegado aún en la carga
-      current.forEach((cw) => {
-        const cleanDni = String(cw.dni || '').replace(/\s+/g, '').trim();
-        const key = cw.id || (cleanDni ? `${cleanDni}__${cw.nombres}` : `idx_${cw.nombres}`);
-        if (!seen.has(key)) {
-          seen.add(key);
-          uniqueWorkers.push(cw);
         }
       });
 
@@ -535,6 +508,9 @@ export default function App() {
     setProgramaGeneralState([]);
     setDetalleJabasState([]);
     setValidacionesState([]);
+    setGruposState([]);
+    setLideresState([]);
+    setReservasState([]);
     setUsuariosState(getUsuarios());
 
     // Clear central node server and wipe all backups
@@ -561,8 +537,8 @@ export default function App() {
       console.warn('Reset firestore error:', e);
     }
 
-    addToast('🧹 Base de datos limpiada correctamente. Sin datos de prueba.', 'success');
-    addLog('🧹 Base de datos reiniciada a cero (sin registros de prueba)', 'ok');
+    addToast('🧹 Base de datos limpiada. Sin backups históricos. Listo para nómina fresca del Sheet.', 'success');
+    addLog('🧹 Base de datos y backups históricos reiniciados a cero (sin distorsión histórica)', 'ok');
   }, [addToast, addLog]);
 
 
@@ -972,20 +948,21 @@ export default function App() {
     addToast(`🗑️ Reserva eliminada del sistema`);
   };
 
-  const handleImportTrabajadores = (newWorkers: Trabajador[]) => {
-    const combined = [...newWorkers, ...trabajadores];
+  const handleImportTrabajadores = (newWorkers: Trabajador[], replaceExisting: boolean = true) => {
+    const list = replaceExisting ? newWorkers : [...newWorkers, ...trabajadores];
     const seenDni = new Set<string>();
     const uniqueWorkers: Trabajador[] = [];
-    combined.forEach((t) => {
+    list.forEach((t) => {
       const cleanDni = String(t.dni || '').trim();
-      if (cleanDni && !seenDni.has(cleanDni)) {
-        seenDni.add(cleanDni);
+      const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${t.nombres}`);
+      if (!seenDni.has(key)) {
+        seenDni.add(key);
         uniqueWorkers.push(t);
       }
     });
     setTrabajadoresState(uniqueWorkers);
     saveTrabajadores(uniqueWorkers);
-    addLog(`📥 Sincronizados ${newWorkers.length} trabajadores en nómina (${uniqueWorkers.length} total)`, 'ok');
+    addLog(`📥 ${replaceExisting ? 'Nómina diaria reemplazada' : 'Trabajadores agregados'}: ${newWorkers.length} trabajadores (${uniqueWorkers.length} total)`, 'ok');
 
     // Fast-path direct push to dedicated trabajadores endpoint
     fetch('/api/trabajadores', {

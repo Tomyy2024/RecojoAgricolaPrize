@@ -319,14 +319,25 @@ function doGet(e) {
           return y + '-' + m + '-' + d;
         }
         var str = String(val).trim();
-        if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(str)) {
-          var parts = str.split(/[-/]/);
-          var dayPart = parts[2].split('T')[0].split(' ')[0];
-          return parts[0] + '-' + ('0' + parts[1]).slice(-2) + '-' + ('0' + dayPart).slice(-2);
+        if (str.indexOf('-') > -1) {
+          var parts = str.split('-');
+          if (parts.length >= 3) {
+            var yPart = parts[0].trim();
+            var mPart = ('0' + parts[1].trim()).slice(-2);
+            var dPart = ('0' + parts[2].split('T')[0].split(' ')[0].trim()).slice(-2);
+            if (yPart.length === 4) return yPart + '-' + mPart + '-' + dPart;
+            if (dPart.length === 4) return dPart + '-' + mPart + '-' + ('0' + yPart).slice(-2);
+          }
         }
-        if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(str)) {
+        if (str.indexOf('/') > -1) {
           var sParts = str.split('/');
-          return sParts[2] + '-' + ('0' + sParts[1]).slice(-2) + '-' + ('0' + sParts[0]).slice(-2);
+          if (sParts.length >= 3) {
+            var p0 = sParts[0].trim();
+            var p1 = ('0' + sParts[1].trim()).slice(-2);
+            var p2 = sParts[2].split('T')[0].split(' ')[0].trim();
+            if (p2.length === 4) return p2 + '-' + p1 + '-' + ('0' + p0).slice(-2);
+            if (p0.length === 4) return p0 + '-' + p1 + '-' + ('0' + p2).slice(-2);
+          }
         }
         var pDate = new Date(str);
         if (!isNaN(pDate.getTime())) {
@@ -336,6 +347,14 @@ function doGet(e) {
           return py + '-' + pm + '-' + pd;
         }
         return str.split('T')[0].split(' ')[0];
+      }
+
+      function cleanDni(val) {
+        var s = String(val || '').trim();
+        if (s.slice(-2) === '.0') {
+          s = s.slice(0, -2);
+        }
+        return s;
       }
 
       // 1. Leer Registro_Avance
@@ -450,7 +469,7 @@ function doGet(e) {
       }
 
       // 5. Leer Trabajadores
-      var sheetTrab = ss.getSheetByName('Trabajadores');
+      var sheetTrab = ss.getSheetByName('Trabajadores') || ss.getSheetByName('Personal') || ss.getSheetByName('Nomina') || ss.getSheetByName('Nómina');
       if (sheetTrab && sheetTrab.getLastRow() > 1) {
         var trabValues = sheetTrab.getRange(2, 1, sheetTrab.getLastRow() - 1, 8).getValues();
         result.trabajadores = trabValues
@@ -459,14 +478,14 @@ function doGet(e) {
           })
           .map(function(r) {
             return {
-              dni: String(r[0] || ''),
-              nombres: String(r[1] || ''),
-              fundo: String(r[2] || ''),
-              modulo: String(r[3] || ''),
-              grupo: String(r[4] || ''),
-              supervisor: String(r[5] || ''),
-              lider: String(r[6] || ''),
-              tipo: String(r[7] || 'Trabajador')
+              dni: cleanDni(r[0]),
+              nombres: String(r[1] || '').trim(),
+              fundo: String(r[2] || '').trim(),
+              modulo: String(r[3] || '').trim(),
+              grupo: String(r[4] || '').trim(),
+              supervisor: String(r[5] || '').trim(),
+              lider: String(r[6] || '').trim(),
+              tipo: String(r[7] || 'Trabajador').trim()
             };
           });
       }
@@ -487,7 +506,7 @@ function doGet(e) {
       }
 
       // 7. Leer Lideres
-      var sheetLid = ss.getSheetByName('Lideres');
+      var sheetLid = ss.getSheetByName('Lideres') || ss.getSheetByName('Líderes');
       if (sheetLid && sheetLid.getLastRow() > 1) {
         var lidValues = sheetLid.getRange(2, 1, sheetLid.getLastRow() - 1, 5).getValues();
         result.lideres = lidValues
@@ -496,11 +515,11 @@ function doGet(e) {
           })
           .map(function(r) {
             return {
-              lider: String(r[0] || ''),
-              dni: String(r[1] || ''),
-              nombres: String(r[2] || ''),
-              grupo: String(r[3] || ''),
-              fechaAlta: String(r[4] || '')
+              lider: String(r[0] || '').trim(),
+              dni: cleanDni(r[1]),
+              nombres: String(r[2] || '').trim(),
+              grupo: String(r[3] || '').trim(),
+              fechaAlta: String(r[4] || '').trim()
             };
           });
       }
@@ -510,7 +529,7 @@ function doGet(e) {
       if (sheetGrp && sheetGrp.getLastRow() > 1) {
         var grpValues = sheetGrp.getRange(2, 1, sheetGrp.getLastRow() - 1, 1).getValues();
         result.grupos = grpValues.map(function(r) {
-          return String(r[0] || '');
+          return String(r[0] || '').trim();
         }).filter(function(g) { return g !== ''; });
       }
 
@@ -964,32 +983,46 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
           </button>
         </div>
 
-        {/* Action Button: Limpiar Datos de Prueba */}
+        {/* Action Button: Limpiar Datos y Tomar del Sheet */}
         {onResetData && (
           <div className="bg-red-50/70 border border-red-200 p-3 sm:p-4 rounded-xl mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-xs sm:text-sm text-red-800">
-                  🧹 Limpiar Base de Datos (Sin Datos de Prueba)
+                  🧹 Borrar Backups Históricos (Evitar Distorsión de Nómina)
                 </span>
                 <span className="text-[10px] bg-red-600 text-white px-2 py-0.2 rounded-full font-bold uppercase">
-                  Paso 2
+                  Limpieza Total
                 </span>
               </div>
               <p className="text-xs text-red-600 mt-0.5 max-w-lg">
-                Elimina todos los registros y pruebas para iniciar operaciones en blanco en todas las computadoras y celulares.
+                Elimina todos los respaldos locales, de servidor y Firebase para que el sistema tome al 100% la nómina de trabajadores, grupos y líderes desde tu Google Sheet cada día.
               </p>
             </div>
-            <button
-              onClick={() => {
-                if (window.confirm('¿Estás seguro de limpiar todos los registros y datos de prueba? Esta acción dejará el sistema en blanco y sincronizado para todos los usuarios.')) {
-                  onResetData();
-                }
-              }}
-              className="bg-red-600 hover:bg-red-700 active:bg-red-800 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer whitespace-nowrap"
-            >
-              🧹 Limpiar Todo
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  if (window.confirm('¿Estás seguro de borrar todos los registros y backups históricos? El sistema quedará listo en blanco para tomar los datos limpios de tu Google Sheet.')) {
+                    onResetData();
+                  }
+                }}
+                className="bg-red-600 hover:bg-red-700 active:bg-red-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer whitespace-nowrap"
+              >
+                🧹 Limpiar Todo
+              </button>
+              <button
+                onClick={async () => {
+                  if (window.confirm('¿Borrar backups históricos y descargar inmediatamente la nómina fresca desde Google Sheets?')) {
+                    onResetData();
+                    await onManualSyncPull();
+                  }
+                }}
+                className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>📥 Limpiar y Cargar del Sheet</span>
+              </button>
+            </div>
           </div>
         )}
 

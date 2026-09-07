@@ -4,7 +4,7 @@ import { FileUp, FileText, Check, X, UploadCloud, AlertTriangle, Eye } from 'luc
 
 interface ImportarTabProps {
   trabajadores: Trabajador[];
-  onImportTrabajadores: (nuevos: Trabajador[]) => void;
+  onImportTrabajadores: (nuevos: Trabajador[], replaceExisting?: boolean) => void;
   onToast: (msg: string) => void;
 }
 
@@ -14,6 +14,7 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
   onToast
 }) => {
   const [mode, setMode] = useState<'file' | 'paste'>('file');
+  const [replaceMode, setReplaceMode] = useState<boolean>(true);
   const [pasteText, setPasteText] = useState('');
   const [parsedData, setParsedData] = useState<Omit<Trabajador, 'id' | 'fecha'>[] | null>(null);
 
@@ -91,38 +92,61 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
     const existingDnis = new Set(trabajadores.map((t) => String(t.dni).trim()));
     const nowIso = new Date().toISOString().split('T')[0] + ' 00:00:00';
 
+    const seenDnis = new Set<string>();
     const newWorkers: Trabajador[] = [];
     let duplicates = 0;
 
     parsedData.forEach((p, idx) => {
-      if (!existingDnis.has(p.dni)) {
-        newWorkers.push({
-          id: `IMP_${Date.now()}_${idx}`,
-          fecha: nowIso,
-          dni: p.dni,
-          nombres: p.nombres,
-          fundo: p.fundo,
-          modulo: p.modulo,
-          supervisor: p.supervisor,
-          grupo: p.grupo,
-          tipo: p.tipo,
-          jabas: 0
-        });
-        existingDnis.add(p.dni);
+      const cleanDni = p.dni.trim();
+      if (replaceMode) {
+        if (!seenDnis.has(cleanDni)) {
+          seenDnis.add(cleanDni);
+          newWorkers.push({
+            id: `IMP_${Date.now()}_${idx}`,
+            fecha: nowIso,
+            dni: cleanDni,
+            nombres: p.nombres,
+            fundo: p.fundo,
+            modulo: p.modulo,
+            supervisor: p.supervisor,
+            grupo: p.grupo,
+            tipo: p.tipo,
+            jabas: 0
+          });
+        } else {
+          duplicates += 1;
+        }
       } else {
-        duplicates += 1;
+        if (!existingDnis.has(cleanDni) && !seenDnis.has(cleanDni)) {
+          seenDnis.add(cleanDni);
+          newWorkers.push({
+            id: `IMP_${Date.now()}_${idx}`,
+            fecha: nowIso,
+            dni: cleanDni,
+            nombres: p.nombres,
+            fundo: p.fundo,
+            modulo: p.modulo,
+            supervisor: p.supervisor,
+            grupo: p.grupo,
+            tipo: p.tipo,
+            jabas: 0
+          });
+        } else {
+          duplicates += 1;
+        }
       }
     });
 
     if (newWorkers.length === 0) {
-      onToast(`⚠️ Todos los ${parsedData.length} trabajadores ya existen en la nómina.`);
+      onToast(`⚠️ No se encontraron trabajadores válidos para importar.`);
       return;
     }
 
-    onImportTrabajadores(newWorkers);
+    onImportTrabajadores(newWorkers, replaceMode);
     onToast(
-      `✅ Importación exitosa: ${newWorkers.length} trabajadores agregados` +
-        (duplicates > 0 ? ` (${duplicates} duplicados omitidos)` : '')
+      replaceMode
+        ? `✅ Nómina diaria reemplazada: ${newWorkers.length} trabajadores activos` + (duplicates > 0 ? ` (${duplicates} duplicados omitidos)` : '')
+        : `✅ Importación exitosa: ${newWorkers.length} trabajadores agregados` + (duplicates > 0 ? ` (${duplicates} duplicados omitidos)` : '')
     );
 
     // Reset
@@ -263,6 +287,44 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
                   ... y {parsedData.length - 10} trabajadores más
                 </div>
               )}
+            </div>
+
+            {/* Mode selection: Reemplazar nómina diaria vs Agregar */}
+            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 mb-4">
+              <div className="text-xs font-bold text-amber-900 mb-2">Modo de Importación:</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <label className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-all ${
+                  replaceMode ? 'bg-white border-[#2e7d32] shadow-sm' : 'bg-transparent border-amber-200 opacity-80'
+                }`}>
+                  <input
+                    type="radio"
+                    name="importMode"
+                    checked={replaceMode}
+                    onChange={() => setReplaceMode(true)}
+                    className="mt-0.5 text-[#2e7d32] focus:ring-[#2e7d32]"
+                  />
+                  <div>
+                    <div className="text-xs font-bold text-[#1b5e20]">🔄 Reemplazar Nómina Diaria (Recomendado)</div>
+                    <div className="text-[11px] text-gray-600 mt-0.5">Sustituye toda la lista actual por estos trabajadores. Evita distorsión con días anteriores.</div>
+                  </div>
+                </label>
+
+                <label className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-all ${
+                  !replaceMode ? 'bg-white border-[#2e7d32] shadow-sm' : 'bg-transparent border-amber-200 opacity-80'
+                }`}>
+                  <input
+                    type="radio"
+                    name="importMode"
+                    checked={!replaceMode}
+                    onChange={() => setReplaceMode(false)}
+                    className="mt-0.5 text-[#2e7d32] focus:ring-[#2e7d32]"
+                  />
+                  <div>
+                    <div className="text-xs font-bold text-gray-800">➕ Agregar a la Nómina Existente</div>
+                    <div className="text-[11px] text-gray-600 mt-0.5">Añade solo los DNIs nuevos sin eliminar los trabajadores actuales.</div>
+                  </div>
+                </label>
+              </div>
             </div>
 
             <div className="flex gap-3">

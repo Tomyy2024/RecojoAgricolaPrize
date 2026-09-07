@@ -130,12 +130,11 @@ export function formatDateDDMMAAAA(d?: string): string {
 export function initializeStorage() {
   try {
     const WIPE_VERSION_KEY = 'recojoFrutosDataVersion';
-    const TARGET_VERSION = 'v105_clean_wipe_all_backups_require_login';
+    const TARGET_VERSION = 'v106_wipe_historical_backups_clean_sheet_mode';
     
     // Check if this browser needs a clean wipe of all backup and cached data
     if (typeof localStorage !== 'undefined' && localStorage.getItem(WIPE_VERSION_KEY) !== TARGET_VERSION) {
-      wipeAllBackupData();
-      clearSession();
+      wipeAllBackupData(false);
       localStorage.setItem(WIPE_VERSION_KEY, TARGET_VERSION);
     }
 
@@ -224,7 +223,7 @@ export function initializeStorage() {
 }
 
 // Completely wipe all backup, test, and historical data from localStorage
-export function wipeAllBackupData() {
+export function wipeAllBackupData(clearAuth: boolean = false) {
   try {
     if (typeof localStorage === 'undefined') return;
 
@@ -239,14 +238,11 @@ export function wipeAllBackupData() {
     localStorage.setItem(KEYS.GRUPOS, JSON.stringify([]));
     localStorage.setItem(KEYS.RESERVAS, JSON.stringify([]));
     localStorage.setItem(KEYS.AUTO_SYNC_QUEUE, JSON.stringify([]));
-    localStorage.setItem(KEYS.USUARIOS, JSON.stringify(INITIAL_USUARIOS));
 
-    // 2. Remove any old sheet URLs or sync caches that might re-import backups
-    localStorage.removeItem(KEYS.GSHEET_URL);
-    localStorage.removeItem(KEYS.AUTO_SYNC);
+    // Reset sync timestamps so fresh sync pulls cleanly
     localStorage.removeItem(KEYS.LAST_SYNC);
 
-    // 3. Scan and delete any ad-hoc backup keys in localStorage
+    // 2. Scan and delete any ad-hoc backup keys in localStorage
     const keysToDelete: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
@@ -265,8 +261,9 @@ export function wipeAllBackupData() {
     }
     keysToDelete.forEach(k => localStorage.removeItem(k));
 
-    // 4. Also clear session so authentication is freshly required
-    clearSession();
+    if (clearAuth) {
+      clearSession();
+    }
   } catch (e) {
     console.error('Error wiping backup data:', e);
   }
@@ -274,7 +271,7 @@ export function wipeAllBackupData() {
 
 // Reset all test records to a completely clean state
 export function resetAllData() {
-  wipeAllBackupData();
+  wipeAllBackupData(false);
 }
 
 
@@ -485,9 +482,11 @@ export function saveAvanceMap(map: Record<string, number>) {
 export function getGrupos(): string[] {
   try {
     const raw = localStorage.getItem(KEYS.GRUPOS);
-    return raw ? JSON.parse(raw) : INITIAL_GRUPOS;
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
   } catch {
-    return INITIAL_GRUPOS;
+    return [];
   }
 }
 
@@ -524,24 +523,7 @@ export function getLideres(): Lider[] {
       }
     }
   } catch {}
-  // Default derive from trabajadores
-  const workers = getTrabajadores();
-  const liderMap = new Map<string, Lider>();
-  workers.forEach(w => {
-    const name = (w.lider || '').trim();
-    if (name) {
-      const key = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-      if (!liderMap.has(key)) {
-        liderMap.set(key, {
-          lider: name,
-          dni: w.tipo === 'Líder' ? w.dni : '',
-          nombres: name,
-          fechaAlta: w.fecha ? w.fecha.slice(0, 10) : getLocalToday()
-        });
-      }
-    }
-  });
-  return Array.from(liderMap.values());
+  return [];
 }
 
 export function saveLideres(lideres: Lider[]) {
