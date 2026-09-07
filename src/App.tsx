@@ -593,8 +593,25 @@ export default function App() {
     setDetalleJabasState(mergedDetalle);
     saveDetalleJabas(mergedDetalle);
 
-    // Update full worker context (Supervisor, Fundo, Modulo, Grupo, Lider) based on this cuadrilla record
-    const workerUpdates: Record<string, { supervisor?: string; fundo?: string; modulo?: string; grupo?: string; lider?: string; nombres?: string; fecha?: string }> = {};
+    // Update full worker context (Supervisor, Fundo, Modulo, Grupo, Lider, Jabas) based on this cuadrilla record
+    const workerUpdates: Record<string, { supervisor?: string; fundo?: string; modulo?: string; grupo?: string; lider?: string; nombres?: string; fecha?: string; jabas?: number }> = {};
+    const hoy = getLocalToday();
+    const workerJabasToday: Record<string, number> = {};
+
+    mergedDetalle.forEach((d) => {
+      const dFecha = String(d.fecha || '').trim();
+      const dTimestamp = String(d.timestamp || '').slice(0, 10);
+      if (dFecha === hoy || dTimestamp === hoy) {
+        const j = Number(d.jabas) || 0;
+        if (d.dni) {
+          const cleanD = String(d.dni).replace(/\s+/g, '').trim();
+          const rawD = String(d.dni).trim();
+          if (cleanD) workerJabasToday[cleanD] = (workerJabasToday[cleanD] || 0) + j;
+          if (rawD) workerJabasToday[rawD] = (workerJabasToday[rawD] || 0) + j;
+        }
+      }
+    });
+
     newDetalleList.forEach((d) => {
       if (d.dni) {
         const cleanD = String(d.dni).replace(/\s+/g, '').trim();
@@ -606,7 +623,8 @@ export default function App() {
           grupo: d.grupo,
           lider: d.lider,
           nombres: d.trabajador,
-          fecha: d.fecha || getLocalToday()
+          fecha: d.fecha || hoy,
+          jabas: Number(d.jabas) || 0
         };
         workerUpdates[rawD] = obj;
         if (cleanD) workerUpdates[cleanD] = obj;
@@ -622,6 +640,7 @@ export default function App() {
       const rawD = String(t.dni || '').trim();
       const normName = t.nombres ? t.nombres.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '';
       const u = (cleanD && workerUpdates[cleanD]) || (rawD && workerUpdates[rawD]) || (t.id && workerUpdates[t.id]) || (normName && workerUpdates[`NAME_${normName}`]);
+      const currentJabasToday = (cleanD && workerJabasToday[cleanD]) || (rawD && workerJabasToday[rawD]) || 0;
       if (u) {
         return {
           ...t,
@@ -630,7 +649,14 @@ export default function App() {
           modulo: u.modulo || t.modulo,
           grupo: u.grupo || t.grupo,
           lider: u.lider || t.lider,
-          fecha: u.fecha || t.fecha
+          fecha: u.fecha || t.fecha,
+          jabas: currentJabasToday > 0 ? currentJabasToday : ((t.jabas || 0) + (u.jabas || 0))
+        };
+      }
+      if (currentJabasToday > 0) {
+        return {
+          ...t,
+          jabas: currentJabasToday
         };
       }
       return t;
@@ -1161,6 +1187,7 @@ export default function App() {
             onDeleteSupervisor={handleDeleteSupervisor}
             onSaveGrupo={handleSaveGrupo}
             onSaveAvance={handleSaveAvance}
+            detalleJabas={detalleJabas}
             reservas={reservas}
             onSaveReserva={handleSaveReserva}
             onDeleteReserva={handleDeleteReserva}

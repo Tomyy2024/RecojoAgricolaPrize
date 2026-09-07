@@ -60,6 +60,7 @@ interface TrabajadoresTabProps {
   onDeleteSupervisor?: (supervisorName: string) => void;
   onSaveGrupo?: (grupo: string) => void;
   onSaveAvance?: (avanceMap: Record<string, number>, detalleList: DetalleJaba[]) => void;
+  detalleJabas?: DetalleJaba[];
   onToast: (msg: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
 }
 
@@ -82,6 +83,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   onDeleteSupervisor,
   onSaveGrupo,
   onSaveAvance,
+  detalleJabas = [],
   onToast
 }) => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -101,7 +103,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const [reservaModalSupervisorFilter, setReservaModalSupervisorFilter] = useState<string>('todos');
   const [reservaModalDateFilter, setReservaModalDateFilter] = useState<'hoy' | 'todas'>('hoy');
   const [reservaModalSearch, setReservaModalSearch] = useState<string>('');
-  const [vistaAsignacion, setVistaAsignacion] = useState<'todos' | 'pendientes' | 'asignados'>('todos');
+  const [vistaAsignacion, setVistaAsignacion] = useState<'sin_jabas' | 'con_jabas' | 'pendientes' | 'todos'>('sin_jabas');
 
   // Supervisor checking
   const isSupervisorUser = session.rol === 'Supervisor';
@@ -426,6 +428,81 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return hasGrupo || hasLider;
   }, []);
 
+  // Mapa de jabas registradas hoy para cada trabajador (basado en detalleJabas y en t.jabas)
+  const workerJabasTodayMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    const hoy = getLocalToday();
+
+    if (Array.isArray(detalleJabas)) {
+      detalleJabas.forEach((d) => {
+        const dFecha = String(d.fecha || '').trim();
+        const dTimestamp = String(d.timestamp || '').slice(0, 10);
+        if (dFecha === hoy || dTimestamp === hoy) {
+          const jabas = Number(d.jabas) || 0;
+          if (jabas > 0 && d.dni) {
+            const norm = normalizeDni(d.dni);
+            const raw = String(d.dni || '').trim();
+            if (norm) map[norm] = (map[norm] || 0) + jabas;
+            if (raw) map[raw] = (map[raw] || 0) + jabas;
+            if (d.id) map[d.id] = (map[d.id] || 0) + jabas;
+            if (d.trabajador) {
+              const normName = normalizeStr(d.trabajador);
+              map[`NAME_${normName}`] = (map[`NAME_${normName}`] || 0) + jabas;
+            }
+          }
+        }
+      });
+    }
+
+    // Complementar con el registro del trabajador si tiene jabas hoy
+    trabajadores.forEach((t) => {
+      const j = Number(t.jabas) || 0;
+      const tFecha = String(t.fecha || '').trim();
+      if (j > 0 && (!tFecha || tFecha === hoy)) {
+        const norm = normalizeDni(t.dni);
+        const raw = String(t.dni || '').trim();
+        if (norm && !map[norm]) map[norm] = j;
+        if (raw && !map[raw]) map[raw] = j;
+        if (t.id && !map[t.id]) map[t.id] = j;
+        if (t.nombres) {
+          const normName = normalizeStr(t.nombres);
+          if (!map[`NAME_${normName}`]) map[`NAME_${normName}`] = j;
+        }
+      }
+    });
+
+    return map;
+  }, [detalleJabas, trabajadores, normalizeDni, normalizeStr]);
+
+  const getWorkerJabasCount = useCallback(
+    (workerOrDni: any) => {
+      if (!workerOrDni) return 0;
+      const worker = typeof workerOrDni === 'object' ? workerOrDni : { dni: String(workerOrDni) };
+      const norm = normalizeDni(worker.dni);
+      const raw = String(worker.dni ?? '').trim();
+      const id = worker.id || '';
+      const nameKey = worker.nombres ? `NAME_${normalizeStr(worker.nombres)}` : '';
+
+      const fromMap =
+        (norm && workerJabasTodayMap[norm]) ||
+        (raw && workerJabasTodayMap[raw]) ||
+        (id && workerJabasTodayMap[id]) ||
+        (nameKey && workerJabasTodayMap[nameKey]) ||
+        0;
+
+      if (fromMap > 0) return fromMap;
+      return Number((worker as any).jabas) || 0;
+    },
+    [workerJabasTodayMap, normalizeDni, normalizeStr]
+  );
+
+  const hasWorkerJabas = useCallback(
+    (workerOrDni: any) => {
+      return getWorkerJabasCount(workerOrDni) > 0;
+    },
+    [getWorkerJabasCount]
+  );
+
   // Nómina de trabajadores con filtro dinámico:
   // Se activa el filtro ÚNICAMENTE cuando el usuario selecciona Supervisor, Fundo o Módulo.
   // Si no se selecciona ninguno, no queda pre-filtrado ningún supervisor, fundo, módulo, grupo o líder.
@@ -464,9 +541,17 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   }, [indexedTrabajadores, searchTerm, cuadrillaSupervisor, cuadrillaFundo, cuadrillaModulo, matchesSupervisor]);
 
   // Contadores dinámicos en tiempo real para el selector de estado de asignación
+  const countSinJabas = useMemo(
+    () => scopedTrabajadores.filter((t) => !hasWorkerJabas(t)).length,
+    [scopedTrabajadores, hasWorkerJabas]
+  );
+  const countConJabas = useMemo(
+    () => scopedTrabajadores.filter((t) => hasWorkerJabas(t)).length,
+    [scopedTrabajadores, hasWorkerJabas]
+  );
   const countPendientes = useMemo(
-    () => scopedTrabajadores.filter((t) => !isWorkerAsignado(t)).length,
-    [scopedTrabajadores, isWorkerAsignado]
+    () => scopedTrabajadores.filter((t) => !isWorkerAsignado(t) && !hasWorkerJabas(t)).length,
+    [scopedTrabajadores, isWorkerAsignado, hasWorkerJabas]
   );
   const countAsignados = useMemo(
     () => scopedTrabajadores.filter((t) => isWorkerAsignado(t)).length,
@@ -502,18 +587,22 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   );
 
   // Lista final de trabajadores según la vista de asignación seleccionada:
-  // - 'pendientes': Solo sin Grupo ni Líder asignados (más cualquier trabajador seleccionado)
-  // - 'asignados': Ya Asignados (cuentan con Grupo o Líder, más cualquier trabajador seleccionado)
-  // - 'todos': Ver Todos (nómina completa del ámbito)
+  // - 'sin_jabas': Solo trabajadores que aún NO tienen jabas registradas hoy
+  // - 'con_jabas': Trabajadores que ya cuentan con jabas registradas hoy
+  // - 'pendientes': Solo sin Grupo ni Líder asignados y que no tengan jabas
+  // - 'todos': Nómina completa
   const filteredTrabajadores = useMemo(() => {
-    if (vistaAsignacion === 'pendientes') {
-      return scopedTrabajadores.filter((t) => !isWorkerAsignado(t) || isDniSelected(t));
+    if (vistaAsignacion === 'sin_jabas') {
+      return scopedTrabajadores.filter((t) => !hasWorkerJabas(t) || isDniSelected(t));
     }
-    if (vistaAsignacion === 'asignados') {
-      return scopedTrabajadores.filter((t) => isWorkerAsignado(t) || isDniSelected(t));
+    if (vistaAsignacion === 'con_jabas') {
+      return scopedTrabajadores.filter((t) => hasWorkerJabas(t) || isDniSelected(t));
+    }
+    if (vistaAsignacion === 'pendientes') {
+      return scopedTrabajadores.filter((t) => (!isWorkerAsignado(t) && !hasWorkerJabas(t)) || isDniSelected(t));
     }
     return scopedTrabajadores;
-  }, [scopedTrabajadores, vistaAsignacion, isWorkerAsignado, isDniSelected]);
+  }, [scopedTrabajadores, vistaAsignacion, hasWorkerJabas, isWorkerAsignado, isDniSelected]);
 
   // Handle changing group for an individual worker
   const handleWorkerGroupChange = (dni: string, newGroup: string, workerName?: string) => {
@@ -1469,40 +1558,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   }, [avanceValues]);
 
   const handleStep1Next = () => {
-    // Si la lista seleccionada está vacía, auto-recuperar de la reserva activa o del supervisor
-    let effectiveList = selectedWorkersList;
-    if (effectiveList.length === 0) {
-      const activeRes = lastSavedReserva || currentSupervisorReservaHoy;
-      if (activeRes && Array.isArray(activeRes.trabajadores) && activeRes.trabajadores.length > 0) {
-        handleLoadReserva(activeRes);
-        setStep(2);
-        return;
-      }
-
-      const targetSup = (cuadrillaSupervisor || (isSupervisorUser ? sessionSupervisorName : '')).trim();
-      if (targetSup) {
-        const assignedInScope = trabajadores.filter(
-          (t) =>
-            matchesSupervisor(targetSup, t.supervisor) &&
-            (!cuadrillaFundo || normalizeStr(t.fundo) === normalizeStr(cuadrillaFundo)) &&
-            (!cuadrillaModulo || normalizeModulo(t.modulo) === normalizeModulo(cuadrillaModulo))
-        );
-        if (assignedInScope.length > 0) {
-          const newSet = new Set<string>();
-          assignedInScope.forEach((w) => {
-            const norm = normalizeDni(w.dni);
-            const raw = String(w.dni || '').trim();
-            if (norm) newSet.add(norm);
-            if (raw) newSet.add(raw);
-            if (w.id) newSet.add(w.id);
-          });
-          setSelectedDnis(newSet);
-          setStep(2);
-          return;
-        }
-      }
-
-      onToast('⚠️ Selecciona al menos un trabajador para la cuadrilla', 'warning');
+    if (selectedWorkersList.length === 0) {
+      onToast('⚠️ Selecciona al menos un trabajador para registrar su avance de jabas', 'warning');
       return;
     }
 
@@ -1591,8 +1648,16 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     onSaveAvance(avanceValues, detalleList);
     onToast(`✅ Avance guardado exitosamente (${totalJabasAvance} jabas registradas)`);
     
-    // Resetear solo los valores de jabas y regresar al paso 1, manteniendo intacta la selección de trabajadores
+    // Limpiar y restaurar completamente los trabajadores seleccionados
+    setSelectedDnis(new Set());
+    setWorkerAssignedGrupos({});
     setAvanceValues({});
+    
+    // Establecer la vista a "Solo sin Jabas" para que los que ya tienen jabas no aparezcan
+    // y aparezcan únicamente los que aún no tienen jabas
+    setVistaAsignacion('sin_jabas');
+
+    // Regresar al Paso 1
     setStep(1);
   };
 
@@ -2503,8 +2568,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 >
                   <CheckSquare className="w-3.5 h-3.5" />
                   <span>
-                    {vistaAsignacion === 'pendientes' && countTodos > filteredTrabajadores.length
-                      ? `Seleccionar Pendientes (${filteredTrabajadores.length})`
+                    {vistaAsignacion === 'sin_jabas'
+                      ? `Seleccionar Sin Jabas (${filteredTrabajadores.length})`
+                      : vistaAsignacion === 'pendientes'
+                      ? `Seleccionar Sin Grupo (${filteredTrabajadores.length})`
                       : `Seleccionar Todos (${filteredTrabajadores.length})`}
                   </span>
                 </button>
@@ -2537,52 +2604,75 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             <div className="flex items-center gap-2 mb-3 text-xs overflow-x-auto pb-1">
               <span className="text-gray-500 text-[11px] font-semibold whitespace-nowrap flex items-center gap-1">
                 <Filter className="w-3.5 h-3.5 text-[#2e7d32]" />
-                <span>Estado de asignación:</span>
+                <span>Estado:</span>
               </span>
 
-              {/* 1. Solo sin Grupo ni Líder */}
+              {/* 1. Solo sin Jabas (Pendientes) */}
+              <button
+                type="button"
+                onClick={() => setVistaAsignacion('sin_jabas')}
+                className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                  vistaAsignacion === 'sin_jabas'
+                    ? 'bg-[#2e7d32] text-white shadow-xs ring-1 ring-[#1b5e20]'
+                    : 'bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100'
+                }`}
+                title="Mostrar solo los trabajadores que aún no tienen jabas registradas hoy"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>Solo sin Jabas</span>
+                <span
+                  className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
+                    vistaAsignacion === 'sin_jabas' ? 'bg-[#1b5e20] text-white' : 'bg-emerald-200 text-emerald-900'
+                  }`}
+                >
+                  {countSinJabas}
+                </span>
+              </button>
+
+              {/* 2. Con Jabas Asignadas */}
+              <button
+                type="button"
+                onClick={() => setVistaAsignacion('con_jabas')}
+                className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                  vistaAsignacion === 'con_jabas'
+                    ? 'bg-amber-600 text-white shadow-xs ring-1 ring-amber-700'
+                    : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
+                }`}
+                title="Mostrar los trabajadores que ya tienen jabas registradas hoy"
+              >
+                <Package className="w-3.5 h-3.5" />
+                <span>Con Jabas</span>
+                <span
+                  className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
+                    vistaAsignacion === 'con_jabas' ? 'bg-amber-800 text-white' : 'bg-amber-200 text-amber-900'
+                  }`}
+                >
+                  {countConJabas}
+                </span>
+              </button>
+
+              {/* 3. Solo sin Grupo ni Líder */}
               <button
                 type="button"
                 onClick={() => setVistaAsignacion('pendientes')}
                 className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
                   vistaAsignacion === 'pendientes'
-                    ? 'bg-amber-500 text-white shadow-xs ring-1 ring-amber-600'
-                    : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
+                    ? 'bg-purple-600 text-white shadow-xs ring-1 ring-purple-700'
+                    : 'bg-purple-50 text-purple-900 border border-purple-200 hover:bg-purple-100'
                 }`}
               >
-                <Clock className="w-3.5 h-3.5" />
-                <span>Solo sin Grupo ni Líder</span>
+                <Users className="w-3.5 h-3.5" />
+                <span>Sin Grupo ni Líder</span>
                 <span
                   className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
-                    vistaAsignacion === 'pendientes' ? 'bg-amber-700 text-white' : 'bg-amber-200 text-amber-900'
+                    vistaAsignacion === 'pendientes' ? 'bg-purple-800 text-white' : 'bg-purple-200 text-purple-900'
                   }`}
                 >
                   {countPendientes}
                 </span>
               </button>
 
-              {/* 2. Ya Asignados */}
-              <button
-                type="button"
-                onClick={() => setVistaAsignacion('asignados')}
-                className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-                  vistaAsignacion === 'asignados'
-                    ? 'bg-purple-600 text-white shadow-xs ring-1 ring-purple-700'
-                    : 'bg-purple-50 text-purple-900 border border-purple-200 hover:bg-purple-100'
-                }`}
-              >
-                <Users className="w-3.5 h-3.5" />
-                <span>Ya Asignados</span>
-                <span
-                  className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
-                    vistaAsignacion === 'asignados' ? 'bg-purple-800 text-white' : 'bg-purple-200 text-purple-900'
-                  }`}
-                >
-                  {countAsignados}
-                </span>
-              </button>
-
-              {/* 3. Ver Todos */}
+              {/* 4. Ver Todos */}
               <button
                 type="button"
                 onClick={() => setVistaAsignacion('todos')}
@@ -2629,22 +2719,26 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   }`}
                 >
                   <span className="flex items-center gap-1.5 font-medium">
-                    {vistaAsignacion === 'pendientes' ? (
-                      <Clock className="w-4 h-4 text-amber-600 shrink-0" />
-                    ) : vistaAsignacion === 'asignados' ? (
+                    {vistaAsignacion === 'sin_jabas' ? (
+                      <Clock className="w-4 h-4 text-[#2e7d32] shrink-0" />
+                    ) : vistaAsignacion === 'con_jabas' ? (
+                      <Package className="w-4 h-4 text-amber-600 shrink-0" />
+                    ) : vistaAsignacion === 'pendientes' ? (
                       <Users className="w-4 h-4 text-purple-600 shrink-0" />
                     ) : (
                       <Building2 className="w-4 h-4 text-[#2e7d32] shrink-0" />
                     )}
                     <span>
-                      {vistaAsignacion === 'pendientes'
-                        ? `Mostrando trabajadores sin asignar (${filteredTrabajadores.length} pendientes). Selecciona Supervisor, Fundo o Módulo para filtrar tu cuadrilla.`
-                        : vistaAsignacion === 'asignados'
-                        ? `Mostrando trabajadores con Grupo o Líder guardado previamente (${filteredTrabajadores.length} asignados). Si aún no has asignado nada, puedes pulsar 'Desasignar Todos' para empezar desde cero.`
+                      {vistaAsignacion === 'sin_jabas'
+                        ? `Mostrando trabajadores pendientes de jabas (${filteredTrabajadores.length} sin jabas hoy). Selecciona para registrar su avance.`
+                        : vistaAsignacion === 'con_jabas'
+                        ? `Mostrando trabajadores con avance registrado hoy (${filteredTrabajadores.length} con jabas).`
+                        : vistaAsignacion === 'pendientes'
+                        ? `Mostrando trabajadores sin Grupo ni Líder (${filteredTrabajadores.length} pendientes).`
                         : `Nómina completa (${filteredTrabajadores.length} trabajadores). Activa filtros seleccionando Supervisor, Fundo o Módulo arriba.`}
                     </span>
                   </span>
-                  {vistaAsignacion === 'asignados' && countAsignados > 0 && (
+                  {vistaAsignacion === 'pendientes' && countAsignados > 0 && (
                     <button
                       type="button"
                       onClick={handleDesasignarTodos}
@@ -2659,7 +2753,37 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               )}
 
               {filteredTrabajadores.length === 0 ? (
-                vistaAsignacion === 'pendientes' && countAsignados > 0 ? (
+                vistaAsignacion === 'sin_jabas' && countConJabas > 0 ? (
+                  /* Estado de Finalización: Cuando todos los trabajadores tienen jabas hoy */
+                  <div className="py-8 px-4 text-center bg-white rounded-xl border border-emerald-200 my-2 shadow-xs">
+                    <div className="w-12 h-12 bg-emerald-100 text-[#1b5e20] rounded-full flex items-center justify-center mx-auto mb-3 shadow-xs">
+                      <CheckCircle2 className="w-6 h-6" />
+                    </div>
+                    <h4 className="text-sm font-bold text-gray-900">
+                      ¡Todos los trabajadores tienen jabas registradas hoy!
+                    </h4>
+                    <p className="text-xs text-gray-600 mt-1 max-w-md mx-auto">
+                      No quedan trabajadores pendientes de jabas en la cuadrilla ({countConJabas} trabajadores completados hoy).
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-2.5 mt-4">
+                      <button
+                        type="button"
+                        onClick={() => setVistaAsignacion('con_jabas')}
+                        className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold py-2 px-3.5 rounded-lg shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                      >
+                        <Package className="w-3.5 h-3.5" />
+                        <span>Ver con Jabas ({countConJabas})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVistaAsignacion('todos')}
+                        className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold py-2 px-3.5 rounded-lg transition-all cursor-pointer"
+                      >
+                        <span>Ver Toda la Nómina ({countTodos})</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : vistaAsignacion === 'pendientes' && countAsignados > 0 ? (
                   /* Estado de Finalización: Cuando todos los trabajadores han sido asignados */
                   <div className="py-8 px-4 text-center bg-white rounded-xl border border-emerald-200 my-2 shadow-xs">
                     <div className="w-12 h-12 bg-emerald-100 text-[#1b5e20] rounded-full flex items-center justify-center mx-auto mb-3 shadow-xs">
@@ -2752,6 +2876,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       (t.id && workerAssignedGrupos[t.id]) ||
                       cuadrillaGrupo;
                     const isAsignado = isWorkerAsignado(t);
+                    const jabasCount = getWorkerJabasCount(t);
+                    const tieneJabas = jabasCount > 0;
 
                     return (
                       <div
@@ -2779,8 +2905,13 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                                 DNI: {t.dni}
                               </span>
 
-                              {/* Identificación visual requerida: Ámbar para pendientes, Morado para asignados */}
-                              {isAsignado ? (
+                              {/* Identificación visual: Verde para jabas hoy, Morado para asignados, Ámbar para sin jabas */}
+                              {tieneJabas ? (
+                                <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                                  <Package className="w-3 h-3 text-emerald-600" />
+                                  <span>{jabasCount} {jabasCount === 1 ? 'jaba' : 'jabas'} hoy</span>
+                                </span>
+                              ) : isAsignado ? (
                                 <span className="text-[10px] bg-purple-50 text-purple-800 border border-purple-200 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
                                   <CheckCircle2 className="w-3 h-3 text-purple-600" />
                                   <span>Asignado ({t.grupo || 'Grupo'}{t.lider ? ` · ${t.lider}` : ''})</span>
@@ -2788,7 +2919,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                               ) : (
                                 <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
                                   <Clock className="w-3 h-3 text-amber-600" />
-                                  <span>Sin Grupo ni Líder</span>
+                                  <span>Sin Jabas</span>
                                 </span>
                               )}
                             </div>
@@ -2846,6 +2977,13 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                               <Check className="w-3 h-3" />
                               <span>Seleccionado</span>
                             </span>
+                          ) : tieneJabas ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-bold border border-emerald-300 flex items-center gap-1">
+                                <Package className="w-2.5 h-2.5 text-emerald-600" />
+                                <span>{jabasCount} {jabasCount === 1 ? 'jaba' : 'jabas'}</span>
+                              </span>
+                            </div>
                           ) : isAsignado ? (
                             <div className="flex items-center gap-1.5">
                               <span className="text-[10px] bg-purple-100 text-purple-800 px-2.5 py-1 rounded-full font-bold border border-purple-200 flex items-center gap-1">
