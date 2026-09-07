@@ -688,6 +688,23 @@ export default function App() {
     setTrabajadoresState(updatedWorkers);
     saveTrabajadores(updatedWorkers);
 
+    // Actualizar reservas de hoy vinculadas a los trabajadores guardados con jabas para marcarlas como completadas
+    const savedDnisSet = new Set(newDetalleList.map((d) => String(d.dni || '').replace(/\s+/g, '').trim()));
+    const updatedReservas = reservas.map((res) => {
+      if (res.fecha !== hoy) return res;
+      const resDnis = (res.trabajadores || []).map((tw) => String(tw.dni || '').replace(/\s+/g, '').trim());
+      const hasSavedWorker = resDnis.some((dni) => savedDnisSet.has(dni));
+      if (hasSavedWorker) {
+        return {
+          ...res,
+          estado: 'completada' as const
+        };
+      }
+      return res;
+    });
+    setReservasState(updatedReservas);
+    saveReservas(updatedReservas);
+
     let updatedProg = programas;
     if (programas.length > 0) {
       updatedProg = [...programas];

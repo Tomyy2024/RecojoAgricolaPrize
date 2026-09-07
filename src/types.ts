@@ -145,6 +145,7 @@ export interface ReservaCuadrilla {
   totalTrabajadores: number;
   trabajadores: ReservaItemTrabajador[];
   timestamp: string;
+  estado?: 'completada' | 'pendiente';
 }
 
 export interface SyncLogEntry {
