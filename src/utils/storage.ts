@@ -608,14 +608,16 @@ export function mergeReservasArrays(
       continue;
     }
 
-    // Check if there is an existing reservation with the same date, supervisor, fundo, and modulo
+    // Check if there is an existing reservation with the same date, supervisor, fundo, modulo and grupo
     const normSup = normalizeSupervisorKey(item.supervisor);
+    const itemGrp = (item.grupo || 'Grupo 01').trim().toLowerCase();
     const existingMatch = Array.from(map.values()).find(
       (e) =>
         e.fecha === item.fecha &&
         normalizeSupervisorKey(e.supervisor) === normSup &&
         e.fundo === item.fundo &&
-        e.modulo === item.modulo
+        e.modulo === item.modulo &&
+        (e.grupo || 'Grupo 01').trim().toLowerCase() === itemGrp
     );
 
     if (existingMatch) {

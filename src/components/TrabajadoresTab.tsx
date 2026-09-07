@@ -353,12 +353,35 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return supervisoresEstadoHoy.filter((s) => s.hasReserva).length;
   }, [supervisoresEstadoHoy]);
 
-  // Reserva de hoy para el supervisor actualmente seleccionado
-  const currentSupervisorReservaHoy = useMemo(() => {
+  // Todas las reservas de hoy para el supervisor actualmente seleccionado
+  const currentSupervisorReservasHoy = useMemo(() => {
     const targetSup = cuadrillaSupervisor || (isSupervisorUser ? sessionSupervisorName : '');
-    if (!targetSup) return null;
-    return reservasHoy.find((r) => matchesSupervisor(r.supervisor, targetSup)) || null;
+    if (!targetSup) return [];
+    return reservasHoy.filter((r) => matchesSupervisor(r.supervisor, targetSup));
   }, [reservasHoy, cuadrillaSupervisor, isSupervisorUser, sessionSupervisorName, matchesSupervisor]);
+
+  // Reserva de hoy para el supervisor actualmente seleccionado (priorizando módulo y grupo actual)
+  const currentSupervisorReservaHoy = useMemo(() => {
+    if (currentSupervisorReservasHoy.length === 0) return null;
+    const targetMod = cuadrillaModulo ? normalizeModulo(cuadrillaModulo) : '';
+    const targetGrp = cuadrillaGrupo ? cuadrillaGrupo.trim().toLowerCase() : '';
+
+    if (targetMod && targetGrp) {
+      const matchBoth = currentSupervisorReservasHoy.find(
+        (r) =>
+          normalizeModulo(r.modulo) === targetMod &&
+          (r.grupo || 'Grupo 01').trim().toLowerCase() === targetGrp
+      );
+      if (matchBoth) return matchBoth;
+    }
+    if (targetMod) {
+      const matchMod = currentSupervisorReservasHoy.find(
+        (r) => normalizeModulo(r.modulo) === targetMod
+      );
+      if (matchMod) return matchMod;
+    }
+    return currentSupervisorReservasHoy[0] || null;
+  }, [currentSupervisorReservasHoy, cuadrillaModulo, cuadrillaGrupo, normalizeModulo]);
 
   // Reservas filtradas para el modal de Reservas por Supervisor
   const filteredModalReservas = useMemo(() => {
@@ -645,9 +668,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         if (nameKey) next.add(nameKey);
         const key = norm || raw || id || nameKey;
         if (key) {
+          const existingGrp = (worker as any).grupo;
           setWorkerAssignedGrupos((prevGrp) => ({
             ...prevGrp,
-            [key]: prevGrp[key] || cuadrillaGrupo
+            [key]: prevGrp[key] || existingGrp || cuadrillaGrupo
           }));
         }
       }
@@ -670,13 +694,13 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         if (nameKey) next.add(nameKey);
         const key = norm || raw || t.id || nameKey;
         if (key) {
-          newGroups[key] = workerAssignedGrupos[key] || cuadrillaGrupo;
+          newGroups[key] = workerAssignedGrupos[key] || t.grupo || cuadrillaGrupo;
         }
       });
       setWorkerAssignedGrupos((prevGrp) => ({ ...prevGrp, ...newGroups }));
       return next;
     });
-    onToast(`✅ ${filteredTrabajadores.length} trabajadores seleccionados y asignados al ${cuadrillaGrupo}`);
+    onToast(`✅ ${filteredTrabajadores.length} trabajadores seleccionados para ${cuadrillaGrupo}`);
   };
 
   // Select all workers in the scoped cuadrilla
@@ -694,13 +718,13 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         if (nameKey) next.add(nameKey);
         const key = norm || raw || t.id || nameKey;
         if (key) {
-          newGroups[key] = workerAssignedGrupos[key] || cuadrillaGrupo;
+          newGroups[key] = workerAssignedGrupos[key] || t.grupo || cuadrillaGrupo;
         }
       });
       setWorkerAssignedGrupos((prevGrp) => ({ ...prevGrp, ...newGroups }));
       return next;
     });
-    onToast(`✅ Todos los ${scopedTrabajadores.length} trabajadores de la cuadrilla seleccionados y asignados al ${cuadrillaGrupo}`);
+    onToast(`✅ Todos los ${scopedTrabajadores.length} trabajadores de la cuadrilla seleccionados para ${cuadrillaGrupo}`);
   };
 
   const clearSelection = () => {
@@ -1018,18 +1042,25 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '_')
       .slice(0, 20);
+    const cleanGrpSlug = targetGrupo
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '_')
+      .slice(0, 15);
 
     const existingMatch = reservasState.find(
       (r) =>
         r.fecha === targetDate &&
         matchesSupervisor(r.supervisor, targetSupervisor) &&
         r.fundo === targetFundo &&
-        r.modulo === targetModulo
+        r.modulo === targetModulo &&
+        (r.grupo || 'Grupo 01').trim().toLowerCase() === targetGrupo.toLowerCase()
     );
 
     const reservaId = existingMatch
       ? existingMatch.id
-      : `RES_${targetDate}_${cleanSupSlug}_${targetModulo}_${Date.now().toString().slice(-4)}`;
+      : `RES_${targetDate}_${cleanSupSlug}_${targetModulo}_${cleanGrpSlug}_${Date.now().toString().slice(-4)}`;
 
     const newReserva: ReservaCuadrilla = {
       id: reservaId,
@@ -1054,7 +1085,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             workerAssignedGrupos[rawDni] ||
             (w.id && workerAssignedGrupos[w.id]) ||
             (nameKey && workerAssignedGrupos[nameKey]) ||
-            targetGrupo
+            targetGrupo,
+          lider: targetLider || w.lider || ''
         };
       }),
       timestamp: getLocalISO()
@@ -1068,11 +1100,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     }
     setLastSavedReserva(newReserva);
 
-    // MANTENER a los trabajadores seleccionados y la vista en 'todos' para que no se muevan ni se borren
-    setVistaAsignacion('todos');
+    // Limpiar selección de trabajadores asignados para que el usuario pueda asignar de inmediato el siguiente grupo
+    setSelectedDnis(new Set());
+    setWorkerAssignedGrupos({});
 
     onToast(
-      `✅ Cuadrilla asignada y guardada para ${countAssigned} trabajadores (${targetGrupo}${targetLider ? ` · Líder: ${targetLider}` : ''}). Listos para continuar al Paso 2.`,
+      `✅ Cuadrilla asignada y guardada para ${countAssigned} trabajadores (${targetGrupo}${targetLider ? ` · Líder: ${targetLider}` : ''}). Selección liberada para asignar el siguiente grupo.`,
       'success'
     );
   };
@@ -1236,18 +1269,25 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '_')
       .slice(0, 20);
+    const cleanGrpSlug = targetGrupo
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '_')
+      .slice(0, 15);
 
     const existingMatch = reservasState.find(
       (r) =>
         r.fecha === targetDate &&
         matchesSupervisor(r.supervisor, targetSupervisor) &&
         r.fundo === targetFundo &&
-        r.modulo === targetModulo
+        r.modulo === targetModulo &&
+        (r.grupo || 'Grupo 01').trim().toLowerCase() === targetGrupo.toLowerCase()
     );
 
     const reservaId = existingMatch
       ? existingMatch.id
-      : `RES_${targetDate}_${cleanSupSlug}_${targetModulo}_${Date.now().toString().slice(-4)}`;
+      : `RES_${targetDate}_${cleanSupSlug}_${targetModulo}_${cleanGrpSlug}_${Date.now().toString().slice(-4)}`;
 
     const selectedWorkers = selectedWorkersList;
     const newReserva: ReservaCuadrilla = {
@@ -1273,7 +1313,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             workerAssignedGrupos[rawDni] ||
             (w.id && workerAssignedGrupos[w.id]) ||
             (nameKey && workerAssignedGrupos[nameKey]) ||
-            targetGrupo
+            targetGrupo,
+          lider: targetLider || w.lider || ''
         };
       }),
       timestamp: getLocalISO()
@@ -1289,11 +1330,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
     const countSaved = selectedWorkers.length;
 
-    // Mantener la selección para continuar fluidamente al Registro de Avance
-    setVistaAsignacion('todos');
+    // Limpiar selección de trabajadores asignados para que el usuario pueda asignar de inmediato el siguiente grupo
+    setSelectedDnis(new Set());
+    setWorkerAssignedGrupos({});
 
     onToast(
-      `💾 Reserva guardada para ${targetSupervisor}: ${countSaved} trabajadores asignados a ${targetFundo} - ${targetModulo} (${targetGrupo}). Cuadrilla lista para registrar avance de jabas.`,
+      `💾 Reserva guardada para ${targetSupervisor}: ${countSaved} trabajadores asignados a ${targetFundo} - ${targetModulo} (${targetGrupo}${targetLider ? ` · Líder: ${targetLider}` : ''}). Selección liberada para asignar el siguiente grupo.`,
       'success'
     );
   };
@@ -1356,40 +1398,40 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         foundIndex = existingByName.get(normItemName)!;
       }
 
-      if (foundIndex >= 0) {
-        const existing = updatedTrabajadores[foundIndex];
-        updatedTrabajadores[foundIndex] = {
-          ...existing,
-          supervisor: targetSupervisor,
-          fundo: targetFundo,
-          modulo: targetModulo,
-          grupo: grp,
-          lider: targetLider || existing.lider || '',
-          fecha: targetFecha
-        };
-      } else {
-        missingInNomina.push(item);
-      }
-    });
+        if (foundIndex >= 0) {
+          const existing = updatedTrabajadores[foundIndex];
+          updatedTrabajadores[foundIndex] = {
+            ...existing,
+            supervisor: targetSupervisor,
+            fundo: targetFundo,
+            modulo: targetModulo,
+            grupo: grp,
+            lider: (item as any).lider || targetLider || existing.lider || '',
+            fecha: targetFecha
+          };
+        } else {
+          missingInNomina.push(item);
+        }
+      });
 
-    // Si algún trabajador de la reserva no existía en nómina, restaurarlo para que no falte nadie
-    if (missingInNomina.length > 0) {
-      missingInNomina.forEach((item, idx) => {
-        const cleanItemDni = normalizeDni(item.dni);
-        const grp = item.grupo || targetGrupo;
-        const newWorker: Trabajador = {
-          id: `RES_RESTORE_${Date.now()}_${idx}`,
-          fecha: targetFecha,
-          dni: item.dni || `TEMP_${Date.now()}_${idx}`,
-          nombres: item.nombres || `TRABAJADOR ${item.dni}`,
-          fundo: targetFundo,
-          modulo: targetModulo,
-          supervisor: targetSupervisor,
-          grupo: grp,
-          lider: targetLider,
-          tipo: 'Cosechador',
-          jabas: 0
-        };
+      // Si algún trabajador de la reserva no existía en nómina, restaurarlo para que no falte nadie
+      if (missingInNomina.length > 0) {
+        missingInNomina.forEach((item, idx) => {
+          const cleanItemDni = normalizeDni(item.dni);
+          const grp = item.grupo || targetGrupo;
+          const newWorker: Trabajador = {
+            id: `RES_RESTORE_${Date.now()}_${idx}`,
+            fecha: targetFecha,
+            dni: item.dni || `TEMP_${Date.now()}_${idx}`,
+            nombres: item.nombres || `TRABAJADOR ${item.dni}`,
+            fundo: targetFundo,
+            modulo: targetModulo,
+            supervisor: targetSupervisor,
+            grupo: grp,
+            lider: (item as any).lider || targetLider,
+            tipo: 'Cosechador',
+            jabas: 0
+          };
         updatedTrabajadores.push(newWorker);
         if (cleanItemDni) newSelected.add(cleanItemDni);
         if (newWorker.id) newSelected.add(newWorker.id);
@@ -1588,8 +1630,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             supervisor: targetSupervisor,
             fundo: targetFundo,
             modulo: targetModulo,
-            grupo: assignedGrp,
-            lider: targetLider || t.lider || '',
+            grupo: t.grupo || assignedGrp,
+            lider: t.lider || targetLider || '',
             fecha: getLocalToday()
           };
         }
@@ -1639,7 +1681,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
           jabas,
           supervisor: cuadrillaSupervisor || session.nombre,
           grupo: assignedGrupo,
-          lider: cuadrillaLider || '',
+          lider: t?.lider || cuadrillaLider || '',
           timestamp: nowIso
         });
       }
@@ -2870,11 +2912,13 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   {filteredTrabajadores.slice(0, visibleLimit).map((t, idx) => {
                     const normDni = normalizeDni(t.dni);
                     const isChecked = isDniSelected(t);
-                    const assignedGrupo =
+                    const currentWorkerGrupo =
+                      t.grupo ||
                       workerAssignedGrupos[normDni] ||
                       workerAssignedGrupos[String(t.dni).trim()] ||
                       (t.id && workerAssignedGrupos[t.id]) ||
-                      cuadrillaGrupo;
+                      '';
+                    const currentWorkerLider = t.lider || '';
                     const isAsignado = isWorkerAsignado(t);
                     const jabasCount = getWorkerJabasCount(t);
                     const tieneJabas = jabasCount > 0;
@@ -2905,109 +2949,87 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                                 DNI: {t.dni}
                               </span>
 
-                              {/* Identificación visual: Verde para jabas hoy, Morado para asignados, Ámbar para sin jabas */}
-                              {tieneJabas ? (
+                              {/* Identificación visual: Jabas hoy, Grupo/Líder asignado, o Sin Grupo */}
+                              {tieneJabas && (
                                 <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
                                   <Package className="w-3 h-3 text-emerald-600" />
                                   <span>{jabasCount} {jabasCount === 1 ? 'jaba' : 'jabas'} hoy</span>
                                 </span>
-                              ) : isAsignado ? (
-                                <span className="text-[10px] bg-purple-50 text-purple-800 border border-purple-200 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                                  <CheckCircle2 className="w-3 h-3 text-purple-600" />
-                                  <span>Asignado ({t.grupo || 'Grupo'}{t.lider ? ` · ${t.lider}` : ''})</span>
+                              )}
+
+                              {isAsignado ? (
+                                <span className="text-[10px] bg-purple-100 text-purple-900 border border-purple-300 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                                  <Users className="w-3 h-3 text-purple-700" />
+                                  <span>{currentWorkerGrupo || 'Grupo'}{currentWorkerLider ? ` · Líder: ${currentWorkerLider}` : ''}</span>
                                 </span>
-                              ) : (
+                              ) : !tieneJabas && (
                                 <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
                                   <Clock className="w-3 h-3 text-amber-600" />
-                                  <span>Sin Jabas</span>
+                                  <span>Sin Grupo</span>
                                 </span>
                               )}
                             </div>
 
-                            {/* Estado de Vinculación: Contexto de cuadrilla al seleccionar o datos actuales */}
-                            {isChecked ? (
-                              <div className="text-[11px] text-[#555] flex flex-wrap items-center gap-1.5 mt-1.5 animate-in fade-in">
-                                <span className="bg-white px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
-                                  👤 <b>Sup:</b> {cuadrillaSupervisor || 'Por seleccionar'}
+                            {/* Tags descriptivos de asignación: Cada persona con su respectivo Grupo y Líder */}
+                            <div className="text-[11px] text-[#555] flex flex-wrap items-center gap-1.5 mt-1">
+                              <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-[10px]">
+                                👤 <b>Sup:</b> {t.supervisor || (isChecked ? cuadrillaSupervisor : 'General')}
+                              </span>
+                              <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-[10px]">
+                                📍 <b>Fundo:</b> {t.fundo || (isChecked ? cuadrillaFundo : 'Sin asignar')}
+                              </span>
+                              <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-[10px]">
+                                🌱 <b>Módulo:</b> {t.modulo || (isChecked ? cuadrillaModulo : 'Sin asignar')}
+                              </span>
+                              {currentWorkerGrupo ? (
+                                <span className="bg-purple-50 text-purple-800 px-2 py-0.5 rounded border border-purple-200 text-[10px] font-bold flex items-center gap-1">
+                                  <Users className="w-3 h-3 text-purple-600" />
+                                  <span>Grupo: <b>{currentWorkerGrupo}</b></span>
                                 </span>
-                                <span className="bg-white px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
-                                  📍 <b>Fundo:</b> {cuadrillaFundo || 'Por seleccionar'}
+                              ) : (
+                                <span className="bg-gray-50 px-1.5 py-0.5 rounded text-gray-400 border border-dashed border-gray-300 text-[10px]">
+                                  Sin Grupo
                                 </span>
-                                <span className="bg-[#e8f5e9] px-1.5 py-0.5 rounded border border-[#81c784] font-bold text-[#1b5e20]">
-                                  🌱 <b>Módulo:</b> {cuadrillaModulo || 'Por seleccionar'}
+                              )}
+                              {currentWorkerLider ? (
+                                <span className="bg-[#fff8e1] text-[#b71c1c] px-2 py-0.5 rounded border border-[#ffe082] text-[10px] font-bold flex items-center gap-1">
+                                  <Crown className="w-3 h-3 text-[#ff8f00]" />
+                                  <span>Líder: <b>{currentWorkerLider}</b></span>
                                 </span>
-                                <span className="bg-white px-1.5 py-0.5 rounded border border-[#a5d6a7] font-semibold text-[#1b5e20]">
-                                  👥 <b>Grupo:</b> {assignedGrupo || 'Por seleccionar'}
+                              ) : (
+                                <span className="bg-gray-50 px-1.5 py-0.5 rounded text-gray-400 border border-dashed border-gray-300 text-[10px]">
+                                  Sin Líder
                                 </span>
-                                {cuadrillaLider && (
-                                  <span className="bg-[#fff8e1] px-1.5 py-0.5 rounded border border-[#ffe082] text-[#e65100] font-bold">
-                                    👑 <b>Líder:</b> {cuadrillaLider}
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="text-[11px] text-[#555] flex flex-wrap items-center gap-1.5 mt-1">
-                                <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-[10px]">
-                                  👤 <b>Sup:</b> {t.supervisor || 'General'}
+                              )}
+                              {isChecked && (
+                                <span className="bg-emerald-50 text-[#1b5e20] px-2 py-0.5 rounded border border-emerald-300 text-[10px] font-semibold flex items-center gap-1">
+                                  <span>🎯 Destino: <b>{cuadrillaGrupo}</b>{cuadrillaLider ? ` · ${cuadrillaLider}` : ''}</span>
                                 </span>
-                                <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-[10px]">
-                                  📍 <b>Fundo:</b> {t.fundo || 'Sin asignar'}
-                                </span>
-                                <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-[10px]">
-                                  🌱 <b>Módulo:</b> {t.modulo || 'Sin asignar'}
-                                </span>
-                                {t.grupo && (
-                                  <span className="bg-purple-50 px-1.5 py-0.5 rounded text-purple-700 border border-purple-200 text-[10px] font-semibold">
-                                    👥 {t.grupo}
-                                  </span>
-                                )}
-                                {t.lider && (
-                                  <span className="bg-[#fff8e1] px-1.5 py-0.5 rounded text-[#e65100] border border-[#ffe082] text-[10px] font-semibold">
-                                    👑 {t.lider}
-                                  </span>
-                                )}
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-                          {isChecked ? (
+                          {isChecked && (
                             <span className="text-[10px] bg-[#2e7d32] text-white px-2.5 py-1 rounded-full font-bold shadow-xs flex items-center gap-1">
                               <Check className="w-3 h-3" />
                               <span>Seleccionado</span>
                             </span>
-                          ) : tieneJabas ? (
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-bold border border-emerald-300 flex items-center gap-1">
-                                <Package className="w-2.5 h-2.5 text-emerald-600" />
-                                <span>{jabasCount} {jabasCount === 1 ? 'jaba' : 'jabas'}</span>
-                              </span>
-                            </div>
-                          ) : isAsignado ? (
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] bg-purple-100 text-purple-800 px-2.5 py-1 rounded-full font-bold border border-purple-200 flex items-center gap-1">
-                                <Users className="w-2.5 h-2.5 text-purple-600" />
-                                <span>Asignado</span>
-                              </span>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDesasignarWorker(t);
-                                }}
-                                className="text-[10px] text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 border border-red-200 px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 cursor-pointer transition-colors"
-                                title={`Quitar Grupo y Líder a ${t.nombres}`}
-                              >
-                                <X className="w-2.5 h-2.5" />
-                                <span>Desasignar</span>
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="text-[10px] bg-amber-100 text-amber-900 px-2.5 py-1 rounded-full font-bold border border-amber-300 flex items-center gap-1">
-                              <Clock className="w-2.5 h-2.5 text-amber-700" />
-                              <span>Pendiente</span>
-                            </span>
+                          )}
+                          {isAsignado && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDesasignarWorker(t);
+                              }}
+                              className="text-[10px] text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 border border-red-200 px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                              title={`Quitar Grupo y Líder a ${t.nombres}`}
+                            >
+                              <X className="w-2.5 h-2.5" />
+                              <span>Desasignar</span>
+                            </button>
                           )}
                         </div>
                       </div>
@@ -3064,11 +3086,11 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                           {hasDiff ? 'Reserva Activa (Diferencia de Cuadrilla Detectada): ' : 'Reserva Activa de Hoy: '}
                         </span>
                         <span>
-                          <b>{resCount}</b> trabajadores reservados para <b>{activeRes.supervisor}</b> ({activeRes.fundo} - {activeRes.modulo}) a las {activeRes.hora || '07:00'}.
+                          <b>{resCount}</b> trabajadores en <b>{activeRes.grupo || 'Grupo 01'}</b>{activeRes.lider ? ` (Líder: ${activeRes.lider})` : ''} · <b>{activeRes.supervisor}</b> ({activeRes.fundo} - {activeRes.modulo}) a las {activeRes.hora || '07:00'}.
                         </span>
                         {hasDiff && (
                           <div className="text-amber-800 font-medium text-[11px] mt-0.5">
-                            ⚠️ Hay {resCount} trabajadores en tu reserva pero actualmente tienes {selectedWorkersList.length} seleccionados para asignar jabas. Presiona <b>"Cuadrar Cuadrilla ({resCount})"</b> para cargar a todos los {resCount} automáticamente.
+                            ⚠️ Hay {resCount} trabajadores en tu reserva de este grupo pero actualmente tienes {selectedWorkersList.length} seleccionados para asignar jabas. Presiona <b>"Cuadrar Cuadrilla ({resCount})"</b> para cargar a todos los {resCount} automáticamente.
                           </div>
                         )}
                       </div>
@@ -3096,6 +3118,33 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       </button>
                     </div>
                   </div>
+
+                  {/* Acceso rápido a los diferentes grupos guardados de hoy */}
+                  {currentSupervisorReservasHoy.length > 1 && (
+                    <div className="pt-2 mt-1 border-t border-emerald-200/70 flex flex-wrap items-center gap-1.5 text-xs">
+                      <span className="text-gray-600 font-bold text-[11px]">Grupos de Hoy ({currentSupervisorReservasHoy.length}):</span>
+                      {currentSupervisorReservasHoy.map((r) => {
+                        const isThisActive = r.id === activeRes.id;
+                        const count = r.totalTrabajadores || (r.trabajadores || []).length;
+                        return (
+                          <button
+                            key={r.id}
+                            type="button"
+                            onClick={() => handleLoadReserva(r)}
+                            className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer flex items-center gap-1 ${
+                              isThisActive
+                                ? 'bg-[#1b5e20] text-white border-[#1b5e20] shadow-xs'
+                                : 'bg-white text-gray-700 border-gray-300 hover:bg-emerald-50 hover:border-emerald-300'
+                            }`}
+                            title={`Cargar ${r.grupo} (${count} trabajadores)`}
+                          >
+                            <Users className="w-3 h-3" />
+                            <span>{r.grupo || 'Grupo'} ({count} trab.{r.lider ? ` · ${r.lider}` : ''})</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })()}

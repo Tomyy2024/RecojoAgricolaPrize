@@ -130,6 +130,7 @@ export interface ReservaItemTrabajador {
   dni: string;
   nombres: string;
   grupo?: string;
+  lider?: string;
 }
 
 export interface ReservaCuadrilla {

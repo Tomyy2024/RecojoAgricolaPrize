@@ -425,12 +425,14 @@ async function startServer() {
         continue;
       }
       const normSup = normalizeSupervisorKey(item.supervisor);
+      const itemGrp = (item.grupo || 'Grupo 01').trim().toLowerCase();
       const existingMatch = Array.from(map.values()).find(
         (e: any) =>
           e.fecha === item.fecha &&
           normalizeSupervisorKey(e.supervisor) === normSup &&
           e.fundo === item.fundo &&
-          e.modulo === item.modulo
+          e.modulo === item.modulo &&
+          (e.grupo || 'Grupo 01').trim().toLowerCase() === itemGrp
       );
       if (existingMatch) {
         if ((item.timestamp || '') >= (existingMatch.timestamp || '')) {
