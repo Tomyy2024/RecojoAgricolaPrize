@@ -53,13 +53,16 @@ import {
   isAutoSyncEnabled, 
   getLastSyncTime, 
   setLastSyncTime, 
+  getFirebaseConfig,
   cleanValidacionesList,
   purgeAllEmptyRecords,
   normalizeSupervisorKey,
-  isModoOfflineNomina,
-  setModoOfflineNomina,
-  getBackupOfflineTrabajadores,
-  restoreBackupOfflineTrabajadores
+  getAuditoriaIngresos,
+  saveAuditoriaIngresos,
+  mergeAuditoriasArrays,
+  isOfflineNominaLocked,
+  setOfflineNominaLocked,
+  restoreTrabajadoresFromOfflineCache
 } from './utils/storage';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
@@ -75,6 +78,10 @@ import { ImportarTab } from './components/ImportarTab';
 import { ConexionTab } from './components/ConexionTab';
 import { ShareAppModal } from './components/ShareAppModal';
 import { Toast, ToastMessage } from './components/Toast';
+import { 
+  subscribeToFirestoreMasterData, 
+  syncAllDataToFirestore 
+} from './lib/firebase';
 
 export default function App() {
   // Initialize storage defaults on first load
@@ -143,10 +150,12 @@ export default function App() {
   const [validaciones, setValidacionesState] = useState<ValidacionSupervisor[]>(() => getValidaciones());
   const [reservas, setReservasState] = useState<ReservaCuadrilla[]>(() => getReservas());
 
+  // Offline Nomina Lock & Network Status (Paso 1 & Paso 2)
+  const [offlineNomina, setOfflineNomina] = useState<boolean>(() => isOfflineNominaLocked());
+  const [isOnline, setIsOnline] = useState<boolean>(() => typeof navigator !== 'undefined' ? navigator.onLine : true);
+
   // Cloud Sync & Logging States
   const [lastSync, setLastSync] = useState<string | null>(() => getLastSyncTime());
-  const [isOnline, setIsOnline] = useState<boolean>(() => typeof navigator !== 'undefined' ? navigator.onLine : true);
-  const [modoOfflineNomina, setModoOfflineNominaState] = useState<boolean>(() => isModoOfflineNomina());
   const [logs, setLogs] = useState<SyncLogEntry[]>([
     {
       id: 'log_0',
@@ -176,6 +185,34 @@ export default function App() {
     setLogs((prev) => [newLog, ...prev.slice(0, 49)]);
   }, []);
 
+  // Handlers for Offline Nomina Mode (Paso 2)
+  const handleToggleOfflineNomina = useCallback((explicitVal?: boolean) => {
+    setOfflineNomina((prev) => {
+      const nextVal = typeof explicitVal === 'boolean' ? explicitVal : !prev;
+      setOfflineNominaLocked(nextVal);
+      if (nextVal) {
+        addToast('🔒 Modo Offline Nómina ACTIVO: Trabajadores blindados contra pérdida de señal.', 'success');
+        addLog('🔒 Modo Offline Nómina activado: Los trabajadores cargados quedan fijos en el dispositivo y no se re-sincronizarán.', 'ok');
+      } else {
+        addToast('🌐 Modo Online Nómina: Sincronización de trabajadores con la nube permitida.', 'info');
+        addLog('🌐 Modo Online Nómina activado: Sincronización de trabajadores habilitada.', 'info');
+      }
+      return nextVal;
+    });
+  }, [addToast, addLog]);
+
+  const handleRestoreOfflineCache = useCallback(() => {
+    const cached = restoreTrabajadoresFromOfflineCache();
+    if (cached.length > 0) {
+      setTrabajadoresState(cached);
+      setOfflineNomina(true);
+      addToast(`✅ Copia offline restaurada: ${cached.length} trabajadores listos. Modo Offline activado.`, 'success');
+      addLog(`♻️ Nómina restaurada desde el respaldo offline del dispositivo (${cached.length} trabajadores).`, 'ok');
+    } else {
+      addToast('⚠️ No hay respaldo offline previo de trabajadores guardado en este dispositivo.', 'warning');
+    }
+  }, [addToast, addLog]);
+
   // Universal Data Applier from Server/Broadcast
   const applyServerData = useCallback((d: any, silent = true) => {
     if (!d || typeof d !== 'object') return;
@@ -189,34 +226,40 @@ export default function App() {
       saveProgramaGeneral(d.programaGeneral);
     }
     if (Array.isArray(d.trabajadores)) {
-      const offlineLocked = isModoOfflineNomina();
+      const isLocked = isOfflineNominaLocked();
       const currentWorkers = getTrabajadores();
 
-      // Blindaje contra pérdida de señal y modo offline:
-      // Si el modo offline está activo, no sobreescribir la nómina local.
-      // Si la respuesta remota llega vacía por corte/intermitencia de red, preservar la nómina intacta.
-      if (offlineLocked) {
-        // Nómina blindada en este dispositivo
+      // PASO 1 & PASO 2: Protección total de la nómina cargada
+      // 1. Si el Modo Offline está activo y ya hay trabajadores en local, NUNCA sobreescribir ni resetear.
+      // 2. Si el servidor o la red devuelve un arreglo vacío (0 trabajadores), NUNCA borrar los trabajadores existentes.
+      if (isLocked && currentWorkers.length > 0) {
+        // Nómina blindada: no se altera por respuestas del servidor
       } else if (d.trabajadores.length === 0 && currentWorkers.length > 0) {
-        addLog('🛡️ Protección de nómina: Respuesta remota vacía rechazada para preservar trabajadores locales.', 'info');
-        // Auto-seed: Compartir la nómina local con el servidor central para que otros equipos la reciban
-        fetch('/api/trabajadores', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ trabajadores: currentWorkers, append: false })
-        }).catch(() => {});
-        addLog(`📤 Nómina local (${currentWorkers.length} trabajadores) compartida con el servidor central para nuevos equipos.`, 'info');
+        // Preservar nómina local ante respuestas vacías por fluctuaciones de señal
       } else {
-        const seenDni = new Set<string>();
+        const seen = new Set<string>();
         const uniqueWorkers: Trabajador[] = [];
-        d.trabajadores.forEach((t: Trabajador) => {
-          const cleanDni = String(t.dni || '').trim();
-          if (cleanDni && !seenDni.has(cleanDni)) {
-            seenDni.add(cleanDni);
-            uniqueWorkers.push(t);
+        d.trabajadores.forEach((t: Trabajador, i: number) => {
+          const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
+          const rawDni = String(t.dni || '').trim();
+          const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+          if (!seen.has(key)) {
+            seen.add(key);
+            uniqueWorkers.push({
+              ...t,
+              dni: cleanDni || rawDni || String(t.dni || '').trim(),
+              nombres: t.nombres ? String(t.nombres).trim() : '',
+              supervisor: t.supervisor ? String(t.supervisor).trim() : '',
+              fundo: t.fundo ? String(t.fundo).trim() : '',
+              modulo: t.modulo ? String(t.modulo).trim() : '',
+              grupo: t.grupo ? String(t.grupo).trim() : '',
+              lider: t.lider ? String(t.lider).trim() : '',
+              fecha: t.fecha || ''
+            });
           }
         });
-        if (uniqueWorkers.length > 0 || currentWorkers.length === 0) {
+
+        if (uniqueWorkers.length > 0) {
           setTrabajadoresState(uniqueWorkers);
           saveTrabajadores(uniqueWorkers);
         }
@@ -234,6 +277,10 @@ export default function App() {
     if (Array.isArray(d.usuarios) && d.usuarios.length > 0) {
       setUsuariosState(d.usuarios);
       saveUsuarios(d.usuarios);
+    }
+    if (Array.isArray(d.auditoriaIngresos)) {
+      const mergedAudit = mergeAuditoriasArrays(getAuditoriaIngresos(), d.auditoriaIngresos);
+      saveAuditoriaIngresos(mergedAudit);
     }
     if (Array.isArray(d.lideres)) {
       const uniqueLideresMap = new Map<string, Lider>();
@@ -280,7 +327,7 @@ export default function App() {
 
   // Centralized Server & Cloud Data Fetcher (Synchronizes all PCs and Mobile Users)
   const fetchCentralizedData = useCallback(async (silent = false) => {
-    // Blindaje ante fluctuaciones o pérdida de señal: no intentar peticiones cuando no hay red
+    // Si estamos offline según el navegador, no intentar llamadas de red
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       return;
     }
@@ -294,11 +341,7 @@ export default function App() {
         const json = await res.json();
         if (json && json.status === 'ok' && json.data) {
           applyServerData(json.data, silent);
-          // If server responded with data, mark fetched; but if it had 0 workers and we have 0 workers locally, try Sheets
-          const serverWorkerCount = Array.isArray(json.data.trabajadores) ? json.data.trabajadores.length : 0;
-          if (serverWorkerCount > 0 || getTrabajadores().length > 0) {
-            fetchedFromServer = true;
-          }
+          fetchedFromServer = true;
         }
       }
     } catch {
@@ -324,55 +367,37 @@ export default function App() {
     }
   }, [applyServerData]);
 
-  // Detección y blindaje de conectividad de red (Online / Offline)
+  // Network Online/Offline Detection (Paso 1)
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      addToast('📶 Conexión de red restablecida (En línea)', 'success');
-      addLog('📶 Conexión restablecida. Sincronización remota reanudada.', 'ok');
+      addToast('📶 Conexión de red restablecida. Nómina cargada protegida.', 'success');
+      addLog('📶 Señal de red restablecida. La nómina de trabajadores permanece intacta.', 'ok');
       fetchCentralizedData(true);
     };
 
     const handleOffline = () => {
       setIsOnline(false);
-      addToast('📵 Sin conexión a internet (Modo Offline activo)', 'warning');
-      addLog('📵 Corte de señal detectado. Operando con datos locales blindados.', 'warn');
+      addToast('⚠️ Sin señal de red: Operando en Modo Offline. Todos tus trabajadores y datos siguen intactos.', 'warning');
+      addLog('⚠️ Pérdida de señal de red detectada: Modo Offline activo. No se perderá ningún dato.', 'warn');
     };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
+    const handleNominaLockEvent = (e: any) => {
+      if (e && e.detail && typeof e.detail.locked === 'boolean') {
+        setOfflineNomina(e.detail.locked);
+      }
+    };
+    window.addEventListener('offline-nomina-changed', handleNominaLockEvent);
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('offline-nomina-changed', handleNominaLockEvent);
     };
-  }, [fetchCentralizedData, addToast, addLog]);
-
-  const handleToggleModoOfflineNomina = useCallback((forcedState?: boolean) => {
-    setModoOfflineNominaState((prev) => {
-      const next = typeof forcedState === 'boolean' ? forcedState : !prev;
-      setModoOfflineNomina(next);
-      if (next) {
-        addToast('🔒 Modo Offline Nómina activado: Nómina blindada en este dispositivo contra cortes y sincronizaciones.', 'success');
-        addLog('🔒 Modo Offline Nómina activado. La nómina local queda blindada.', 'ok');
-      } else {
-        addToast('🔓 Modo Online Nómina activado: Sincronización de trabajadores abierta.', 'info');
-        addLog('🔓 Modo Online Nómina activado. Se permite actualización remota de nómina.', 'info');
-      }
-      return next;
-    });
-  }, [addToast, addLog]);
-
-  const handleRestoreBackupOffline = useCallback(() => {
-    const restored = restoreBackupOfflineTrabajadores();
-    if (restored && restored.length > 0) {
-      setTrabajadoresState(restored);
-      addToast(`✅ Respaldo offline restaurado: ${restored.length} trabajadores recuperados`, 'success');
-      addLog(`♻️ Respaldo offline de nómina restaurado con éxito (${restored.length} trabajadores).`, 'ok');
-    } else {
-      addToast('⚠️ No se encontró un respaldo offline previo en la memoria local.', 'warning');
-    }
-  }, [addToast, addLog]);
+  }, [addToast, addLog, fetchCentralizedData]);
 
   // Broadcast Channel reference for instant cross-tab sync
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
@@ -450,15 +475,29 @@ export default function App() {
 
     // 4. Fast polling fallback (every 2.5s) to guarantee zero desync
     const interval = setInterval(() => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
       fetchCentralizedData(true);
     }, 2500);
 
     const onFocusOrVisible = () => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
       fetchCentralizedData(true);
     };
 
     window.addEventListener('focus', onFocusOrVisible);
     document.addEventListener('visibilitychange', onFocusOrVisible);
+
+    // 5. Firebase Firestore Real-Time Listener
+    let unsubscribeFirestoreMaster: (() => void) | null = null;
+    try {
+      unsubscribeFirestoreMaster = subscribeToFirestoreMasterData((firestoreData) => {
+        if (firestoreData) {
+          applyServerData(firestoreData, true);
+        }
+      });
+    } catch (err) {
+      console.warn('Firestore subscription error:', err);
+    }
 
     return () => {
       broadcastChannelRef.current?.close();
@@ -466,6 +505,7 @@ export default function App() {
       clearInterval(interval);
       window.removeEventListener('focus', onFocusOrVisible);
       document.removeEventListener('visibilitychange', onFocusOrVisible);
+      unsubscribeFirestoreMaster?.();
     };
   }, [fetchCentralizedData, applyServerData]);
 
@@ -496,7 +536,25 @@ export default function App() {
     // 1. Always sync immediately to Central Server so other PCs see it instantly
     syncToServer(updatedPayload);
 
-    // 2. Also sync to Google Sheets if configured
+    // 2. Sync to Firebase Firestore in real-time
+    try {
+      const firestoreData = {
+        programas: getProgramas(),
+        programaGeneral: getProgramaGeneral(),
+        trabajadores: getTrabajadores(),
+        detalleJabas: getDetalleJabas(),
+        usuarios: getUsuarios(),
+        validaciones: getValidaciones(),
+        lideres: getLideres(),
+        grupos: getGrupos(),
+        ...updatedPayload
+      };
+      syncAllDataToFirestore(firestoreData).catch(() => {});
+    } catch {
+      // Offline fallback
+    }
+
+    // 3. Also sync to Google Sheets if configured
     if (!isAutoSyncEnabled()) return;
     const url = getGsheetUrl();
     if (!url) return;
@@ -538,6 +596,9 @@ export default function App() {
     setProgramaGeneralState([]);
     setDetalleJabasState([]);
     setValidacionesState([]);
+    setGruposState([]);
+    setLideresState([]);
+    setReservasState([]);
     setUsuariosState(getUsuarios());
 
     // Clear central node server and wipe all backups
@@ -547,8 +608,25 @@ export default function App() {
       console.warn('Reset server api error:', e);
     }
 
-    addToast('🧹 Base de datos limpiada correctamente. Sin datos de prueba.', 'success');
-    addLog('🧹 Base de datos reiniciada a cero (sin registros de prueba)', 'ok');
+    // Clear Firebase Firestore
+    try {
+      await syncAllDataToFirestore({
+        programas: [],
+        programaGeneral: [],
+        trabajadores: [],
+        detalleJabas: [],
+        validaciones: [],
+        grupos: [],
+        lideres: [],
+        reservas: [],
+        usuarios: getUsuarios()
+      });
+    } catch (e) {
+      console.warn('Reset firestore error:', e);
+    }
+
+    addToast('🧹 Base de datos limpiada. Sin backups históricos. Listo para nómina fresca del Sheet.', 'success');
+    addLog('🧹 Base de datos y backups históricos reiniciados a cero (sin distorsión histórica)', 'ok');
   }, [addToast, addLog]);
 
 
@@ -603,25 +681,55 @@ export default function App() {
     setDetalleJabasState(mergedDetalle);
     saveDetalleJabas(mergedDetalle);
 
-    // Update full worker context (Supervisor, Fundo, Modulo, Grupo, Lider) based on this cuadrilla record
-    const workerUpdates: Record<string, { supervisor?: string; fundo?: string; modulo?: string; grupo?: string; lider?: string; nombres?: string; fecha?: string }> = {};
+    // Update full worker context (Supervisor, Fundo, Modulo, Grupo, Lider, Jabas) based on this cuadrilla record
+    const workerUpdates: Record<string, { supervisor?: string; fundo?: string; modulo?: string; grupo?: string; lider?: string; nombres?: string; fecha?: string; jabas?: number }> = {};
+    const hoy = getLocalToday();
+    const workerJabasToday: Record<string, number> = {};
+
+    mergedDetalle.forEach((d) => {
+      const dFecha = String(d.fecha || '').trim();
+      const dTimestamp = String(d.timestamp || '').slice(0, 10);
+      if (dFecha === hoy || dTimestamp === hoy) {
+        const j = Number(d.jabas) || 0;
+        if (d.dni) {
+          const cleanD = String(d.dni).replace(/\s+/g, '').trim();
+          const rawD = String(d.dni).trim();
+          if (cleanD) workerJabasToday[cleanD] = (workerJabasToday[cleanD] || 0) + j;
+          if (rawD) workerJabasToday[rawD] = (workerJabasToday[rawD] || 0) + j;
+        }
+      }
+    });
+
     newDetalleList.forEach((d) => {
       if (d.dni) {
-        workerUpdates[d.dni] = {
+        const cleanD = String(d.dni).replace(/\s+/g, '').trim();
+        const rawD = String(d.dni).trim();
+        const obj = {
           supervisor: d.supervisor,
           fundo: d.fundo,
           modulo: d.modulo,
           grupo: d.grupo,
           lider: d.lider,
           nombres: d.trabajador,
-          fecha: d.fecha || getLocalToday()
+          fecha: d.fecha || hoy,
+          jabas: Number(d.jabas) || 0
         };
+        workerUpdates[rawD] = obj;
+        if (cleanD) workerUpdates[cleanD] = obj;
+        if (d.trabajador) {
+          const normName = d.trabajador.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+          workerUpdates[`NAME_${normName}`] = obj;
+        }
       }
     });
 
     let updatedWorkers = trabajadores.map((t) => {
-      if (workerUpdates[t.dni]) {
-        const u = workerUpdates[t.dni];
+      const cleanD = String(t.dni || '').replace(/\s+/g, '').trim();
+      const rawD = String(t.dni || '').trim();
+      const normName = t.nombres ? t.nombres.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '';
+      const u = (cleanD && workerUpdates[cleanD]) || (rawD && workerUpdates[rawD]) || (t.id && workerUpdates[t.id]) || (normName && workerUpdates[`NAME_${normName}`]);
+      const currentJabasToday = (cleanD && workerJabasToday[cleanD]) || (rawD && workerJabasToday[rawD]) || 0;
+      if (u) {
         return {
           ...t,
           supervisor: u.supervisor || t.supervisor,
@@ -629,7 +737,14 @@ export default function App() {
           modulo: u.modulo || t.modulo,
           grupo: u.grupo || t.grupo,
           lider: u.lider || t.lider,
-          fecha: u.fecha || t.fecha
+          fecha: u.fecha || t.fecha,
+          jabas: currentJabasToday > 0 ? currentJabasToday : ((t.jabas || 0) + (u.jabas || 0))
+        };
+      }
+      if (currentJabasToday > 0) {
+        return {
+          ...t,
+          jabas: currentJabasToday
         };
       }
       return t;
@@ -660,6 +775,23 @@ export default function App() {
 
     setTrabajadoresState(updatedWorkers);
     saveTrabajadores(updatedWorkers);
+
+    // Actualizar reservas de hoy vinculadas a los trabajadores guardados con jabas para marcarlas como completadas
+    const savedDnisSet = new Set(newDetalleList.map((d) => String(d.dni || '').replace(/\s+/g, '').trim()));
+    const updatedReservas = reservas.map((res) => {
+      if (res.fecha !== hoy) return res;
+      const resDnis = (res.trabajadores || []).map((tw) => String(tw.dni || '').replace(/\s+/g, '').trim());
+      const hasSavedWorker = resDnis.some((dni) => savedDnisSet.has(dni));
+      if (hasSavedWorker) {
+        return {
+          ...res,
+          estado: 'completada' as const
+        };
+      }
+      return res;
+    });
+    setReservasState(updatedReservas);
+    saveReservas(updatedReservas);
 
     let updatedProg = programas;
     if (programas.length > 0) {
@@ -947,27 +1079,27 @@ export default function App() {
     addToast(`🗑️ Reserva eliminada del sistema`);
   };
 
-  const handleImportTrabajadores = (newWorkers: Trabajador[]) => {
-    const combined = [...newWorkers, ...trabajadores];
+  const handleImportTrabajadores = (newWorkers: Trabajador[], replaceExisting: boolean = true) => {
+    const list = replaceExisting ? newWorkers : [...newWorkers, ...trabajadores];
     const seenDni = new Set<string>();
     const uniqueWorkers: Trabajador[] = [];
-    combined.forEach((t) => {
+    list.forEach((t) => {
       const cleanDni = String(t.dni || '').trim();
-      if (cleanDni && !seenDni.has(cleanDni)) {
-        seenDni.add(cleanDni);
+      const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${t.nombres}`);
+      if (!seenDni.has(key)) {
+        seenDni.add(key);
         uniqueWorkers.push(t);
       }
     });
     setTrabajadoresState(uniqueWorkers);
     saveTrabajadores(uniqueWorkers);
 
-    // Bloqueo de nómina automático al cargar: blindar en Modo Offline
-    setModoOfflineNomina(true);
-    setModoOfflineNominaState(true);
+    // PASO 2: Activar Modo Offline con los trabajadores cargados para que no se vuelva a sincronizar la nómina
+    setOfflineNominaLocked(true);
+    setOfflineNomina(true);
 
-    addLog(`📥 Sincronizados e importados ${newWorkers.length} trabajadores en nómina (${uniqueWorkers.length} total)`, 'ok');
-    addLog(`🔒 Modo Offline activado automáticamente para blindar los ${uniqueWorkers.length} trabajadores contra cortes de red.`, 'ok');
-    addToast(`🔒 Nómina blindada en Modo Offline (${uniqueWorkers.length} trabajadores protegidos)`, 'success');
+    addLog(`📥 ${replaceExisting ? 'Nómina diaria reemplazada' : 'Trabajadores agregados'}: ${newWorkers.length} trabajadores. 🔒 Modo Offline activo: nómina asegurada en el dispositivo.`, 'ok');
+    addToast(`🔒 Nómina cargada (${newWorkers.length} trab.). Modo Offline activo: no se restablecerán por cortes de señal.`, 'success');
 
     // Fast-path direct push to dedicated trabajadores endpoint
     fetch('/api/trabajadores', {
@@ -1073,56 +1205,6 @@ export default function App() {
     }
   };
 
-  const handlePushLocalToServer = async () => {
-    const currentWorkers = getTrabajadores();
-    if (currentWorkers.length === 0) {
-      addToast('⚠️ No hay trabajadores en este equipo para subir. Importa la nómina primero.', 'warning');
-      return;
-    }
-    addLog(`📤 Subiendo nómina completa (${currentWorkers.length} trabajadores) al servidor central...`, 'info');
-    try {
-      const res = await fetch('/api/trabajadores', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trabajadores: currentWorkers, append: false })
-      });
-      if (res.ok) {
-        addLog(`✅ Nómina de ${currentWorkers.length} trabajadores subida exitosamente al servidor. Ahora otros equipos pueden descargarla.`, 'ok');
-        addToast(`✅ ${currentWorkers.length} trabajadores listos en el servidor central`, 'success');
-        triggerAutoSync('Publicación de Nómina a Servidor', { trabajadores: currentWorkers });
-      } else {
-        addToast('⚠️ Error al subir al servidor', 'warning');
-      }
-    } catch {
-      addToast('❌ No se pudo conectar al servidor central', 'error');
-    }
-  };
-
-  const handlePullServerData = async () => {
-    addLog('📥 Descargando nómina y datos actualizados desde el servidor central...', 'info');
-    try {
-      const res = await fetch('/api/data');
-      if (res.ok) {
-        const json = await res.json();
-        if (json && json.status === 'ok' && json.data) {
-          applyServerData(json.data, false);
-          const count = json.data.trabajadores?.length || 0;
-          if (count > 0) {
-            addLog(`✅ Sincronización exitosa: ${count} trabajadores recibidos del servidor.`, 'ok');
-            addToast(`✅ ${count} trabajadores sincronizados desde el servidor`, 'success');
-          } else {
-            addLog('ℹ️ El servidor central no tiene trabajadores registrados aún.', 'info');
-            addToast('ℹ️ El servidor central aún no tiene trabajadores cargados.', 'info');
-          }
-        }
-      } else {
-        addToast('⚠️ El servidor no respondió adecuadamente', 'warning');
-      }
-    } catch {
-      addToast('❌ No se pudo conectar al servidor central', 'error');
-    }
-  };
-
   // If unauthenticated, show field-ready login
   if (!session) {
     return (
@@ -1133,6 +1215,8 @@ export default function App() {
     );
   }
 
+  const fbConfig = getFirebaseConfig();
+
   return (
     <div className={`min-h-screen bg-[#f0f2f5] text-[#212121] pb-24 flex flex-col font-sans transition-all duration-300 ${
       deviceMode === 'celular' ? 'bg-[#e0e0e0]/70' : 'bg-[#f5f5f5]'
@@ -1142,15 +1226,16 @@ export default function App() {
         session={session}
         onLogout={handleLogout}
         lastSync={lastSync}
+        firebaseConnected={true}
         autoSyncActive={isAutoSyncEnabled()}
         onRefresh={() => fetchCentralizedData(false)}
         onOpenShareModal={() => setIsShareModalOpen(true)}
         deviceMode={deviceMode}
         onChangeDeviceMode={handleDeviceModeChange}
-        modoOfflineNomina={modoOfflineNomina}
+        offlineNomina={offlineNomina}
+        onToggleOfflineNomina={handleToggleOfflineNomina}
         isOnline={isOnline}
-        totalTrabajadores={trabajadores.length}
-        onToggleModoOfflineNomina={handleToggleModoOfflineNomina}
+        trabajadoresCount={trabajadores.length}
       />
 
       {/* Sub Navigation Bar */}
@@ -1217,16 +1302,15 @@ export default function App() {
             onDeleteSupervisor={handleDeleteSupervisor}
             onSaveGrupo={handleSaveGrupo}
             onSaveAvance={handleSaveAvance}
+            detalleJabas={detalleJabas}
             reservas={reservas}
             onSaveReserva={handleSaveReserva}
             onDeleteReserva={handleDeleteReserva}
             onToast={addToast}
-            modoOfflineNomina={modoOfflineNomina}
+            offlineNomina={offlineNomina}
+            onToggleOfflineNomina={handleToggleOfflineNomina}
+            onRestoreOfflineCache={handleRestoreOfflineCache}
             isOnline={isOnline}
-            onToggleModoOfflineNomina={handleToggleModoOfflineNomina}
-            onRestoreBackupOffline={handleRestoreBackupOffline}
-            onNavigateTab={(tab) => setActiveTab(tab)}
-            onSyncCentral={handlePullServerData}
           />
         )}
 
@@ -1275,6 +1359,7 @@ export default function App() {
             usuarios={usuarios}
             onSaveUsuarios={handleSaveUsuarios}
             onToast={addToast}
+            session={session}
           />
         )}
 
@@ -1283,6 +1368,8 @@ export default function App() {
             trabajadores={trabajadores}
             onImportTrabajadores={handleImportTrabajadores}
             onToast={addToast}
+            offlineNomina={offlineNomina}
+            onToggleOfflineNomina={handleToggleOfflineNomina}
           />
         )}
 
@@ -1295,13 +1382,9 @@ export default function App() {
             onToast={addToast}
             onResetData={handleResetAllData}
             onDataLoadedFromCloud={(data) => applyServerData(data, true)}
-            modoOfflineNomina={modoOfflineNomina}
+            offlineNomina={offlineNomina}
+            onToggleOfflineNomina={handleToggleOfflineNomina}
             isOnline={isOnline}
-            totalTrabajadores={trabajadores.length}
-            onToggleModoOfflineNomina={handleToggleModoOfflineNomina}
-            onRestoreBackupOffline={handleRestoreBackupOffline}
-            onPushLocalToServer={handlePushLocalToServer}
-            onPullServerData={handlePullServerData}
           />
         )}
       </main>

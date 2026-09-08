@@ -4,6 +4,12 @@ export interface UserSession {
   user: string;
   nombre: string;
   rol: UserRole;
+  horaLogin?: string;
+  fechaLogin?: string;
+  ultimoIngreso?: string;
+  horaIngreso?: string;
+  fechaIngreso?: string;
+  horaAsignada?: string;
 }
 
 export interface Usuario {
@@ -12,6 +18,31 @@ export interface Usuario {
   nombre: string;
   rol: UserRole;
   creado: string;
+  ultimoLogin?: string;        // Timestamp ISO del último login
+  ultimaHoraLogin?: string;    // Hora HH:MM:SS del login
+  ultimaFechaLogin?: string;   // Fecha YYYY-MM-DD del login
+  ultimoIngreso?: string;      // Timestamp ISO
+  ultimaHoraAcceso?: string;   // Hora HH:MM:SS
+  ultimaFechaAcceso?: string;  // Fecha YYYY-MM-DD
+  horaIngreso?: string;        // Opcional
+  turno?: string;
+  toleranciaMinutos?: number;
+}
+
+export interface AuditoriaIngreso {
+  id: string;
+  user: string;
+  nombre: string;
+  rol: UserRole;
+  fecha: string;               // YYYY-MM-DD de login
+  horaIngreso: string;         // HH:MM:SS hora de login
+  dispositivo?: 'PC' | 'Celular' | 'Desconocido';
+  timestamp: string;           // ISO timestamp
+  horaAsignada?: string;
+  estado?: string;
+  diferenciaMinutos?: number;
+  metodo?: string;
+  observaciones?: string;
 }
 
 export interface LoteItem {
@@ -95,9 +126,11 @@ export interface Lider {
 }
 
 export interface ReservaItemTrabajador {
+  id?: string;
   dni: string;
   nombres: string;
   grupo?: string;
+  lider?: string;
 }
 
 export interface ReservaCuadrilla {
@@ -112,6 +145,7 @@ export interface ReservaCuadrilla {
   totalTrabajadores: number;
   trabajadores: ReservaItemTrabajador[];
   timestamp: string;
+  estado?: 'completada' | 'pendiente';
 }
 
 export interface SyncLogEntry {
@@ -162,3 +196,13 @@ export type TabId =
   | 'conexion';
 
 export type DeviceViewMode = 'pc' | 'celular';
+
+export interface FirebaseConfig {
+  apiKey: string;
+  authDomain?: string;
+  databaseURL: string;
+  projectId?: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  appId?: string;
+}

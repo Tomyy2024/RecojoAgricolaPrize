@@ -1,35 +1,37 @@
 import React, { useState } from 'react';
 import { UserSession, DeviceViewMode } from '../types';
-import { LogOut, User, Sprout, Cloud, RefreshCw, QrCode, Smartphone, Monitor } from 'lucide-react';
+import { LogOut, User, Sprout, Cloud, RefreshCw, QrCode, Smartphone, Monitor, Clock, ShieldCheck, Wifi, WifiOff } from 'lucide-react';
 
 interface HeaderProps {
   session: UserSession;
   onLogout: () => void;
   lastSync?: string | null;
+  firebaseConnected?: boolean;
   autoSyncActive?: boolean;
   onRefresh?: () => Promise<void> | void;
   onOpenShareModal?: () => void;
   deviceMode?: DeviceViewMode;
   onChangeDeviceMode?: (mode: DeviceViewMode) => void;
-  modoOfflineNomina?: boolean;
-  totalTrabajadores?: number;
+  offlineNomina?: boolean;
+  onToggleOfflineNomina?: () => void;
   isOnline?: boolean;
-  onToggleModoOfflineNomina?: () => void;
+  trabajadoresCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   session,
   onLogout,
   lastSync,
+  firebaseConnected,
   autoSyncActive,
   onRefresh,
   onOpenShareModal,
   deviceMode = 'pc',
   onChangeDeviceMode,
-  modoOfflineNomina = false,
-  totalTrabajadores = 0,
+  offlineNomina,
+  onToggleOfflineNomina,
   isOnline = true,
-  onToggleModoOfflineNomina
+  trabajadoresCount
 }) => {
   const [refreshing, setRefreshing] = useState(false);
 
@@ -47,13 +49,25 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="sticky top-0 z-40 shadow-md bg-gradient-to-r from-[#1b5e20] via-[#2e7d32] to-[#388e3c] text-white">
       {/* Top Session & Status Bar */}
       <div className="bg-black/25 border-b border-white/15 px-3 sm:px-4 py-1.5 flex flex-wrap justify-between items-center gap-2 text-xs">
-        <div className="flex items-center gap-2">
-          <User className="w-3.5 h-3.5 text-[#a5d6a7]" />
-          <span className="font-semibold">{session.nombre}</span>
-          <span className="text-white/60">|</span>
-          <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider text-[#cbffc2]">
-            {session.rol}
-          </span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <User className="w-3.5 h-3.5 text-[#a5d6a7]" />
+            <span className="font-semibold">{session.nombre}</span>
+            <span className="text-white/60">|</span>
+            <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider text-[#cbffc2]">
+              {session.rol}
+            </span>
+          </div>
+
+          {(session.horaLogin || session.horaIngreso) && (
+            <div
+              className="bg-black/35 border border-white/25 px-2.5 py-0.5 rounded-lg text-[11px] font-mono text-[#cbffc2] flex items-center gap-1.5 shadow-inner"
+              title={`Hora de Login al sistema: ${session.horaLogin || session.horaIngreso}`}
+            >
+              <Clock className="w-3.5 h-3.5 text-[#a5d6a7]" />
+              <span>Login: <strong>{session.horaLogin || session.horaIngreso}</strong></span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2.5 flex-wrap">
@@ -91,6 +105,47 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
+          {/* Indicador de Señal de Red */}
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+              isOnline
+                ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-400/30'
+                : 'bg-rose-500/30 text-rose-200 border border-rose-400/40 animate-pulse'
+            }`}
+            title={isOnline ? 'Conexión a Internet activa' : 'Sin señal de internet (Modo Offline activo)'}
+          >
+            {isOnline ? <Wifi className="w-3 h-3 text-emerald-300" /> : <WifiOff className="w-3 h-3 text-rose-300" />}
+            <span className="hidden sm:inline">{isOnline ? 'Online' : 'Sin Señal'}</span>
+          </span>
+
+          {/* Botón / Indicador de Modo Offline Nómina (Paso 2) */}
+          {onToggleOfflineNomina && (
+            <button
+              type="button"
+              onClick={onToggleOfflineNomina}
+              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold transition-all active:scale-95 cursor-pointer shadow-sm ${
+                offlineNomina
+                  ? 'bg-amber-400 text-amber-950 hover:bg-amber-300 border border-amber-300'
+                  : 'bg-white/15 text-white/90 hover:bg-white/25 border border-white/20'
+              }`}
+              title={
+                offlineNomina
+                  ? 'Modo Offline Nómina ACTIVO: Los trabajadores no se reinician ni re-sincronizan ante cortes de señal. Click para cambiar.'
+                  : 'Modo Online Nómina: Se permite sincronizar trabajadores con el servidor. Click para activar Modo Offline fijo.'
+              }
+            >
+              <ShieldCheck className={`w-3.5 h-3.5 ${offlineNomina ? 'text-amber-950' : 'text-[#cbffc2]'}`} />
+              <span>{offlineNomina ? '🔒 Nómina Offline' : '🌐 Nómina Sinc.'}</span>
+              {typeof trabajadoresCount === 'number' && trabajadoresCount > 0 && (
+                <span className={`text-[10px] px-1 py-0.2 rounded-full font-mono font-black ${
+                  offlineNomina ? 'bg-amber-900/30 text-amber-950' : 'bg-black/30 text-white'
+                }`}>
+                  {trabajadoresCount}
+                </span>
+              )}
+            </button>
+          )}
+
           {onOpenShareModal && (
             <button
               onClick={onOpenShareModal}
@@ -99,52 +154,6 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Smartphone className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Compartir App</span>
-            </button>
-          )}
-
-          {/* Estado de Señal / Conexión */}
-          {isOnline ? (
-            <span
-              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-950/40 text-[#cbffc2] text-[10px] font-bold border border-emerald-400/30"
-              title="Dispositivo conectado a internet"
-            >
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Online</span>
-            </span>
-          ) : (
-            <span
-              className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-extrabold shadow-sm animate-bounce border border-red-300"
-              title="Dispositivo sin conexión a internet - Operando en modo fuera de línea"
-            >
-              <span className="w-2 h-2 rounded-full bg-white" />
-              <span>Sin Señal</span>
-            </span>
-          )}
-
-          {/* Control interactivo de Modo Offline para Trabajadores */}
-          {onToggleModoOfflineNomina && (
-            <button
-              type="button"
-              onClick={onToggleModoOfflineNomina}
-              className={`flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full transition-all cursor-pointer shadow-xs ${
-                modoOfflineNomina
-                  ? 'bg-amber-400 hover:bg-amber-300 text-amber-950 ring-1 ring-amber-200'
-                  : 'bg-white/15 hover:bg-white/25 text-white/90'
-              }`}
-              title={
-                modoOfflineNomina
-                  ? `🔒 Modo Offline Nómina Activo: ${totalTrabajadores} trabajadores asegurados en el dispositivo contra cortes de señal. Clic para desbloquear.`
-                  : `🔓 Modo Online Nómina: Sincronización abierta. Clic para activar Modo Offline y blindar la lista de trabajadores.`
-              }
-            >
-              <span>{modoOfflineNomina ? '🔒 Nómina Offline' : '🔓 Nómina Online'}</span>
-              <span
-                className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
-                  modoOfflineNomina ? 'bg-amber-950 text-white' : 'bg-white/25 text-white'
-                }`}
-              >
-                {totalTrabajadores}
-              </span>
             </button>
           )}
 
@@ -158,6 +167,12 @@ export const Header: React.FC<HeaderProps> = ({
               <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin text-[#cbffc2]' : ''}`} />
               <span className="hidden md:inline">Actualizar</span>
             </button>
+          )}
+
+          {firebaseConnected && (
+            <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#ff8f00] text-black text-[10px] font-bold">
+              🔥 Firebase
+            </span>
           )}
 
           {autoSyncActive && (

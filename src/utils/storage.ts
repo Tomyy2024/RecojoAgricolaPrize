@@ -7,8 +7,10 @@ import {
   Lider, 
   UserSession, 
   SyncLogEntry, 
+  FirebaseConfig,
   ValidacionSupervisor,
-  ReservaCuadrilla
+  ReservaCuadrilla,
+  AuditoriaIngreso
 } from '../types';
 import { 
   INITIAL_USUARIOS, 
@@ -34,10 +36,12 @@ const KEYS = {
   AUTO_SYNC: 'recojoFrutosAutoSync',
   AUTO_SYNC_QUEUE: 'recojoFrutosAutoSyncCola',
   LAST_SYNC: 'recojoFrutosLastSync',
+  FIREBASE_CONFIG: 'recojoFrutosFirebaseConfig',
   VALIDACIONES: 'recojoFrutosValidaciones',
   RESERVAS: 'recojoFrutosReservas',
-  MODO_OFFLINE_NOMINA: 'recojoFrutosModoOfflineNomina',
-  BACKUP_OFFLINE_TRABAJADORES: 'recojoFrutosBackupOfflineTrabajadores'
+  AUDITORIA_INGRESOS: 'recojoFrutosAuditoriaIngresos',
+  OFFLINE_NOMINA_LOCKED: 'recojoFrutosOfflineNominaLocked',
+  TRABAJADORES_OFFLINE_CACHE: 'recojoFrutosTrabajadoresOfflineCache'
 };
 
 // Date helpers
@@ -128,12 +132,11 @@ export function formatDateDDMMAAAA(d?: string): string {
 export function initializeStorage() {
   try {
     const WIPE_VERSION_KEY = 'recojoFrutosDataVersion';
-    const TARGET_VERSION = 'v105_clean_wipe_all_backups_require_login';
+    const TARGET_VERSION = 'v106_wipe_historical_backups_clean_sheet_mode';
     
     // Check if this browser needs a clean wipe of all backup and cached data
     if (typeof localStorage !== 'undefined' && localStorage.getItem(WIPE_VERSION_KEY) !== TARGET_VERSION) {
-      wipeAllBackupData();
-      clearSession();
+      wipeAllBackupData(false);
       localStorage.setItem(WIPE_VERSION_KEY, TARGET_VERSION);
     }
 
@@ -222,7 +225,7 @@ export function initializeStorage() {
 }
 
 // Completely wipe all backup, test, and historical data from localStorage
-export function wipeAllBackupData() {
+export function wipeAllBackupData(clearAuth: boolean = false) {
   try {
     if (typeof localStorage === 'undefined') return;
 
@@ -237,14 +240,11 @@ export function wipeAllBackupData() {
     localStorage.setItem(KEYS.GRUPOS, JSON.stringify([]));
     localStorage.setItem(KEYS.RESERVAS, JSON.stringify([]));
     localStorage.setItem(KEYS.AUTO_SYNC_QUEUE, JSON.stringify([]));
-    localStorage.setItem(KEYS.USUARIOS, JSON.stringify(INITIAL_USUARIOS));
 
-    // 2. Remove any old sheet URLs or sync caches that might re-import backups
-    localStorage.removeItem(KEYS.GSHEET_URL);
-    localStorage.removeItem(KEYS.AUTO_SYNC);
+    // Reset sync timestamps so fresh sync pulls cleanly
     localStorage.removeItem(KEYS.LAST_SYNC);
 
-    // 3. Scan and delete any ad-hoc backup keys in localStorage
+    // 2. Scan and delete any ad-hoc backup keys in localStorage
     const keysToDelete: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
@@ -263,8 +263,9 @@ export function wipeAllBackupData() {
     }
     keysToDelete.forEach(k => localStorage.removeItem(k));
 
-    // 4. Also clear session so authentication is freshly required
-    clearSession();
+    if (clearAuth) {
+      clearSession();
+    }
   } catch (e) {
     console.error('Error wiping backup data:', e);
   }
@@ -272,7 +273,7 @@ export function wipeAllBackupData() {
 
 // Reset all test records to a completely clean state
 export function resetAllData() {
-  wipeAllBackupData();
+  wipeAllBackupData(false);
 }
 
 
@@ -338,95 +339,135 @@ export function saveUsuarios(usuarios: Usuario[]) {
   localStorage.setItem(KEYS.USUARIOS, JSON.stringify(usuarios));
 }
 
-// Modo Offline Nómina & Respaldo Persistente
-export function isModoOfflineNomina(): boolean {
+// Auditoría de Ingresos
+export function getAuditoriaIngresos(): AuditoriaIngreso[] {
   try {
-    const raw = localStorage.getItem(KEYS.MODO_OFFLINE_NOMINA);
-    return raw === 'true';
+    const raw = localStorage.getItem(KEYS.AUDITORIA_INGRESOS);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveAuditoriaIngresos(auditoria: AuditoriaIngreso[]) {
+  try {
+    localStorage.setItem(KEYS.AUDITORIA_INGRESOS, JSON.stringify(auditoria));
+  } catch (e) {
+    console.error('Error saving auditoria de ingresos:', e);
+  }
+}
+
+export function addAuditoriaIngreso(entry: AuditoriaIngreso) {
+  try {
+    const current = getAuditoriaIngresos();
+    // Prepend new audit entry, limit to last 1000 items
+    const updated = [entry, ...current.filter((item) => item.id !== entry.id)].slice(0, 1000);
+    saveAuditoriaIngresos(updated);
+  } catch (e) {
+    console.error('Error adding auditoria de ingreso:', e);
+  }
+}
+
+export function mergeAuditoriasArrays(base: AuditoriaIngreso[], incoming: AuditoriaIngreso[]): AuditoriaIngreso[] {
+  const map = new Map<string, AuditoriaIngreso>();
+  (base || []).forEach((item) => {
+    if (item && item.id) map.set(item.id, item);
+  });
+  (incoming || []).forEach((item) => {
+    if (item && item.id) map.set(item.id, item);
+  });
+  return Array.from(map.values()).sort((a, b) => {
+    return new Date(b.timestamp || b.fecha).getTime() - new Date(a.timestamp || a.fecha).getTime();
+  });
+}
+
+// Trabajadores & Modo Offline Nómina
+export function isOfflineNominaLocked(): boolean {
+  try {
+    const val = localStorage.getItem(KEYS.OFFLINE_NOMINA_LOCKED);
+    if (val !== null) {
+      return val === 'true';
+    }
+    // Si no se ha configurado expresamente, pero ya existen trabajadores cargados en local,
+    // activamos la protección automáticamente para que una desconexión o reconexión de red no los borre.
+    const raw = localStorage.getItem(KEYS.TRABAJADORES);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          localStorage.setItem(KEYS.OFFLINE_NOMINA_LOCKED, 'true');
+          return true;
+        }
+      } catch {}
+    }
+    return false;
   } catch {
     return false;
   }
 }
 
-export function setModoOfflineNomina(enabled: boolean): void {
+export function setOfflineNominaLocked(locked: boolean): void {
   try {
-    localStorage.setItem(KEYS.MODO_OFFLINE_NOMINA, String(enabled));
-  } catch (e) {
-    console.warn('Error saving modo offline nómina:', e);
-  }
-}
-
-export interface BackupOfflineNomina {
-  fecha: string;
-  count: number;
-  trabajadores: Trabajador[];
-}
-
-export function getBackupOfflineTrabajadores(): BackupOfflineNomina | null {
-  try {
-    const raw = localStorage.getItem(KEYS.BACKUP_OFFLINE_TRABAJADORES);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed && Array.isArray(parsed.trabajadores) && parsed.trabajadores.length > 0) {
-      return parsed;
+    localStorage.setItem(KEYS.OFFLINE_NOMINA_LOCKED, locked ? 'true' : 'false');
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('offline-nomina-changed', { detail: { locked } }));
     }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-export function saveBackupOfflineTrabajadores(trabajadores: Trabajador[]): void {
-  try {
-    if (!Array.isArray(trabajadores) || trabajadores.length === 0) return;
-    const backup: BackupOfflineNomina = {
-      fecha: new Date().toISOString(),
-      count: trabajadores.length,
-      trabajadores
-    };
-    localStorage.setItem(KEYS.BACKUP_OFFLINE_TRABAJADORES, JSON.stringify(backup));
   } catch (e) {
-    console.warn('Error saving offline worker backup:', e);
+    console.error('Error saving offline nomina lock:', e);
   }
 }
 
-export function restoreBackupOfflineTrabajadores(): Trabajador[] | null {
+export function getTrabajadoresOfflineCache(): Trabajador[] {
   try {
-    const backup = getBackupOfflineTrabajadores();
-    if (backup && Array.isArray(backup.trabajadores) && backup.trabajadores.length > 0) {
-      saveTrabajadores(backup.trabajadores);
-      return backup.trabajadores;
-    }
-    return null;
+    const raw = localStorage.getItem(KEYS.TRABAJADORES_OFFLINE_CACHE);
+    if (!raw) return [];
+    const list: Trabajador[] = JSON.parse(raw);
+    return Array.isArray(list) ? list : [];
   } catch {
-    return null;
+    return [];
   }
 }
 
-// Trabajadores
+export function restoreTrabajadoresFromOfflineCache(): Trabajador[] {
+  const cached = getTrabajadoresOfflineCache();
+  if (cached.length > 0) {
+    saveTrabajadores(cached);
+    setOfflineNominaLocked(true);
+  }
+  return cached;
+}
+
 export function getTrabajadores(): Trabajador[] {
   try {
     const raw = localStorage.getItem(KEYS.TRABAJADORES);
     let list: Trabajador[] = raw ? JSON.parse(raw) : [];
 
-    // Auto-restauración desde respaldo offline persistente si la lista está vacía
-    if (!list || list.length === 0) {
-      const backup = getBackupOfflineTrabajadores();
-      if (backup && Array.isArray(backup.trabajadores) && backup.trabajadores.length > 0) {
-        list = backup.trabajadores;
-        localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(list));
-      } else if (!raw) {
+    // Si la lista local quedó vacía pero existe snapshot en cache offline, recuperarlo
+    if (!Array.isArray(list) || list.length === 0) {
+      const offlineBackup = getTrabajadoresOfflineCache();
+      if (offlineBackup.length > 0) {
+        list = offlineBackup;
+        try {
+          localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(offlineBackup));
+        } catch {}
+      } else {
         list = INITIAL_TRABAJADORES;
       }
     }
 
     const seen = new Set<string>();
     const unique: Trabajador[] = [];
-    list.forEach((t) => {
-      const cleanDni = String(t.dni || '').trim();
-      if (cleanDni && !seen.has(cleanDni)) {
-        seen.add(cleanDni);
-        unique.push(t);
+    list.forEach((t, i) => {
+      const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
+      const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push({
+          ...t,
+          dni: cleanDni || String(t.dni || '').trim()
+        });
       }
     });
     return unique;
@@ -438,16 +479,23 @@ export function getTrabajadores(): Trabajador[] {
 export function saveTrabajadores(trabajadores: Trabajador[]) {
   const seen = new Set<string>();
   const unique: Trabajador[] = [];
-  trabajadores.forEach((t) => {
-    const cleanDni = String(t.dni || '').trim();
-    if (cleanDni && !seen.has(cleanDni)) {
-      seen.add(cleanDni);
-      unique.push(t);
+  trabajadores.forEach((t, i) => {
+    const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
+    const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push({
+        ...t,
+        dni: cleanDni || String(t.dni || '').trim()
+      });
     }
   });
   localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(unique));
+  // Respaldo permanente offline si hay trabajadores cargados
   if (unique.length > 0) {
-    saveBackupOfflineTrabajadores(unique);
+    try {
+      localStorage.setItem(KEYS.TRABAJADORES_OFFLINE_CACHE, JSON.stringify(unique));
+    } catch {}
   }
 }
 
@@ -511,9 +559,11 @@ export function saveAvanceMap(map: Record<string, number>) {
 export function getGrupos(): string[] {
   try {
     const raw = localStorage.getItem(KEYS.GRUPOS);
-    return raw ? JSON.parse(raw) : INITIAL_GRUPOS;
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
   } catch {
-    return INITIAL_GRUPOS;
+    return [];
   }
 }
 
@@ -550,24 +600,7 @@ export function getLideres(): Lider[] {
       }
     }
   } catch {}
-  // Default derive from trabajadores
-  const workers = getTrabajadores();
-  const liderMap = new Map<string, Lider>();
-  workers.forEach(w => {
-    const name = (w.lider || '').trim();
-    if (name) {
-      const key = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-      if (!liderMap.has(key)) {
-        liderMap.set(key, {
-          lider: name,
-          dni: w.tipo === 'Líder' ? w.dni : '',
-          nombres: name,
-          fechaAlta: w.fecha ? w.fecha.slice(0, 10) : getLocalToday()
-        });
-      }
-    }
-  });
-  return Array.from(liderMap.values());
+  return [];
 }
 
 export function saveLideres(lideres: Lider[]) {
@@ -652,14 +685,16 @@ export function mergeReservasArrays(
       continue;
     }
 
-    // Check if there is an existing reservation with the same date, supervisor, fundo, and modulo
+    // Check if there is an existing reservation with the same date, supervisor, fundo, modulo and grupo
     const normSup = normalizeSupervisorKey(item.supervisor);
+    const itemGrp = (item.grupo || 'Grupo 01').trim().toLowerCase();
     const existingMatch = Array.from(map.values()).find(
       (e) =>
         e.fecha === item.fecha &&
         normalizeSupervisorKey(e.supervisor) === normSup &&
         e.fundo === item.fundo &&
-        e.modulo === item.modulo
+        e.modulo === item.modulo &&
+        (e.grupo || 'Grupo 01').trim().toLowerCase() === itemGrp
     );
 
     if (existingMatch) {
@@ -745,6 +780,28 @@ export function getLastSyncTime(): string | null {
 
 export function setLastSyncTime(isoDate: string) {
   localStorage.setItem(KEYS.LAST_SYNC, isoDate);
+}
+
+// Firebase Config
+export function getFirebaseConfig(): FirebaseConfig | null {
+  try {
+    const raw = localStorage.getItem(KEYS.FIREBASE_CONFIG);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.apiKey && parsed.databaseURL) return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveFirebaseConfig(cfg: FirebaseConfig | null) {
+  if (!cfg) {
+    localStorage.removeItem(KEYS.FIREBASE_CONFIG);
+  } else {
+    localStorage.setItem(KEYS.FIREBASE_CONFIG, JSON.stringify(cfg));
+  }
 }
 
 // Validaciones por Supervisor Sanitizer
