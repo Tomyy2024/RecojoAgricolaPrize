@@ -199,6 +199,13 @@ export default function App() {
         // Nómina blindada en este dispositivo
       } else if (d.trabajadores.length === 0 && currentWorkers.length > 0) {
         addLog('🛡️ Protección de nómina: Respuesta remota vacía rechazada para preservar trabajadores locales.', 'info');
+        // Auto-seed: Compartir la nómina local con el servidor central para que otros equipos la reciban
+        fetch('/api/trabajadores', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trabajadores: currentWorkers, append: false })
+        }).catch(() => {});
+        addLog(`📤 Nómina local (${currentWorkers.length} trabajadores) compartida con el servidor central para nuevos equipos.`, 'info');
       } else {
         const seenDni = new Set<string>();
         const uniqueWorkers: Trabajador[] = [];
@@ -287,7 +294,11 @@ export default function App() {
         const json = await res.json();
         if (json && json.status === 'ok' && json.data) {
           applyServerData(json.data, silent);
-          fetchedFromServer = true;
+          // If server responded with data, mark fetched; but if it had 0 workers and we have 0 workers locally, try Sheets
+          const serverWorkerCount = Array.isArray(json.data.trabajadores) ? json.data.trabajadores.length : 0;
+          if (serverWorkerCount > 0 || getTrabajadores().length > 0) {
+            fetchedFromServer = true;
+          }
         }
       }
     } catch {
@@ -1062,6 +1073,56 @@ export default function App() {
     }
   };
 
+  const handlePushLocalToServer = async () => {
+    const currentWorkers = getTrabajadores();
+    if (currentWorkers.length === 0) {
+      addToast('⚠️ No hay trabajadores en este equipo para subir. Importa la nómina primero.', 'warning');
+      return;
+    }
+    addLog(`📤 Subiendo nómina completa (${currentWorkers.length} trabajadores) al servidor central...`, 'info');
+    try {
+      const res = await fetch('/api/trabajadores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trabajadores: currentWorkers, append: false })
+      });
+      if (res.ok) {
+        addLog(`✅ Nómina de ${currentWorkers.length} trabajadores subida exitosamente al servidor. Ahora otros equipos pueden descargarla.`, 'ok');
+        addToast(`✅ ${currentWorkers.length} trabajadores listos en el servidor central`, 'success');
+        triggerAutoSync('Publicación de Nómina a Servidor', { trabajadores: currentWorkers });
+      } else {
+        addToast('⚠️ Error al subir al servidor', 'warning');
+      }
+    } catch {
+      addToast('❌ No se pudo conectar al servidor central', 'error');
+    }
+  };
+
+  const handlePullServerData = async () => {
+    addLog('📥 Descargando nómina y datos actualizados desde el servidor central...', 'info');
+    try {
+      const res = await fetch('/api/data');
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.status === 'ok' && json.data) {
+          applyServerData(json.data, false);
+          const count = json.data.trabajadores?.length || 0;
+          if (count > 0) {
+            addLog(`✅ Sincronización exitosa: ${count} trabajadores recibidos del servidor.`, 'ok');
+            addToast(`✅ ${count} trabajadores sincronizados desde el servidor`, 'success');
+          } else {
+            addLog('ℹ️ El servidor central no tiene trabajadores registrados aún.', 'info');
+            addToast('ℹ️ El servidor central aún no tiene trabajadores cargados.', 'info');
+          }
+        }
+      } else {
+        addToast('⚠️ El servidor no respondió adecuadamente', 'warning');
+      }
+    } catch {
+      addToast('❌ No se pudo conectar al servidor central', 'error');
+    }
+  };
+
   // If unauthenticated, show field-ready login
   if (!session) {
     return (
@@ -1164,6 +1225,8 @@ export default function App() {
             isOnline={isOnline}
             onToggleModoOfflineNomina={handleToggleModoOfflineNomina}
             onRestoreBackupOffline={handleRestoreBackupOffline}
+            onNavigateTab={(tab) => setActiveTab(tab)}
+            onSyncCentral={handlePullServerData}
           />
         )}
 
@@ -1237,6 +1300,8 @@ export default function App() {
             totalTrabajadores={trabajadores.length}
             onToggleModoOfflineNomina={handleToggleModoOfflineNomina}
             onRestoreBackupOffline={handleRestoreBackupOffline}
+            onPushLocalToServer={handlePushLocalToServer}
+            onPullServerData={handlePullServerData}
           />
         )}
       </main>

@@ -47,6 +47,8 @@ interface ConexionTabProps {
   totalTrabajadores?: number;
   onToggleModoOfflineNomina?: () => void;
   onRestoreBackupOffline?: () => void;
+  onPushLocalToServer?: () => void;
+  onPullServerData?: () => void;
 }
 
 
@@ -551,7 +553,9 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
   isOnline = true,
   totalTrabajadores = 0,
   onToggleModoOfflineNomina,
-  onRestoreBackupOffline
+  onRestoreBackupOffline,
+  onPushLocalToServer,
+  onPullServerData
 }) => {
   const [gsheetUrl, setGsheetUrl] = useState(getGsheetUrl());
   const [autoSync, setAutoSync] = useState(isAutoSyncEnabled());
@@ -767,6 +771,66 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
           </div>
         );
       })()}
+
+      {/* Sincronización entre Equipos / Servidor Central */}
+      <div className="bg-white rounded-2xl shadow-sm border border-[#e0e0e0] p-4 sm:p-6">
+        <div className="flex items-center justify-between pb-3 border-b border-[#f0f0f0] mb-4">
+          <div className="flex items-center gap-2">
+            <Database className="w-5 h-5 text-[#2e7d32]" />
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-[#1b5e20]">
+                Sincronización Directa entre Equipos y Servidor
+              </h2>
+              <p className="text-xs text-[#757575]">
+                Distribuye la nómina de trabajadores y los datos del sistema a los celulares y computadoras de todo tu equipo
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs font-bold text-[#1b5e20] bg-[#e8f5e9] px-2.5 py-1 rounded-full border border-[#a5d6a7]">
+            <Radio className="w-3.5 h-3.5 text-[#2e7d32] animate-pulse" />
+            <span>{totalTrabajadores} en este equipo</span>
+          </div>
+        </div>
+
+        <div className="bg-emerald-50/50 border border-emerald-200 rounded-xl p-3.5 mb-4 text-xs text-gray-700">
+          <p className="font-semibold text-gray-900 mb-1">
+            ¿Cómo compartir la nómina con los celulares y otros equipos?
+          </p>
+          <ul className="list-disc list-inside space-y-1 text-gray-600">
+            <li><strong>1. En el equipo donde cargaste la nómina:</strong> Haz clic en <span className="font-semibold text-emerald-800">"📤 Subir Nómina Local al Servidor"</span> para dejarla disponible centralmente.</li>
+            <li><strong>2. En los celulares de los supervisores o nuevos equipos:</strong> Haz clic en <span className="font-semibold text-emerald-800">"📥 Descargar Nómina del Servidor"</span> para cargar todos los trabajadores de inmediato.</li>
+          </ul>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {onPushLocalToServer && (
+            <button
+              type="button"
+              onClick={onPushLocalToServer}
+              disabled={totalTrabajadores === 0}
+              className={`p-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer ${
+                totalTrabajadores === 0
+                  ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                  : 'bg-[#2e7d32] hover:bg-[#1b5e20] text-white'
+              }`}
+            >
+              <UploadCloud className="w-4 h-4" />
+              <span>📤 Subir Nómina Local al Servidor ({totalTrabajadores})</span>
+            </button>
+          )}
+
+          {onPullServerData && (
+            <button
+              type="button"
+              onClick={onPullServerData}
+              className="bg-white hover:bg-emerald-50 text-[#1b5e20] border-2 border-[#2e7d32] p-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+            >
+              <DownloadCloud className="w-4 h-4 text-[#2e7d32]" />
+              <span>📥 Descargar Nómina del Servidor</span>
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Google Sheets Connection Card */}
       <div className="bg-white rounded-2xl shadow-sm border border-[#e0e0e0] p-4 sm:p-6">

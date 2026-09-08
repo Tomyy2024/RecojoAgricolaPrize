@@ -37,7 +37,9 @@ import {
   SlidersHorizontal,
   X,
   Lock,
-  Unlock
+  Unlock,
+  RefreshCw,
+  FileUp
 } from 'lucide-react';
 
 interface TrabajadoresTabProps {
@@ -52,6 +54,8 @@ interface TrabajadoresTabProps {
   isOnline?: boolean;
   onToggleModoOfflineNomina?: () => void;
   onRestoreBackupOffline?: () => void;
+  onNavigateTab?: (tab: string) => void;
+  onSyncCentral?: () => void;
   onSaveReserva?: (reserva: ReservaCuadrilla) => void;
   onDeleteReserva?: (reservaId: string) => void;
   onSaveModulo?: (fundo: string, modulo: string) => void;
@@ -78,6 +82,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   isOnline = true,
   onToggleModoOfflineNomina,
   onRestoreBackupOffline,
+  onNavigateTab,
+  onSyncCentral,
   onSaveReserva,
   onDeleteReserva,
   onSaveModulo,
@@ -2319,8 +2325,52 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             {/* Listado de Tarjetas de Trabajadores con renderizado de alto rendimiento */}
             <div className="max-h-96 overflow-y-auto space-y-2 rounded-xl border border-[#e0e0e0] p-2 bg-[#fafafa]">
               {filteredTrabajadores.length === 0 ? (
-                <div className="py-8 text-center text-gray-500 text-xs">
-                  {filtroGrupoLider === 'sin_grupo_lider' && moduloWorkerCounts.conGrupoLider > 0 ? (
+                <div className="py-6 px-4 text-center text-xs">
+                  {trabajadores.length === 0 ? (
+                    <div className="bg-emerald-50/60 rounded-xl border border-emerald-200 p-4 max-w-lg mx-auto">
+                      <div className="w-12 h-12 bg-white text-[#2e7d32] border border-emerald-200 rounded-2xl flex items-center justify-center mx-auto mb-2.5 shadow-2xs">
+                        <Users className="w-6 h-6" />
+                      </div>
+                      <h4 className="font-bold text-gray-900 text-sm mb-1">
+                        No hay nómina de trabajadores en este equipo
+                      </h4>
+                      <p className="text-[11px] text-gray-600 mb-3.5 leading-relaxed">
+                        Este equipo o celular aún no tiene cargada la lista de personal. Puedes sincronizarla desde el servidor central o importarla desde Excel / CSV.
+                      </p>
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        {onSyncCentral && (
+                          <button
+                            type="button"
+                            onClick={onSyncCentral}
+                            className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white font-bold py-2 px-3.5 rounded-lg shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer text-xs"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>Sincronizar del Servidor</span>
+                          </button>
+                        )}
+                        {onNavigateTab && (
+                          <button
+                            type="button"
+                            onClick={() => onNavigateTab('importar')}
+                            className="bg-white hover:bg-emerald-50 text-[#1b5e20] border border-[#a5d6a7] font-bold py-2 px-3 rounded-lg shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer text-xs"
+                          >
+                            <FileUp className="w-3.5 h-3.5" />
+                            <span>Importar Nómina (Excel / CSV)</span>
+                          </button>
+                        )}
+                        {onRestoreBackupOffline && (
+                          <button
+                            type="button"
+                            onClick={onRestoreBackupOffline}
+                            className="bg-white hover:bg-amber-50 text-amber-800 border border-amber-300 font-semibold py-2 px-3 rounded-lg shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer text-xs"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Restaurar Respaldo</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ) : filtroGrupoLider === 'sin_grupo_lider' && moduloWorkerCounts.conGrupoLider > 0 ? (
                     <>
                       <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-2">
                         <Check className="w-5 h-5" />
