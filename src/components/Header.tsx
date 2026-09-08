@@ -1,29 +1,35 @@
 import React, { useState } from 'react';
 import { UserSession, DeviceViewMode } from '../types';
-import { LogOut, User, Sprout, Cloud, RefreshCw, QrCode, Smartphone, Monitor, Clock } from 'lucide-react';
+import { LogOut, User, Sprout, Cloud, RefreshCw, QrCode, Smartphone, Monitor } from 'lucide-react';
 
 interface HeaderProps {
   session: UserSession;
   onLogout: () => void;
   lastSync?: string | null;
-  firebaseConnected?: boolean;
   autoSyncActive?: boolean;
   onRefresh?: () => Promise<void> | void;
   onOpenShareModal?: () => void;
   deviceMode?: DeviceViewMode;
   onChangeDeviceMode?: (mode: DeviceViewMode) => void;
+  modoOfflineNomina?: boolean;
+  totalTrabajadores?: number;
+  isOnline?: boolean;
+  onToggleModoOfflineNomina?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   session,
   onLogout,
   lastSync,
-  firebaseConnected,
   autoSyncActive,
   onRefresh,
   onOpenShareModal,
   deviceMode = 'pc',
-  onChangeDeviceMode
+  onChangeDeviceMode,
+  modoOfflineNomina = false,
+  totalTrabajadores = 0,
+  isOnline = true,
+  onToggleModoOfflineNomina
 }) => {
   const [refreshing, setRefreshing] = useState(false);
 
@@ -41,25 +47,13 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="sticky top-0 z-40 shadow-md bg-gradient-to-r from-[#1b5e20] via-[#2e7d32] to-[#388e3c] text-white">
       {/* Top Session & Status Bar */}
       <div className="bg-black/25 border-b border-white/15 px-3 sm:px-4 py-1.5 flex flex-wrap justify-between items-center gap-2 text-xs">
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5">
-            <User className="w-3.5 h-3.5 text-[#a5d6a7]" />
-            <span className="font-semibold">{session.nombre}</span>
-            <span className="text-white/60">|</span>
-            <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider text-[#cbffc2]">
-              {session.rol}
-            </span>
-          </div>
-
-          {(session.horaLogin || session.horaIngreso) && (
-            <div
-              className="bg-black/35 border border-white/25 px-2.5 py-0.5 rounded-lg text-[11px] font-mono text-[#cbffc2] flex items-center gap-1.5 shadow-inner"
-              title={`Hora de Login al sistema: ${session.horaLogin || session.horaIngreso}`}
-            >
-              <Clock className="w-3.5 h-3.5 text-[#a5d6a7]" />
-              <span>Login: <strong>{session.horaLogin || session.horaIngreso}</strong></span>
-            </div>
-          )}
+        <div className="flex items-center gap-2">
+          <User className="w-3.5 h-3.5 text-[#a5d6a7]" />
+          <span className="font-semibold">{session.nombre}</span>
+          <span className="text-white/60">|</span>
+          <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider text-[#cbffc2]">
+            {session.rol}
+          </span>
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2.5 flex-wrap">
@@ -108,6 +102,52 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
+          {/* Estado de Señal / Conexión */}
+          {isOnline ? (
+            <span
+              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-950/40 text-[#cbffc2] text-[10px] font-bold border border-emerald-400/30"
+              title="Dispositivo conectado a internet"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Online</span>
+            </span>
+          ) : (
+            <span
+              className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-extrabold shadow-sm animate-bounce border border-red-300"
+              title="Dispositivo sin conexión a internet - Operando en modo fuera de línea"
+            >
+              <span className="w-2 h-2 rounded-full bg-white" />
+              <span>Sin Señal</span>
+            </span>
+          )}
+
+          {/* Control interactivo de Modo Offline para Trabajadores */}
+          {onToggleModoOfflineNomina && (
+            <button
+              type="button"
+              onClick={onToggleModoOfflineNomina}
+              className={`flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full transition-all cursor-pointer shadow-xs ${
+                modoOfflineNomina
+                  ? 'bg-amber-400 hover:bg-amber-300 text-amber-950 ring-1 ring-amber-200'
+                  : 'bg-white/15 hover:bg-white/25 text-white/90'
+              }`}
+              title={
+                modoOfflineNomina
+                  ? `🔒 Modo Offline Nómina Activo: ${totalTrabajadores} trabajadores asegurados en el dispositivo contra cortes de señal. Clic para desbloquear.`
+                  : `🔓 Modo Online Nómina: Sincronización abierta. Clic para activar Modo Offline y blindar la lista de trabajadores.`
+              }
+            >
+              <span>{modoOfflineNomina ? '🔒 Nómina Offline' : '🔓 Nómina Online'}</span>
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                  modoOfflineNomina ? 'bg-amber-950 text-white' : 'bg-white/25 text-white'
+                }`}
+              >
+                {totalTrabajadores}
+              </span>
+            </button>
+          )}
+
           {onRefresh && (
             <button
               onClick={handleRefreshClick}
@@ -118,12 +158,6 @@ export const Header: React.FC<HeaderProps> = ({
               <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin text-[#cbffc2]' : ''}`} />
               <span className="hidden md:inline">Actualizar</span>
             </button>
-          )}
-
-          {firebaseConnected && (
-            <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#ff8f00] text-black text-[10px] font-bold">
-              🔥 Firebase
-            </span>
           )}
 
           {autoSyncActive && (

@@ -53,13 +53,13 @@ import {
   isAutoSyncEnabled, 
   getLastSyncTime, 
   setLastSyncTime, 
-  getFirebaseConfig,
   cleanValidacionesList,
   purgeAllEmptyRecords,
   normalizeSupervisorKey,
-  getAuditoriaIngresos,
-  saveAuditoriaIngresos,
-  mergeAuditoriasArrays
+  isModoOfflineNomina,
+  setModoOfflineNomina,
+  getBackupOfflineTrabajadores,
+  restoreBackupOfflineTrabajadores
 } from './utils/storage';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
@@ -75,10 +75,6 @@ import { ImportarTab } from './components/ImportarTab';
 import { ConexionTab } from './components/ConexionTab';
 import { ShareAppModal } from './components/ShareAppModal';
 import { Toast, ToastMessage } from './components/Toast';
-import { 
-  subscribeToFirestoreMasterData, 
-  syncAllDataToFirestore 
-} from './lib/firebase';
 
 export default function App() {
   // Initialize storage defaults on first load
@@ -149,6 +145,8 @@ export default function App() {
 
   // Cloud Sync & Logging States
   const [lastSync, setLastSync] = useState<string | null>(() => getLastSyncTime());
+  const [isOnline, setIsOnline] = useState<boolean>(() => typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [modoOfflineNomina, setModoOfflineNominaState] = useState<boolean>(() => isModoOfflineNomina());
   const [logs, setLogs] = useState<SyncLogEntry[]>([
     {
       id: 'log_0',
@@ -191,30 +189,31 @@ export default function App() {
       saveProgramaGeneral(d.programaGeneral);
     }
     if (Array.isArray(d.trabajadores)) {
-      const seen = new Set<string>();
-      const uniqueWorkers: Trabajador[] = [];
-      d.trabajadores.forEach((t: Trabajador, i: number) => {
-        const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
-        const rawDni = String(t.dni || '').trim();
-        const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
-        if (!seen.has(key)) {
-          seen.add(key);
-          uniqueWorkers.push({
-            ...t,
-            dni: cleanDni || rawDni || String(t.dni || '').trim(),
-            nombres: t.nombres ? String(t.nombres).trim() : '',
-            supervisor: t.supervisor ? String(t.supervisor).trim() : '',
-            fundo: t.fundo ? String(t.fundo).trim() : '',
-            modulo: t.modulo ? String(t.modulo).trim() : '',
-            grupo: t.grupo ? String(t.grupo).trim() : '',
-            lider: t.lider ? String(t.lider).trim() : '',
-            fecha: t.fecha || ''
-          });
-        }
-      });
+      const offlineLocked = isModoOfflineNomina();
+      const currentWorkers = getTrabajadores();
 
-      setTrabajadoresState(uniqueWorkers);
-      saveTrabajadores(uniqueWorkers);
+      // Blindaje contra pérdida de señal y modo offline:
+      // Si el modo offline está activo, no sobreescribir la nómina local.
+      // Si la respuesta remota llega vacía por corte/intermitencia de red, preservar la nómina intacta.
+      if (offlineLocked) {
+        // Nómina blindada en este dispositivo
+      } else if (d.trabajadores.length === 0 && currentWorkers.length > 0) {
+        addLog('🛡️ Protección de nómina: Respuesta remota vacía rechazada para preservar trabajadores locales.', 'info');
+      } else {
+        const seenDni = new Set<string>();
+        const uniqueWorkers: Trabajador[] = [];
+        d.trabajadores.forEach((t: Trabajador) => {
+          const cleanDni = String(t.dni || '').trim();
+          if (cleanDni && !seenDni.has(cleanDni)) {
+            seenDni.add(cleanDni);
+            uniqueWorkers.push(t);
+          }
+        });
+        if (uniqueWorkers.length > 0 || currentWorkers.length === 0) {
+          setTrabajadoresState(uniqueWorkers);
+          saveTrabajadores(uniqueWorkers);
+        }
+      }
     }
     if (Array.isArray(d.detalleJabas)) {
       setDetalleJabasState(d.detalleJabas);
@@ -228,10 +227,6 @@ export default function App() {
     if (Array.isArray(d.usuarios) && d.usuarios.length > 0) {
       setUsuariosState(d.usuarios);
       saveUsuarios(d.usuarios);
-    }
-    if (Array.isArray(d.auditoriaIngresos)) {
-      const mergedAudit = mergeAuditoriasArrays(getAuditoriaIngresos(), d.auditoriaIngresos);
-      saveAuditoriaIngresos(mergedAudit);
     }
     if (Array.isArray(d.lideres)) {
       const uniqueLideresMap = new Map<string, Lider>();
@@ -278,6 +273,11 @@ export default function App() {
 
   // Centralized Server & Cloud Data Fetcher (Synchronizes all PCs and Mobile Users)
   const fetchCentralizedData = useCallback(async (silent = false) => {
+    // Blindaje ante fluctuaciones o pérdida de señal: no intentar peticiones cuando no hay red
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return;
+    }
+
     let fetchedFromServer = false;
 
     // 1. Try local express backend (if running in full-stack container)
@@ -312,6 +312,56 @@ export default function App() {
       }
     }
   }, [applyServerData]);
+
+  // Detección y blindaje de conectividad de red (Online / Offline)
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      addToast('📶 Conexión de red restablecida (En línea)', 'success');
+      addLog('📶 Conexión restablecida. Sincronización remota reanudada.', 'ok');
+      fetchCentralizedData(true);
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      addToast('📵 Sin conexión a internet (Modo Offline activo)', 'warning');
+      addLog('📵 Corte de señal detectado. Operando con datos locales blindados.', 'warn');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [fetchCentralizedData, addToast, addLog]);
+
+  const handleToggleModoOfflineNomina = useCallback((forcedState?: boolean) => {
+    setModoOfflineNominaState((prev) => {
+      const next = typeof forcedState === 'boolean' ? forcedState : !prev;
+      setModoOfflineNomina(next);
+      if (next) {
+        addToast('🔒 Modo Offline Nómina activado: Nómina blindada en este dispositivo contra cortes y sincronizaciones.', 'success');
+        addLog('🔒 Modo Offline Nómina activado. La nómina local queda blindada.', 'ok');
+      } else {
+        addToast('🔓 Modo Online Nómina activado: Sincronización de trabajadores abierta.', 'info');
+        addLog('🔓 Modo Online Nómina activado. Se permite actualización remota de nómina.', 'info');
+      }
+      return next;
+    });
+  }, [addToast, addLog]);
+
+  const handleRestoreBackupOffline = useCallback(() => {
+    const restored = restoreBackupOfflineTrabajadores();
+    if (restored && restored.length > 0) {
+      setTrabajadoresState(restored);
+      addToast(`✅ Respaldo offline restaurado: ${restored.length} trabajadores recuperados`, 'success');
+      addLog(`♻️ Respaldo offline de nómina restaurado con éxito (${restored.length} trabajadores).`, 'ok');
+    } else {
+      addToast('⚠️ No se encontró un respaldo offline previo en la memoria local.', 'warning');
+    }
+  }, [addToast, addLog]);
 
   // Broadcast Channel reference for instant cross-tab sync
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
@@ -399,25 +449,12 @@ export default function App() {
     window.addEventListener('focus', onFocusOrVisible);
     document.addEventListener('visibilitychange', onFocusOrVisible);
 
-    // 5. Firebase Firestore Real-Time Listener
-    let unsubscribeFirestoreMaster: (() => void) | null = null;
-    try {
-      unsubscribeFirestoreMaster = subscribeToFirestoreMasterData((firestoreData) => {
-        if (firestoreData) {
-          applyServerData(firestoreData, true);
-        }
-      });
-    } catch (err) {
-      console.warn('Firestore subscription error:', err);
-    }
-
     return () => {
       broadcastChannelRef.current?.close();
       es?.close();
       clearInterval(interval);
       window.removeEventListener('focus', onFocusOrVisible);
       document.removeEventListener('visibilitychange', onFocusOrVisible);
-      unsubscribeFirestoreMaster?.();
     };
   }, [fetchCentralizedData, applyServerData]);
 
@@ -448,25 +485,7 @@ export default function App() {
     // 1. Always sync immediately to Central Server so other PCs see it instantly
     syncToServer(updatedPayload);
 
-    // 2. Sync to Firebase Firestore in real-time
-    try {
-      const firestoreData = {
-        programas: getProgramas(),
-        programaGeneral: getProgramaGeneral(),
-        trabajadores: getTrabajadores(),
-        detalleJabas: getDetalleJabas(),
-        usuarios: getUsuarios(),
-        validaciones: getValidaciones(),
-        lideres: getLideres(),
-        grupos: getGrupos(),
-        ...updatedPayload
-      };
-      syncAllDataToFirestore(firestoreData).catch(() => {});
-    } catch {
-      // Offline fallback
-    }
-
-    // 3. Also sync to Google Sheets if configured
+    // 2. Also sync to Google Sheets if configured
     if (!isAutoSyncEnabled()) return;
     const url = getGsheetUrl();
     if (!url) return;
@@ -508,9 +527,6 @@ export default function App() {
     setProgramaGeneralState([]);
     setDetalleJabasState([]);
     setValidacionesState([]);
-    setGruposState([]);
-    setLideresState([]);
-    setReservasState([]);
     setUsuariosState(getUsuarios());
 
     // Clear central node server and wipe all backups
@@ -520,25 +536,8 @@ export default function App() {
       console.warn('Reset server api error:', e);
     }
 
-    // Clear Firebase Firestore
-    try {
-      await syncAllDataToFirestore({
-        programas: [],
-        programaGeneral: [],
-        trabajadores: [],
-        detalleJabas: [],
-        validaciones: [],
-        grupos: [],
-        lideres: [],
-        reservas: [],
-        usuarios: getUsuarios()
-      });
-    } catch (e) {
-      console.warn('Reset firestore error:', e);
-    }
-
-    addToast('🧹 Base de datos limpiada. Sin backups históricos. Listo para nómina fresca del Sheet.', 'success');
-    addLog('🧹 Base de datos y backups históricos reiniciados a cero (sin distorsión histórica)', 'ok');
+    addToast('🧹 Base de datos limpiada correctamente. Sin datos de prueba.', 'success');
+    addLog('🧹 Base de datos reiniciada a cero (sin registros de prueba)', 'ok');
   }, [addToast, addLog]);
 
 
@@ -593,55 +592,25 @@ export default function App() {
     setDetalleJabasState(mergedDetalle);
     saveDetalleJabas(mergedDetalle);
 
-    // Update full worker context (Supervisor, Fundo, Modulo, Grupo, Lider, Jabas) based on this cuadrilla record
-    const workerUpdates: Record<string, { supervisor?: string; fundo?: string; modulo?: string; grupo?: string; lider?: string; nombres?: string; fecha?: string; jabas?: number }> = {};
-    const hoy = getLocalToday();
-    const workerJabasToday: Record<string, number> = {};
-
-    mergedDetalle.forEach((d) => {
-      const dFecha = String(d.fecha || '').trim();
-      const dTimestamp = String(d.timestamp || '').slice(0, 10);
-      if (dFecha === hoy || dTimestamp === hoy) {
-        const j = Number(d.jabas) || 0;
-        if (d.dni) {
-          const cleanD = String(d.dni).replace(/\s+/g, '').trim();
-          const rawD = String(d.dni).trim();
-          if (cleanD) workerJabasToday[cleanD] = (workerJabasToday[cleanD] || 0) + j;
-          if (rawD) workerJabasToday[rawD] = (workerJabasToday[rawD] || 0) + j;
-        }
-      }
-    });
-
+    // Update full worker context (Supervisor, Fundo, Modulo, Grupo, Lider) based on this cuadrilla record
+    const workerUpdates: Record<string, { supervisor?: string; fundo?: string; modulo?: string; grupo?: string; lider?: string; nombres?: string; fecha?: string }> = {};
     newDetalleList.forEach((d) => {
       if (d.dni) {
-        const cleanD = String(d.dni).replace(/\s+/g, '').trim();
-        const rawD = String(d.dni).trim();
-        const obj = {
+        workerUpdates[d.dni] = {
           supervisor: d.supervisor,
           fundo: d.fundo,
           modulo: d.modulo,
           grupo: d.grupo,
           lider: d.lider,
           nombres: d.trabajador,
-          fecha: d.fecha || hoy,
-          jabas: Number(d.jabas) || 0
+          fecha: d.fecha || getLocalToday()
         };
-        workerUpdates[rawD] = obj;
-        if (cleanD) workerUpdates[cleanD] = obj;
-        if (d.trabajador) {
-          const normName = d.trabajador.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
-          workerUpdates[`NAME_${normName}`] = obj;
-        }
       }
     });
 
     let updatedWorkers = trabajadores.map((t) => {
-      const cleanD = String(t.dni || '').replace(/\s+/g, '').trim();
-      const rawD = String(t.dni || '').trim();
-      const normName = t.nombres ? t.nombres.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '';
-      const u = (cleanD && workerUpdates[cleanD]) || (rawD && workerUpdates[rawD]) || (t.id && workerUpdates[t.id]) || (normName && workerUpdates[`NAME_${normName}`]);
-      const currentJabasToday = (cleanD && workerJabasToday[cleanD]) || (rawD && workerJabasToday[rawD]) || 0;
-      if (u) {
+      if (workerUpdates[t.dni]) {
+        const u = workerUpdates[t.dni];
         return {
           ...t,
           supervisor: u.supervisor || t.supervisor,
@@ -649,14 +618,7 @@ export default function App() {
           modulo: u.modulo || t.modulo,
           grupo: u.grupo || t.grupo,
           lider: u.lider || t.lider,
-          fecha: u.fecha || t.fecha,
-          jabas: currentJabasToday > 0 ? currentJabasToday : ((t.jabas || 0) + (u.jabas || 0))
-        };
-      }
-      if (currentJabasToday > 0) {
-        return {
-          ...t,
-          jabas: currentJabasToday
+          fecha: u.fecha || t.fecha
         };
       }
       return t;
@@ -687,23 +649,6 @@ export default function App() {
 
     setTrabajadoresState(updatedWorkers);
     saveTrabajadores(updatedWorkers);
-
-    // Actualizar reservas de hoy vinculadas a los trabajadores guardados con jabas para marcarlas como completadas
-    const savedDnisSet = new Set(newDetalleList.map((d) => String(d.dni || '').replace(/\s+/g, '').trim()));
-    const updatedReservas = reservas.map((res) => {
-      if (res.fecha !== hoy) return res;
-      const resDnis = (res.trabajadores || []).map((tw) => String(tw.dni || '').replace(/\s+/g, '').trim());
-      const hasSavedWorker = resDnis.some((dni) => savedDnisSet.has(dni));
-      if (hasSavedWorker) {
-        return {
-          ...res,
-          estado: 'completada' as const
-        };
-      }
-      return res;
-    });
-    setReservasState(updatedReservas);
-    saveReservas(updatedReservas);
 
     let updatedProg = programas;
     if (programas.length > 0) {
@@ -991,21 +936,27 @@ export default function App() {
     addToast(`🗑️ Reserva eliminada del sistema`);
   };
 
-  const handleImportTrabajadores = (newWorkers: Trabajador[], replaceExisting: boolean = true) => {
-    const list = replaceExisting ? newWorkers : [...newWorkers, ...trabajadores];
+  const handleImportTrabajadores = (newWorkers: Trabajador[]) => {
+    const combined = [...newWorkers, ...trabajadores];
     const seenDni = new Set<string>();
     const uniqueWorkers: Trabajador[] = [];
-    list.forEach((t) => {
+    combined.forEach((t) => {
       const cleanDni = String(t.dni || '').trim();
-      const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${t.nombres}`);
-      if (!seenDni.has(key)) {
-        seenDni.add(key);
+      if (cleanDni && !seenDni.has(cleanDni)) {
+        seenDni.add(cleanDni);
         uniqueWorkers.push(t);
       }
     });
     setTrabajadoresState(uniqueWorkers);
     saveTrabajadores(uniqueWorkers);
-    addLog(`📥 ${replaceExisting ? 'Nómina diaria reemplazada' : 'Trabajadores agregados'}: ${newWorkers.length} trabajadores (${uniqueWorkers.length} total)`, 'ok');
+
+    // Bloqueo de nómina automático al cargar: blindar en Modo Offline
+    setModoOfflineNomina(true);
+    setModoOfflineNominaState(true);
+
+    addLog(`📥 Sincronizados e importados ${newWorkers.length} trabajadores en nómina (${uniqueWorkers.length} total)`, 'ok');
+    addLog(`🔒 Modo Offline activado automáticamente para blindar los ${uniqueWorkers.length} trabajadores contra cortes de red.`, 'ok');
+    addToast(`🔒 Nómina blindada en Modo Offline (${uniqueWorkers.length} trabajadores protegidos)`, 'success');
 
     // Fast-path direct push to dedicated trabajadores endpoint
     fetch('/api/trabajadores', {
@@ -1121,8 +1072,6 @@ export default function App() {
     );
   }
 
-  const fbConfig = getFirebaseConfig();
-
   return (
     <div className={`min-h-screen bg-[#f0f2f5] text-[#212121] pb-24 flex flex-col font-sans transition-all duration-300 ${
       deviceMode === 'celular' ? 'bg-[#e0e0e0]/70' : 'bg-[#f5f5f5]'
@@ -1132,12 +1081,15 @@ export default function App() {
         session={session}
         onLogout={handleLogout}
         lastSync={lastSync}
-        firebaseConnected={true}
         autoSyncActive={isAutoSyncEnabled()}
         onRefresh={() => fetchCentralizedData(false)}
         onOpenShareModal={() => setIsShareModalOpen(true)}
         deviceMode={deviceMode}
         onChangeDeviceMode={handleDeviceModeChange}
+        modoOfflineNomina={modoOfflineNomina}
+        isOnline={isOnline}
+        totalTrabajadores={trabajadores.length}
+        onToggleModoOfflineNomina={handleToggleModoOfflineNomina}
       />
 
       {/* Sub Navigation Bar */}
@@ -1204,11 +1156,14 @@ export default function App() {
             onDeleteSupervisor={handleDeleteSupervisor}
             onSaveGrupo={handleSaveGrupo}
             onSaveAvance={handleSaveAvance}
-            detalleJabas={detalleJabas}
             reservas={reservas}
             onSaveReserva={handleSaveReserva}
             onDeleteReserva={handleDeleteReserva}
             onToast={addToast}
+            modoOfflineNomina={modoOfflineNomina}
+            isOnline={isOnline}
+            onToggleModoOfflineNomina={handleToggleModoOfflineNomina}
+            onRestoreBackupOffline={handleRestoreBackupOffline}
           />
         )}
 
@@ -1257,7 +1212,6 @@ export default function App() {
             usuarios={usuarios}
             onSaveUsuarios={handleSaveUsuarios}
             onToast={addToast}
-            session={session}
           />
         )}
 
@@ -1278,6 +1232,11 @@ export default function App() {
             onToast={addToast}
             onResetData={handleResetAllData}
             onDataLoadedFromCloud={(data) => applyServerData(data, true)}
+            modoOfflineNomina={modoOfflineNomina}
+            isOnline={isOnline}
+            totalTrabajadores={trabajadores.length}
+            onToggleModoOfflineNomina={handleToggleModoOfflineNomina}
+            onRestoreBackupOffline={handleRestoreBackupOffline}
           />
         )}
       </main>

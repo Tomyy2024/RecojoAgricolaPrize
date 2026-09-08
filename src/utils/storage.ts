@@ -7,10 +7,8 @@ import {
   Lider, 
   UserSession, 
   SyncLogEntry, 
-  FirebaseConfig,
   ValidacionSupervisor,
-  ReservaCuadrilla,
-  AuditoriaIngreso
+  ReservaCuadrilla
 } from '../types';
 import { 
   INITIAL_USUARIOS, 
@@ -36,10 +34,10 @@ const KEYS = {
   AUTO_SYNC: 'recojoFrutosAutoSync',
   AUTO_SYNC_QUEUE: 'recojoFrutosAutoSyncCola',
   LAST_SYNC: 'recojoFrutosLastSync',
-  FIREBASE_CONFIG: 'recojoFrutosFirebaseConfig',
   VALIDACIONES: 'recojoFrutosValidaciones',
   RESERVAS: 'recojoFrutosReservas',
-  AUDITORIA_INGRESOS: 'recojoFrutosAuditoriaIngresos'
+  MODO_OFFLINE_NOMINA: 'recojoFrutosModoOfflineNomina',
+  BACKUP_OFFLINE_TRABAJADORES: 'recojoFrutosBackupOfflineTrabajadores'
 };
 
 // Date helpers
@@ -130,11 +128,12 @@ export function formatDateDDMMAAAA(d?: string): string {
 export function initializeStorage() {
   try {
     const WIPE_VERSION_KEY = 'recojoFrutosDataVersion';
-    const TARGET_VERSION = 'v106_wipe_historical_backups_clean_sheet_mode';
+    const TARGET_VERSION = 'v105_clean_wipe_all_backups_require_login';
     
     // Check if this browser needs a clean wipe of all backup and cached data
     if (typeof localStorage !== 'undefined' && localStorage.getItem(WIPE_VERSION_KEY) !== TARGET_VERSION) {
-      wipeAllBackupData(false);
+      wipeAllBackupData();
+      clearSession();
       localStorage.setItem(WIPE_VERSION_KEY, TARGET_VERSION);
     }
 
@@ -223,7 +222,7 @@ export function initializeStorage() {
 }
 
 // Completely wipe all backup, test, and historical data from localStorage
-export function wipeAllBackupData(clearAuth: boolean = false) {
+export function wipeAllBackupData() {
   try {
     if (typeof localStorage === 'undefined') return;
 
@@ -238,11 +237,14 @@ export function wipeAllBackupData(clearAuth: boolean = false) {
     localStorage.setItem(KEYS.GRUPOS, JSON.stringify([]));
     localStorage.setItem(KEYS.RESERVAS, JSON.stringify([]));
     localStorage.setItem(KEYS.AUTO_SYNC_QUEUE, JSON.stringify([]));
+    localStorage.setItem(KEYS.USUARIOS, JSON.stringify(INITIAL_USUARIOS));
 
-    // Reset sync timestamps so fresh sync pulls cleanly
+    // 2. Remove any old sheet URLs or sync caches that might re-import backups
+    localStorage.removeItem(KEYS.GSHEET_URL);
+    localStorage.removeItem(KEYS.AUTO_SYNC);
     localStorage.removeItem(KEYS.LAST_SYNC);
 
-    // 2. Scan and delete any ad-hoc backup keys in localStorage
+    // 3. Scan and delete any ad-hoc backup keys in localStorage
     const keysToDelete: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
@@ -261,9 +263,8 @@ export function wipeAllBackupData(clearAuth: boolean = false) {
     }
     keysToDelete.forEach(k => localStorage.removeItem(k));
 
-    if (clearAuth) {
-      clearSession();
-    }
+    // 4. Also clear session so authentication is freshly required
+    clearSession();
   } catch (e) {
     console.error('Error wiping backup data:', e);
   }
@@ -271,7 +272,7 @@ export function wipeAllBackupData(clearAuth: boolean = false) {
 
 // Reset all test records to a completely clean state
 export function resetAllData() {
-  wipeAllBackupData(false);
+  wipeAllBackupData();
 }
 
 
@@ -337,66 +338,95 @@ export function saveUsuarios(usuarios: Usuario[]) {
   localStorage.setItem(KEYS.USUARIOS, JSON.stringify(usuarios));
 }
 
-// Auditoría de Ingresos
-export function getAuditoriaIngresos(): AuditoriaIngreso[] {
+// Modo Offline Nómina & Respaldo Persistente
+export function isModoOfflineNomina(): boolean {
   try {
-    const raw = localStorage.getItem(KEYS.AUDITORIA_INGRESOS);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    const raw = localStorage.getItem(KEYS.MODO_OFFLINE_NOMINA);
+    return raw === 'true';
   } catch {
-    return [];
+    return false;
   }
 }
 
-export function saveAuditoriaIngresos(auditoria: AuditoriaIngreso[]) {
+export function setModoOfflineNomina(enabled: boolean): void {
   try {
-    localStorage.setItem(KEYS.AUDITORIA_INGRESOS, JSON.stringify(auditoria));
+    localStorage.setItem(KEYS.MODO_OFFLINE_NOMINA, String(enabled));
   } catch (e) {
-    console.error('Error saving auditoria de ingresos:', e);
+    console.warn('Error saving modo offline nómina:', e);
   }
 }
 
-export function addAuditoriaIngreso(entry: AuditoriaIngreso) {
+export interface BackupOfflineNomina {
+  fecha: string;
+  count: number;
+  trabajadores: Trabajador[];
+}
+
+export function getBackupOfflineTrabajadores(): BackupOfflineNomina | null {
   try {
-    const current = getAuditoriaIngresos();
-    // Prepend new audit entry, limit to last 1000 items
-    const updated = [entry, ...current.filter((item) => item.id !== entry.id)].slice(0, 1000);
-    saveAuditoriaIngresos(updated);
-  } catch (e) {
-    console.error('Error adding auditoria de ingreso:', e);
+    const raw = localStorage.getItem(KEYS.BACKUP_OFFLINE_TRABAJADORES);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.trabajadores) && parsed.trabajadores.length > 0) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
   }
 }
 
-export function mergeAuditoriasArrays(base: AuditoriaIngreso[], incoming: AuditoriaIngreso[]): AuditoriaIngreso[] {
-  const map = new Map<string, AuditoriaIngreso>();
-  (base || []).forEach((item) => {
-    if (item && item.id) map.set(item.id, item);
-  });
-  (incoming || []).forEach((item) => {
-    if (item && item.id) map.set(item.id, item);
-  });
-  return Array.from(map.values()).sort((a, b) => {
-    return new Date(b.timestamp || b.fecha).getTime() - new Date(a.timestamp || a.fecha).getTime();
-  });
+export function saveBackupOfflineTrabajadores(trabajadores: Trabajador[]): void {
+  try {
+    if (!Array.isArray(trabajadores) || trabajadores.length === 0) return;
+    const backup: BackupOfflineNomina = {
+      fecha: new Date().toISOString(),
+      count: trabajadores.length,
+      trabajadores
+    };
+    localStorage.setItem(KEYS.BACKUP_OFFLINE_TRABAJADORES, JSON.stringify(backup));
+  } catch (e) {
+    console.warn('Error saving offline worker backup:', e);
+  }
+}
+
+export function restoreBackupOfflineTrabajadores(): Trabajador[] | null {
+  try {
+    const backup = getBackupOfflineTrabajadores();
+    if (backup && Array.isArray(backup.trabajadores) && backup.trabajadores.length > 0) {
+      saveTrabajadores(backup.trabajadores);
+      return backup.trabajadores;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // Trabajadores
 export function getTrabajadores(): Trabajador[] {
   try {
     const raw = localStorage.getItem(KEYS.TRABAJADORES);
-    const list: Trabajador[] = raw ? JSON.parse(raw) : INITIAL_TRABAJADORES;
+    let list: Trabajador[] = raw ? JSON.parse(raw) : [];
+
+    // Auto-restauración desde respaldo offline persistente si la lista está vacía
+    if (!list || list.length === 0) {
+      const backup = getBackupOfflineTrabajadores();
+      if (backup && Array.isArray(backup.trabajadores) && backup.trabajadores.length > 0) {
+        list = backup.trabajadores;
+        localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(list));
+      } else if (!raw) {
+        list = INITIAL_TRABAJADORES;
+      }
+    }
+
     const seen = new Set<string>();
     const unique: Trabajador[] = [];
-    list.forEach((t, i) => {
-      const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
-      const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
-      if (!seen.has(key)) {
-        seen.add(key);
-        unique.push({
-          ...t,
-          dni: cleanDni || String(t.dni || '').trim()
-        });
+    list.forEach((t) => {
+      const cleanDni = String(t.dni || '').trim();
+      if (cleanDni && !seen.has(cleanDni)) {
+        seen.add(cleanDni);
+        unique.push(t);
       }
     });
     return unique;
@@ -408,18 +438,17 @@ export function getTrabajadores(): Trabajador[] {
 export function saveTrabajadores(trabajadores: Trabajador[]) {
   const seen = new Set<string>();
   const unique: Trabajador[] = [];
-  trabajadores.forEach((t, i) => {
-    const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
-    const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
-    if (!seen.has(key)) {
-      seen.add(key);
-      unique.push({
-        ...t,
-        dni: cleanDni || String(t.dni || '').trim()
-      });
+  trabajadores.forEach((t) => {
+    const cleanDni = String(t.dni || '').trim();
+    if (cleanDni && !seen.has(cleanDni)) {
+      seen.add(cleanDni);
+      unique.push(t);
     }
   });
   localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(unique));
+  if (unique.length > 0) {
+    saveBackupOfflineTrabajadores(unique);
+  }
 }
 
 // Programas
@@ -482,11 +511,9 @@ export function saveAvanceMap(map: Record<string, number>) {
 export function getGrupos(): string[] {
   try {
     const raw = localStorage.getItem(KEYS.GRUPOS);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    return raw ? JSON.parse(raw) : INITIAL_GRUPOS;
   } catch {
-    return [];
+    return INITIAL_GRUPOS;
   }
 }
 
@@ -523,7 +550,24 @@ export function getLideres(): Lider[] {
       }
     }
   } catch {}
-  return [];
+  // Default derive from trabajadores
+  const workers = getTrabajadores();
+  const liderMap = new Map<string, Lider>();
+  workers.forEach(w => {
+    const name = (w.lider || '').trim();
+    if (name) {
+      const key = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      if (!liderMap.has(key)) {
+        liderMap.set(key, {
+          lider: name,
+          dni: w.tipo === 'Líder' ? w.dni : '',
+          nombres: name,
+          fechaAlta: w.fecha ? w.fecha.slice(0, 10) : getLocalToday()
+        });
+      }
+    }
+  });
+  return Array.from(liderMap.values());
 }
 
 export function saveLideres(lideres: Lider[]) {
@@ -608,16 +652,14 @@ export function mergeReservasArrays(
       continue;
     }
 
-    // Check if there is an existing reservation with the same date, supervisor, fundo, modulo and grupo
+    // Check if there is an existing reservation with the same date, supervisor, fundo, and modulo
     const normSup = normalizeSupervisorKey(item.supervisor);
-    const itemGrp = (item.grupo || 'Grupo 01').trim().toLowerCase();
     const existingMatch = Array.from(map.values()).find(
       (e) =>
         e.fecha === item.fecha &&
         normalizeSupervisorKey(e.supervisor) === normSup &&
         e.fundo === item.fundo &&
-        e.modulo === item.modulo &&
-        (e.grupo || 'Grupo 01').trim().toLowerCase() === itemGrp
+        e.modulo === item.modulo
     );
 
     if (existingMatch) {
@@ -703,28 +745,6 @@ export function getLastSyncTime(): string | null {
 
 export function setLastSyncTime(isoDate: string) {
   localStorage.setItem(KEYS.LAST_SYNC, isoDate);
-}
-
-// Firebase Config
-export function getFirebaseConfig(): FirebaseConfig | null {
-  try {
-    const raw = localStorage.getItem(KEYS.FIREBASE_CONFIG);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.apiKey && parsed.databaseURL) return parsed;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-export function saveFirebaseConfig(cfg: FirebaseConfig | null) {
-  if (!cfg) {
-    localStorage.removeItem(KEYS.FIREBASE_CONFIG);
-  } else {
-    localStorage.setItem(KEYS.FIREBASE_CONFIG, JSON.stringify(cfg));
-  }
 }
 
 // Validaciones por Supervisor Sanitizer

@@ -1,24 +1,14 @@
 import React, { useState } from 'react';
-import { SyncLogEntry, FirebaseConfig } from '../types';
+import { SyncLogEntry } from '../types';
 import { 
   getGsheetUrl, 
   saveGsheetUrl, 
   isAutoSyncEnabled, 
   setAutoSyncEnabled, 
-  getFirebaseConfig, 
-  saveFirebaseConfig, 
   generateBackupJson, 
-  setLastSyncTime 
+  setLastSyncTime,
+  getBackupOfflineTrabajadores
 } from '../utils/storage';
-import { 
-  auth, 
-  signInWithGoogle, 
-  signInGuest, 
-  logOut as firebaseLogOut,
-  syncAllDataToFirestore,
-  fetchAllDataFromFirestore,
-  testConnection
-} from '../lib/firebase';
 import { 
   Cloud,
   Save, 
@@ -26,7 +16,6 @@ import {
   DownloadCloud, 
   CheckCircle2, 
   AlertCircle, 
-  Flame, 
   Download, 
   RefreshCw, 
   FileCode2, 
@@ -39,9 +28,10 @@ import {
   ShieldCheck,
   Table,
   Zap,
-  LogIn,
-  LogOut,
-  Database
+  Database,
+  Lock,
+  Unlock,
+  RotateCcw
 } from 'lucide-react';
 
 interface ConexionTabProps {
@@ -52,6 +42,11 @@ interface ConexionTabProps {
   onToast: (msg: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
   onResetData?: () => void;
   onDataLoadedFromCloud?: (data: any) => void;
+  modoOfflineNomina?: boolean;
+  isOnline?: boolean;
+  totalTrabajadores?: number;
+  onToggleModoOfflineNomina?: () => void;
+  onRestoreBackupOffline?: () => void;
 }
 
 
@@ -319,25 +314,14 @@ function doGet(e) {
           return y + '-' + m + '-' + d;
         }
         var str = String(val).trim();
-        if (str.indexOf('-') > -1) {
-          var parts = str.split('-');
-          if (parts.length >= 3) {
-            var yPart = parts[0].trim();
-            var mPart = ('0' + parts[1].trim()).slice(-2);
-            var dPart = ('0' + parts[2].split('T')[0].split(' ')[0].trim()).slice(-2);
-            if (yPart.length === 4) return yPart + '-' + mPart + '-' + dPart;
-            if (dPart.length === 4) return dPart + '-' + mPart + '-' + ('0' + yPart).slice(-2);
-          }
+        if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(str)) {
+          var parts = str.split(/[-/]/);
+          var dayPart = parts[2].split('T')[0].split(' ')[0];
+          return parts[0] + '-' + ('0' + parts[1]).slice(-2) + '-' + ('0' + dayPart).slice(-2);
         }
-        if (str.indexOf('/') > -1) {
+        if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(str)) {
           var sParts = str.split('/');
-          if (sParts.length >= 3) {
-            var p0 = sParts[0].trim();
-            var p1 = ('0' + sParts[1].trim()).slice(-2);
-            var p2 = sParts[2].split('T')[0].split(' ')[0].trim();
-            if (p2.length === 4) return p2 + '-' + p1 + '-' + ('0' + p0).slice(-2);
-            if (p0.length === 4) return p0 + '-' + p1 + '-' + ('0' + p2).slice(-2);
-          }
+          return sParts[2] + '-' + ('0' + sParts[1]).slice(-2) + '-' + ('0' + sParts[0]).slice(-2);
         }
         var pDate = new Date(str);
         if (!isNaN(pDate.getTime())) {
@@ -347,14 +331,6 @@ function doGet(e) {
           return py + '-' + pm + '-' + pd;
         }
         return str.split('T')[0].split(' ')[0];
-      }
-
-      function cleanDni(val) {
-        var s = String(val || '').trim();
-        if (s.slice(-2) === '.0') {
-          s = s.slice(0, -2);
-        }
-        return s;
       }
 
       // 1. Leer Registro_Avance
@@ -469,7 +445,7 @@ function doGet(e) {
       }
 
       // 5. Leer Trabajadores
-      var sheetTrab = ss.getSheetByName('Trabajadores') || ss.getSheetByName('Personal') || ss.getSheetByName('Nomina') || ss.getSheetByName('Nómina');
+      var sheetTrab = ss.getSheetByName('Trabajadores');
       if (sheetTrab && sheetTrab.getLastRow() > 1) {
         var trabValues = sheetTrab.getRange(2, 1, sheetTrab.getLastRow() - 1, 8).getValues();
         result.trabajadores = trabValues
@@ -478,14 +454,14 @@ function doGet(e) {
           })
           .map(function(r) {
             return {
-              dni: cleanDni(r[0]),
-              nombres: String(r[1] || '').trim(),
-              fundo: String(r[2] || '').trim(),
-              modulo: String(r[3] || '').trim(),
-              grupo: String(r[4] || '').trim(),
-              supervisor: String(r[5] || '').trim(),
-              lider: String(r[6] || '').trim(),
-              tipo: String(r[7] || 'Trabajador').trim()
+              dni: String(r[0] || ''),
+              nombres: String(r[1] || ''),
+              fundo: String(r[2] || ''),
+              modulo: String(r[3] || ''),
+              grupo: String(r[4] || ''),
+              supervisor: String(r[5] || ''),
+              lider: String(r[6] || ''),
+              tipo: String(r[7] || 'Trabajador')
             };
           });
       }
@@ -506,7 +482,7 @@ function doGet(e) {
       }
 
       // 7. Leer Lideres
-      var sheetLid = ss.getSheetByName('Lideres') || ss.getSheetByName('Líderes');
+      var sheetLid = ss.getSheetByName('Lideres');
       if (sheetLid && sheetLid.getLastRow() > 1) {
         var lidValues = sheetLid.getRange(2, 1, sheetLid.getLastRow() - 1, 5).getValues();
         result.lideres = lidValues
@@ -515,11 +491,11 @@ function doGet(e) {
           })
           .map(function(r) {
             return {
-              lider: String(r[0] || '').trim(),
-              dni: cleanDni(r[1]),
-              nombres: String(r[2] || '').trim(),
-              grupo: String(r[3] || '').trim(),
-              fechaAlta: String(r[4] || '').trim()
+              lider: String(r[0] || ''),
+              dni: String(r[1] || ''),
+              nombres: String(r[2] || ''),
+              grupo: String(r[3] || ''),
+              fechaAlta: String(r[4] || '')
             };
           });
       }
@@ -529,7 +505,7 @@ function doGet(e) {
       if (sheetGrp && sheetGrp.getLastRow() > 1) {
         var grpValues = sheetGrp.getRange(2, 1, sheetGrp.getLastRow() - 1, 1).getValues();
         result.grupos = grpValues.map(function(r) {
-          return String(r[0] || '').trim();
+          return String(r[0] || '');
         }).filter(function(g) { return g !== ''; });
       }
 
@@ -570,144 +546,18 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
   onManualSyncPull,
   onToast,
   onResetData,
-  onDataLoadedFromCloud
+  onDataLoadedFromCloud,
+  modoOfflineNomina = false,
+  isOnline = true,
+  totalTrabajadores = 0,
+  onToggleModoOfflineNomina,
+  onRestoreBackupOffline
 }) => {
   const [gsheetUrl, setGsheetUrl] = useState(getGsheetUrl());
   const [autoSync, setAutoSync] = useState(isAutoSyncEnabled());
-  const [fbConfigText, setFbConfigText] = useState(() => {
-    const existing = getFirebaseConfig();
-    return existing ? JSON.stringify(existing, null, 2) : '';
-  });
   const [testingConnection, setTestingConnection] = useState(false);
-  const [testingFirebase, setTestingFirebase] = useState(false);
-  const [syncingFirebase, setSyncingFirebase] = useState(false);
   const [showCodeGuide, setShowCodeGuide] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
-  const [firebaseUser, setFirebaseUser] = useState(() => auth.currentUser);
-
-  React.useEffect(() => {
-    const unsub = auth.onAuthStateChanged((user) => {
-      setFirebaseUser(user);
-    });
-    return () => unsub();
-  }, []);
-
-  const handleTestFirebase = async () => {
-    setTestingFirebase(true);
-    onAddLog('🔥 Probando conexión con Firebase Firestore (recojo-fruto-campo)...', 'info');
-    try {
-      const ok = await testConnection();
-      if (ok) {
-        onAddLog('✅ Conexión con Firebase Firestore verificada con éxito. Base de datos lista en us-east1.', 'ok');
-        onToast('✅ Firebase Firestore conectado y activo', 'success');
-      } else {
-        onAddLog('⚠️ Conexión con Firebase Firestore no disponible o en modo sin conexión.', 'err');
-        onToast('⚠️ No se pudo verificar Firebase', 'warning');
-      }
-    } catch (e: any) {
-      onAddLog(`❌ Error en Firebase: ${e.message || String(e)}`, 'err');
-      onToast('❌ Error al conectar con Firebase', 'error');
-    } finally {
-      setTestingFirebase(false);
-    }
-  };
-
-  const handlePushToFirebase = async () => {
-    setSyncingFirebase(true);
-    onAddLog('🔥 Subiendo datos locales a Firebase Firestore...', 'info');
-    try {
-      const payload = {
-        trabajadores: JSON.parse(localStorage.getItem('recojoFrutosTrabajadores') || '[]'),
-        programas: JSON.parse(localStorage.getItem('recojoFrutosProgramas') || '[]'),
-        programaGeneral: JSON.parse(localStorage.getItem('recojoFrutosProgramaGeneral') || '[]'),
-        detalleJabas: JSON.parse(localStorage.getItem('recojoFrutosDetalleJabas') || '[]'),
-        validaciones: JSON.parse(localStorage.getItem('recojoFrutosValidaciones') || '[]'),
-        grupos: JSON.parse(localStorage.getItem('recojoFrutosGrupos') || '[]'),
-        lideres: JSON.parse(localStorage.getItem('recojoFrutosLideres') || '[]'),
-        usuarios: JSON.parse(localStorage.getItem('recojoFrutosUsuarios') || '[]'),
-      };
-      await syncAllDataToFirestore(payload);
-      onAddLog('✅ Datos sincronizados y guardados en Firebase Firestore con éxito', 'ok');
-      onToast('✅ Sincronizado con Firebase Firestore', 'success');
-    } catch (e: any) {
-      onAddLog(`❌ Error al subir a Firebase: ${e.message || String(e)}`, 'err');
-      onToast('❌ Error al sincronizar con Firebase', 'error');
-    } finally {
-      setSyncingFirebase(false);
-    }
-  };
-
-  const handlePullFromFirebase = async () => {
-    setSyncingFirebase(true);
-    onAddLog('🔥 Descargando datos desde Firebase Firestore...', 'info');
-    try {
-      const data = await fetchAllDataFromFirestore();
-      if (data && onDataLoadedFromCloud) {
-        onDataLoadedFromCloud(data);
-        onAddLog('✅ Datos de Firebase Firestore aplicados con éxito al sistema local', 'ok');
-        onToast('✅ Datos descargados de Firebase', 'success');
-      } else if (!data) {
-        onAddLog('ℹ️ No se encontraron datos en Firebase Firestore aún. Puedes hacer "Subir Todo".', 'info');
-        onToast('ℹ️ Firebase sin datos previos', 'info');
-      }
-    } catch (e: any) {
-      onAddLog(`❌ Error al descargar de Firebase: ${e.message || String(e)}`, 'err');
-      onToast('❌ Error al consultar Firebase', 'error');
-    } finally {
-      setSyncingFirebase(false);
-    }
-  };
-
-  const handleGoogleSignIn = async () => {
-    try {
-      const user = await signInWithGoogle();
-      onAddLog(`✅ Sesión iniciada con Google en Firebase: ${user.email}`, 'ok');
-      onToast(`✅ Conectado como ${user.email}`, 'success');
-    } catch (e: any) {
-      const code = e?.code || '';
-      const msg = e?.message || String(e);
-      let userFriendlyMsg = 'No se completó el inicio con Google.';
-
-      if (code === 'auth/unauthorized-domain') {
-        userFriendlyMsg = 'Dominio no autorizado en Firebase Console (Authentication > Sign-in method > Authorized domains).';
-        onAddLog(`⚠️ Firebase Auth: El dominio actual no está en la lista de "Authorized Domains" de Firebase Console. Agrega este dominio en la consola de Firebase o usa la app directamente (Firestore funciona sin requerir login).`, 'err');
-      } else if (code === 'auth/popup-blocked') {
-        userFriendlyMsg = 'El navegador bloqueó la ventana emergente. Ábrela en una pestaña nueva o permite popups.';
-        onAddLog(`⚠️ Ventana emergente bloqueada por el navegador o por el visor (iframe).`, 'err');
-      } else if (code === 'auth/popup-closed-by-user') {
-        userFriendlyMsg = 'Se cerró la ventana de Google antes de finalizar.';
-        onAddLog(`ℹ️ Ventana de inicio de sesión cerrada por el usuario.`, 'info');
-      } else if (code === 'auth/operation-not-allowed') {
-        userFriendlyMsg = 'El proveedor Google no está habilitado en Firebase Authentication.';
-        onAddLog(`⚠️ Ve a Firebase Console > Authentication > Sign-in method y habilita "Google".`, 'err');
-      } else {
-        onAddLog(`⚠️ Error al autenticar con Google (${code || 'desconocido'}): ${msg}`, 'err');
-      }
-
-      onToast(`⚠️ ${userFriendlyMsg}`, 'warning');
-    }
-  };
-
-  const handleAnonymousSignIn = async () => {
-    try {
-      const user = await signInGuest();
-      onAddLog(`✅ Conectado a Firebase en modo invitado/dispositivo: ${user.uid.slice(0, 8)}...`, 'ok');
-      onToast('✅ Conectado a Firebase', 'success');
-    } catch (e: any) {
-      onAddLog(`⚠️ Error en modo invitado: ${e.message || String(e)}`, 'err');
-      onToast('⚠️ No se pudo conectar como invitado', 'warning');
-    }
-  };
-
-  const handleFirebaseLogout = async () => {
-    try {
-      await firebaseLogOut();
-      onAddLog('Sesión de Google en Firebase cerrada.', 'info');
-      onToast('Sesión de Firebase cerrada', 'info');
-    } catch (e: any) {
-      onToast('Error al cerrar sesión', 'error');
-    }
-  };
 
   const handleSaveGsheetUrl = () => {
     const trimmed = gsheetUrl.trim();
@@ -811,98 +661,112 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* Firebase Firestore Cloud Card */}
-      <div className="bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-emerald-500/10 rounded-2xl shadow-sm border border-amber-300/60 p-4 sm:p-6">
-        <div className="flex flex-wrap items-center justify-between pb-3 border-b border-amber-200/60 mb-4 gap-2">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white shadow-sm">
-              <Flame className="w-5 h-5" />
+      {/* Tarjeta: Modo Offline para Trabajadores (Blindaje de Nómina y Caché Persistente) */}
+      {(() => {
+        const offlineBackup = getBackupOfflineTrabajadores();
+        return (
+          <div className="bg-white rounded-2xl shadow-sm border border-[#e0e0e0] p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#f0f0f0] mb-4">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                    modoOfflineNomina ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-[#1b5e20]'
+                  }`}
+                >
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-base sm:text-lg font-bold text-[#1b5e20]">
+                      Modo Offline para Trabajadores (Blindaje de Nómina)
+                    </h2>
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold uppercase ${
+                        modoOfflineNomina ? 'bg-amber-600 text-white' : 'bg-emerald-700 text-white'
+                      }`}
+                    >
+                      {modoOfflineNomina ? 'Modo Offline Activo' : 'Modo Online Activo'}
+                    </span>
+                    {isOnline ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>Conexión de Red OK</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded-full border border-red-200 animate-bounce">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                        <span>Sin Señal (Offline)</span>
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-[#757575]">
+                    Protege tu lista de personal contra fluctuaciones, cortes de señal o respuestas vacías del servidor.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {onToggleModoOfflineNomina && (
+                  <button
+                    type="button"
+                    onClick={onToggleModoOfflineNomina}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer ${
+                      modoOfflineNomina
+                        ? 'bg-amber-500 hover:bg-amber-600 text-amber-950'
+                        : 'bg-[#2e7d32] hover:bg-[#1b5e20] text-white'
+                    }`}
+                  >
+                    {modoOfflineNomina ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                    <span>{modoOfflineNomina ? 'DESACTIVAR BLOQUEO' : 'ACTIVAR MODO OFFLINE'}</span>
+                  </button>
+                )}
+              </div>
             </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-amber-950 flex items-center gap-2">
-                Firebase Firestore Cloud
-                <span className="text-[10px] bg-amber-600 text-white px-2 py-0.5 rounded-full font-extrabold uppercase">
-                  Activo
+
+            {/* Resumen del Blindaje */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4 text-xs">
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                <span className="text-gray-500 block text-[11px]">Nómina Activa en Memoria:</span>
+                <span className="text-base font-extrabold text-[#1b5e20]">{totalTrabajadores} trabajadores</span>
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                <span className="text-gray-500 block text-[11px]">Caché de Respaldo Persistente:</span>
+                <span className="text-base font-extrabold text-amber-800">
+                  {offlineBackup ? `${offlineBackup.count} trabajadores` : 'Sin respaldo previo'}
                 </span>
-              </h2>
-              <p className="text-xs text-amber-900/80">
-                Base de datos en la nube en tiempo real (Proyecto: <strong>recojo-fruto-campo</strong> · Región: <strong>us-east1</strong>)
-              </p>
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                <span className="text-gray-500 block text-[11px]">Último Respaldo Automático:</span>
+                <span className="text-xs font-bold text-gray-800">
+                  {offlineBackup ? new Date(offlineBackup.fecha).toLocaleString() : 'No registrado'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#f1f8e9]/60 border border-[#c8e6c9] rounded-xl p-3 text-xs text-[#1b5e20]">
+              <div className="flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 text-[#2e7d32] shrink-0 mt-0.5" />
+                <p>
+                  <strong>Blindaje ante reconexión:</strong> Si la señal se interrumpe y se reconecta, o si Google Sheets devuelve una lista vacía por latencia, el sistema preserva intacta la nómina de trabajadores cargada en el dispositivo.
+                </p>
+              </div>
+
+              {onRestoreBackupOffline && (
+                <button
+                  type="button"
+                  onClick={onRestoreBackupOffline}
+                  className="bg-white hover:bg-emerald-50 text-[#1b5e20] border border-[#a5d6a7] px-3 py-1.5 rounded-xl font-bold flex items-center justify-center gap-1.5 cursor-pointer shrink-0 transition-all shadow-2xs"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Restaurar Respaldo Offline</span>
+                </button>
+              )}
             </div>
           </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {firebaseUser ? (
-              <div className="flex items-center gap-2 bg-white/90 border border-amber-300 px-3 py-1 rounded-full text-xs font-semibold text-amber-900 shadow-sm">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="max-w-[160px] truncate">{firebaseUser.email || `Dispositivo (${firebaseUser.uid.slice(0, 6)})`}</span>
-                <button
-                  onClick={handleFirebaseLogout}
-                  className="text-amber-800 hover:text-red-700 ml-1 font-bold cursor-pointer"
-                  title="Cerrar sesión de Firebase"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={handleGoogleSignIn}
-                  className="bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
-                  title="Iniciar sesión con tu cuenta de Google"
-                >
-                  <LogIn className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Acceder con Google</span>
-                </button>
-                <button
-                  onClick={handleAnonymousSignIn}
-                  className="bg-amber-100/80 hover:bg-amber-200/80 text-amber-900 border border-amber-300 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer"
-                  title="Conectar sesión de este dispositivo a Firebase"
-                >
-                  <span>Conectar Dispositivo</span>
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Firebase Quick Actions */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-4">
-          <button
-            onClick={handlePushToFirebase}
-            disabled={syncingFirebase}
-            className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white p-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
-          >
-            <UploadCloud className={`w-4 h-4 ${syncingFirebase ? 'animate-bounce' : ''}`} />
-            <span>🔥 Subir Todo a Firebase</span>
-          </button>
-
-          <button
-            onClick={handlePullFromFirebase}
-            disabled={syncingFirebase}
-            className="bg-white hover:bg-amber-50 border border-amber-300 text-amber-900 p-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
-          >
-            <DownloadCloud className={`w-4 h-4 ${syncingFirebase ? 'animate-bounce' : ''}`} />
-            <span>📥 Descargar de Firebase</span>
-          </button>
-
-          <button
-            onClick={handleTestFirebase}
-            disabled={testingFirebase}
-            className="bg-white hover:bg-gray-50 border border-amber-300 text-amber-950 p-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
-          >
-            <RefreshCw className={`w-4 h-4 ${testingFirebase ? 'animate-spin text-amber-600' : ''}`} />
-            <span>🔍 Probar Firebase</span>
-          </button>
-        </div>
-
-        <div className="bg-white/60 border border-amber-200/80 rounded-xl p-3 text-xs text-amber-950 flex items-start gap-2">
-          <Zap className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-          <p>
-            <strong>Sincronización en vivo:</strong> Cualquier escaneo de jabas, validación de supervisor o cambio en el programa se sincroniza de forma automática con Firestore para que todos los dispositivos vean los mismos datos al instante.
-          </p>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* Google Sheets Connection Card */}
       <div className="bg-white rounded-2xl shadow-sm border border-[#e0e0e0] p-4 sm:p-6">
@@ -983,46 +847,32 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
           </button>
         </div>
 
-        {/* Action Button: Limpiar Datos y Tomar del Sheet */}
+        {/* Action Button: Limpiar Datos de Prueba */}
         {onResetData && (
           <div className="bg-red-50/70 border border-red-200 p-3 sm:p-4 rounded-xl mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-xs sm:text-sm text-red-800">
-                  🧹 Borrar Backups Históricos (Evitar Distorsión de Nómina)
+                  🧹 Limpiar Base de Datos (Sin Datos de Prueba)
                 </span>
                 <span className="text-[10px] bg-red-600 text-white px-2 py-0.2 rounded-full font-bold uppercase">
-                  Limpieza Total
+                  Paso 2
                 </span>
               </div>
               <p className="text-xs text-red-600 mt-0.5 max-w-lg">
-                Elimina todos los respaldos locales, de servidor y Firebase para que el sistema tome al 100% la nómina de trabajadores, grupos y líderes desde tu Google Sheet cada día.
+                Elimina todos los registros y pruebas para iniciar operaciones en blanco en todas las computadoras y celulares.
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  if (window.confirm('¿Estás seguro de borrar todos los registros y backups históricos? El sistema quedará listo en blanco para tomar los datos limpios de tu Google Sheet.')) {
-                    onResetData();
-                  }
-                }}
-                className="bg-red-600 hover:bg-red-700 active:bg-red-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer whitespace-nowrap"
-              >
-                🧹 Limpiar Todo
-              </button>
-              <button
-                onClick={async () => {
-                  if (window.confirm('¿Borrar backups históricos y descargar inmediatamente la nómina fresca desde Google Sheets?')) {
-                    onResetData();
-                    await onManualSyncPull();
-                  }
-                }}
-                className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>📥 Limpiar y Cargar del Sheet</span>
-              </button>
-            </div>
+            <button
+              onClick={() => {
+                if (window.confirm('¿Estás seguro de limpiar todos los registros y datos de prueba? Esta acción dejará el sistema en blanco y sincronizado para todos los usuarios.')) {
+                  onResetData();
+                }
+              }}
+              className="bg-red-600 hover:bg-red-700 active:bg-red-800 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer whitespace-nowrap"
+            >
+              🧹 Limpiar Todo
+            </button>
           </div>
         )}
 
