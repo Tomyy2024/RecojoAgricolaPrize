@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Trabajador, UserSession } from '../types';
-import { FileUp, FileText, Check, X, UploadCloud, AlertTriangle, Eye, ShieldCheck, Lock, Trash2, ShieldAlert } from 'lucide-react';
+import { FileUp, FileText, Check, X, UploadCloud, AlertTriangle, Eye, ShieldCheck, Lock, Trash2, ShieldAlert, ArrowRight, UserCheck } from 'lucide-react';
 import { getLocalToday, normalizeDateString } from '../utils/storage';
 
 interface ImportarTabProps {
@@ -11,6 +11,7 @@ interface ImportarTabProps {
   offlineNomina?: boolean;
   onToggleOfflineNomina?: (val?: boolean) => void;
   onDepurarTrabajadoresAyer?: () => void;
+  onNavigateToGruposLideres?: () => void;
 }
 
 export const ImportarTab: React.FC<ImportarTabProps> = ({
@@ -20,7 +21,8 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
   onToast,
   offlineNomina = true,
   onToggleOfflineNomina,
-  onDepurarTrabajadoresAyer
+  onDepurarTrabajadoresAyer,
+  onNavigateToGruposLideres
 }) => {
   const isAdmin = session?.rol === 'Administrador';
   const hoyStr = getLocalToday();
@@ -68,16 +70,21 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
         const fundo = cols[2] || 'Arena Azul';
         const modulo = cols[3] || 'M01';
         const supervisor = cols[4] || 'General';
-        const grupo = cols[5] || 'Grupo 01';
+        const grupo = cols[5] || '';
+        const lider = cols[6] || '';
+
+        // Preservar grupo/líder existente si el trabajador ya estaba registrado
+        const existing = trabajadores.find((t) => String(t.dni).trim() === dni);
 
         if (dni) {
           list.push({
             dni,
             nombres: nombres || `TRABAJADOR ${dni}`,
-            fundo,
-            modulo,
-            supervisor,
-            grupo,
+            fundo: fundo || existing?.fundo || 'Arena Azul',
+            modulo: modulo || existing?.modulo || 'M01',
+            supervisor: supervisor || existing?.supervisor || 'General',
+            grupo: grupo || existing?.grupo || '',
+            lider: lider || existing?.lider || '',
             tipo: 'Cosechador',
             jabas: 0
           });
@@ -136,6 +143,7 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
             modulo: p.modulo,
             supervisor: p.supervisor,
             grupo: p.grupo,
+            lider: (p as any).lider || '',
             tipo: p.tipo,
             jabas: 0
           });
@@ -154,6 +162,7 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
             modulo: p.modulo,
             supervisor: p.supervisor,
             grupo: p.grupo,
+            lider: (p as any).lider || '',
             tipo: p.tipo,
             jabas: 0
           });
@@ -188,22 +197,41 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-2xl shadow-sm border border-[#e0e0e0] p-4 sm:p-6">
-        <div className="flex items-center justify-between pb-3 border-b border-[#f0f0f0] mb-4">
-          <div className="flex items-center gap-2">
-            <FileUp className="w-5 h-5 text-[#2e7d32]" />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#f0f0f0] mb-4 gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-800 flex items-center justify-center shrink-0 border border-emerald-200">
+              <FileUp className="w-5 h-5 text-[#2e7d32]" />
+            </div>
             <div>
-              <h2 className="text-base sm:text-lg font-bold text-[#1b5e20]">
-                Importación Masiva de Trabajadores
-              </h2>
-              <p className="text-xs text-[#757575]">
-                Carga de nómina mediante archivo CSV o pegado directo de columnas
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 uppercase tracking-wider">
+                  Hoja 1
+                </span>
+                <h2 className="text-base sm:text-lg font-bold text-[#1b5e20]">
+                  Carga de Trabajadores (Nómina Base)
+                </h2>
+              </div>
+              <p className="text-xs text-[#757575] mt-0.5">
+                Carga exclusiva de la nómina de trabajadores (DNI y Nombres) sin mover cuadrillas
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="bg-[#e8f5e9] text-[#1b5e20] font-bold text-xs px-2.5 py-1 rounded-full border border-[#a5d6a7]">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="bg-[#e8f5e9] text-[#1b5e20] font-bold text-xs px-2.5 py-1.5 rounded-xl border border-[#a5d6a7]">
               {trabajadores.length} Registrados
             </span>
+            {onNavigateToGruposLideres && (
+              <button
+                type="button"
+                onClick={onNavigateToGruposLideres}
+                className="bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs px-3 py-1.5 rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                title="Ir a la Hoja 2 para organizar y asignar Grupo y Líder"
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Hoja 2: Grupos y Líderes</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
 

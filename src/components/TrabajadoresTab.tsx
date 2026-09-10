@@ -2045,8 +2045,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         </button>
       </div>
 
-      {/* Banner de Control Modo Offline / Nómina Blindada (Solo visible para Administrador) */}
-      {isAdmin && (
+      {/* Banner de Control Modo Offline / Nómina Blindada (Visible para Administrador y Trabajador) */}
+      {(isAdmin || session?.rol === 'Trabajador') && (
         <div className={`rounded-xl p-3 sm:p-4 border transition-all shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
           offlineNomina
             ? 'bg-amber-50/90 border-amber-300 text-amber-950'

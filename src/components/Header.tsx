@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserSession, DeviceViewMode } from '../types';
-import { LogOut, User, Sprout, Cloud, RefreshCw, QrCode, Smartphone, Monitor, Clock, ShieldCheck, Wifi, WifiOff } from 'lucide-react';
+import { LogOut, User, Sprout, Cloud, RefreshCw, QrCode, Smartphone, Monitor, Clock, ShieldCheck, Lock, Wifi, WifiOff } from 'lucide-react';
 
 interface HeaderProps {
   session: UserSession;
@@ -105,6 +105,38 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
+          {/* Botón / Indicador de Bloquear Nómina (Disponible para Administrador y Trabajador) */}
+          {onToggleOfflineNomina && (
+            <button
+              type="button"
+              onClick={onToggleOfflineNomina}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold transition-all active:scale-95 cursor-pointer shadow-sm ${
+                offlineNomina
+                  ? 'bg-amber-400 text-amber-950 hover:bg-amber-300 border border-amber-300 ring-1 ring-amber-400/40'
+                  : 'bg-white/15 text-white/90 hover:bg-white/25 border border-white/20'
+              }`}
+              title={
+                offlineNomina
+                  ? 'Modo Offline Nómina ACTIVO (Nómina Bloqueada): Los trabajadores no se reinician ni re-sincronizan ante cortes de señal. Click para desbloquear.'
+                  : 'Nómina Desbloqueada: Click para Bloquear Nómina en este dispositivo y evitar alteraciones de red.'
+              }
+            >
+              {offlineNomina ? (
+                <Lock className="w-3.5 h-3.5 text-amber-950" />
+              ) : (
+                <ShieldCheck className="w-3.5 h-3.5 text-[#cbffc2]" />
+              )}
+              <span>{offlineNomina ? '🔒 Nómina Bloqueada' : 'Bloquear Nómina'}</span>
+              {typeof trabajadoresCount === 'number' && trabajadoresCount > 0 && (
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
+                  offlineNomina ? 'bg-amber-900/30 text-amber-950' : 'bg-black/30 text-white'
+                }`}>
+                  {trabajadoresCount}
+                </span>
+              )}
+            </button>
+          )}
+
           {/* Indicador de Señal de Red */}
           <span
             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -117,34 +149,6 @@ export const Header: React.FC<HeaderProps> = ({
             {isOnline ? <Wifi className="w-3 h-3 text-emerald-300" /> : <WifiOff className="w-3 h-3 text-rose-300" />}
             <span className="hidden sm:inline">{isOnline ? 'Online' : 'Sin Señal'}</span>
           </span>
-
-          {/* Botón / Indicador de Modo Offline Nómina (Paso 2) - Solo Administrador */}
-          {session?.rol === 'Administrador' && onToggleOfflineNomina && (
-            <button
-              type="button"
-              onClick={onToggleOfflineNomina}
-              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold transition-all active:scale-95 cursor-pointer shadow-sm ${
-                offlineNomina
-                  ? 'bg-amber-400 text-amber-950 hover:bg-amber-300 border border-amber-300'
-                  : 'bg-white/15 text-white/90 hover:bg-white/25 border border-white/20'
-              }`}
-              title={
-                offlineNomina
-                  ? 'Modo Offline Nómina ACTIVO: Los trabajadores no se reinician ni re-sincronizan ante cortes de señal. Click para cambiar.'
-                  : 'Modo Online Nómina: Se permite sincronizar trabajadores con el servidor. Click para activar Modo Offline fijo.'
-              }
-            >
-              <ShieldCheck className={`w-3.5 h-3.5 ${offlineNomina ? 'text-amber-950' : 'text-[#cbffc2]'}`} />
-              <span>{offlineNomina ? '🔒 Nómina Offline' : '🌐 Nómina Sinc.'}</span>
-              {typeof trabajadoresCount === 'number' && trabajadoresCount > 0 && (
-                <span className={`text-[10px] px-1 py-0.2 rounded-full font-mono font-black ${
-                  offlineNomina ? 'bg-amber-900/30 text-amber-950' : 'bg-black/30 text-white'
-                }`}>
-                  {trabajadoresCount}
-                </span>
-              )}
-            </button>
-          )}
 
           {onOpenShareModal && (
             <button

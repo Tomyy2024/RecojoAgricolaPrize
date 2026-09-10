@@ -9,6 +9,7 @@ import {
   FileSpreadsheet, 
   UserCog, 
   FileUp, 
+  UserCheck,
   Cloud 
 } from 'lucide-react';
 
@@ -71,9 +72,15 @@ const TABS: TabConfig[] = [
   },
   {
     id: 'importar',
-    label: 'Importar',
+    label: 'Carga Nómina',
     icon: <FileUp className="w-5 h-5" />,
     roles: ['Administrador']
+  },
+  {
+    id: 'gruposLideres',
+    label: 'Grupos/Líder',
+    icon: <UserCheck className="w-5 h-5" />,
+    roles: ['Administrador', 'Supervisor']
   },
   {
     id: 'conexion',

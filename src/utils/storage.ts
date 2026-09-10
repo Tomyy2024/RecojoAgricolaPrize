@@ -544,6 +544,41 @@ export function saveTrabajadores(trabajadores: Trabajador[]) {
 }
 
 /**
+ * Actualiza únicamente el grupo y/o líder de trabajadores existentes en la nómina,
+ * sin alterar la carga base de nómina (DNI, nombres, fecha, etc.).
+ */
+export function actualizarGruposYLideresTrabajadores(
+  asignaciones: { dni: string; grupo?: string; lider?: string }[]
+): Trabajador[] {
+  const current = getTrabajadores();
+  if (!Array.isArray(asignaciones) || asignaciones.length === 0) return current;
+
+  const mapAsign = new Map<string, { grupo?: string; lider?: string }>();
+  asignaciones.forEach((a) => {
+    const cleanDni = String(a.dni || '').replace(/\D/g, '').trim();
+    if (cleanDni) {
+      mapAsign.set(cleanDni, a);
+    }
+  });
+
+  const updated = current.map((t) => {
+    const cleanDni = String(t.dni || '').replace(/\D/g, '').trim();
+    const asig = mapAsign.get(cleanDni);
+    if (asig) {
+      return {
+        ...t,
+        grupo: asig.grupo !== undefined ? asig.grupo : (t.grupo || ''),
+        lider: asig.lider !== undefined ? asig.lider : (t.lider || '')
+      };
+    }
+    return t;
+  });
+
+  saveTrabajadores(updated);
+  return updated;
+}
+
+/**
  * Depura los trabajadores de la nómina del día anterior o días previos.
  * Garantiza que no se queden guardados en la memoria local ni en el caché offline.
  */

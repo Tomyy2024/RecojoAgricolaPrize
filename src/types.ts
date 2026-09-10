@@ -193,6 +193,7 @@ export type TabId =
   | 'reportes'
   | 'usuarios'
   | 'importar'
+  | 'gruposLideres'
   | 'conexion';
 
 export type DeviceViewMode = 'pc' | 'celular';

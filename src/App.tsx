@@ -77,6 +77,7 @@ import { DashboardTab } from './components/DashboardTab';
 import { ReportesTab } from './components/ReportesTab';
 import { UsuariosTab } from './components/UsuariosTab';
 import { ImportarTab } from './components/ImportarTab';
+import { GruposLideresTab } from './components/GruposLideresTab';
 import { ConexionTab } from './components/ConexionTab';
 import { ShareAppModal } from './components/ShareAppModal';
 import { Toast, ToastMessage } from './components/Toast';
@@ -236,12 +237,20 @@ export default function App() {
       // 1. Si el Modo Offline está activo y ya hay trabajadores en local, NUNCA sobreescribir salvo que sea una depuración explícita del Administrador.
       // 2. Si el servidor o la red devuelve un arreglo vacío (0 trabajadores), NUNCA borrar los trabajadores existentes salvo depuración explícita.
       if (isLocked && currentWorkers.length > 0 && !isExplicitPurge) {
-        // Nómina blindada: no se altera por respuestas del servidor
+        // Nómina blindada: no se altera por respuestas del servidor ni de Google Sheets
       } else if (d.trabajadores.length === 0 && currentWorkers.length > 0 && !isExplicitPurge) {
         // Preservar nómina local ante respuestas vacías por fluctuaciones de señal
       } else {
         const userRol = getSession()?.rol;
         const hoy = getLocalToday();
+
+        // Mapa de trabajadores locales existentes para preservar siempre el grupo y líder asignado
+        const localWorkersMap = new Map<string, Trabajador>();
+        currentWorkers.forEach((lw) => {
+          const cDni = String(lw.dni || '').replace(/\s+/g, '').trim();
+          if (cDni) localWorkersMap.set(cDni, lw);
+          if (lw.id) localWorkersMap.set(lw.id, lw);
+        });
 
         // Para rol Trabajador, filtrar registros de días anteriores
         const rawList = userRol === 'Trabajador'
@@ -258,18 +267,25 @@ export default function App() {
           const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
           const rawDni = String(t.dni || '').trim();
           const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+
+          // Buscar si el trabajador ya existía en local para no pisar su grupo o líder si la hoja de Drive viene vacía
+          const existingLocal = (cleanDni ? localWorkersMap.get(cleanDni) : null) || (t.id ? localWorkersMap.get(t.id) : null);
+          const grupoFinal = (t.grupo ? String(t.grupo).trim() : '') || (existingLocal?.grupo ? String(existingLocal.grupo).trim() : '');
+          const liderFinal = (t.lider ? String(t.lider).trim() : '') || (existingLocal?.lider ? String(existingLocal.lider).trim() : '');
+          const supFinal = (t.supervisor ? String(t.supervisor).trim() : '') || (existingLocal?.supervisor ? String(existingLocal.supervisor).trim() : '');
+
           if (!seen.has(key)) {
             seen.add(key);
             uniqueWorkers.push({
               ...t,
               dni: cleanDni || rawDni || String(t.dni || '').trim(),
               nombres: t.nombres ? String(t.nombres).trim() : '',
-              supervisor: t.supervisor ? String(t.supervisor).trim() : '',
-              fundo: t.fundo ? String(t.fundo).trim() : '',
-              modulo: t.modulo ? String(t.modulo).trim() : '',
-              grupo: t.grupo ? String(t.grupo).trim() : '',
-              lider: t.lider ? String(t.lider).trim() : '',
-              fecha: t.fecha || ''
+              supervisor: supFinal,
+              fundo: t.fundo ? String(t.fundo).trim() : (existingLocal?.fundo || ''),
+              modulo: t.modulo ? String(t.modulo).trim() : (existingLocal?.modulo || ''),
+              grupo: grupoFinal,
+              lider: liderFinal,
+              fecha: t.fecha || (existingLocal?.fecha || '')
             });
           }
         });
@@ -372,7 +388,12 @@ export default function App() {
           if (gRes.ok) {
             const gJson = await gRes.json();
             if (gJson && gJson.status === 'ok' && gJson.data) {
-              applyServerData(gJson.data, silent);
+              const gData = gJson.data;
+              const currentLocal = getTrabajadores();
+              if (currentLocal.length > 0) {
+                gData.trabajadores = currentLocal;
+              }
+              applyServerData(gData, silent);
             }
           }
         } catch {
@@ -535,9 +556,16 @@ export default function App() {
         const json = await res.json();
         if (json && json.status === 'ok' && json.data) {
           const d = json.data;
+          // CRITICAL: Si ya existen trabajadores activos en el dispositivo,
+          // NUNCA permitir que la hoja 'Trabajadores' de Google Drive sobreescriba la nómina activa del día
+          const currentLocal = getTrabajadores();
+          if (currentLocal.length > 0) {
+            d.trabajadores = currentLocal;
+          }
           applyServerData(d, true);
           addLog('☁️ Datos sincronizados automáticamente con Google Sheets', 'ok');
-          syncToServer(d);
+          // Enviar al servidor central asegurando que la nómina local activa no sea pisada por la hoja de Drive
+          syncToServer({ ...d, trabajadores: getTrabajadores() });
         }
       } catch {
         // Silently use offline cache
@@ -971,6 +999,28 @@ export default function App() {
     }
   };
 
+  const handleDeleteGrupo = (grupoToDelete: string) => {
+    const clean = (grupoToDelete || '').trim();
+    if (!clean) return;
+    const updated = grupos.filter((g) => g.trim().toLowerCase() !== clean.toLowerCase());
+    setGruposState(updated);
+    saveGrupos(updated);
+
+    // Remove this group from workers who were in this group
+    const updatedWorkers = trabajadores.map((t) => {
+      if ((t.grupo || '').trim().toLowerCase() === clean.toLowerCase()) {
+        return { ...t, grupo: '' };
+      }
+      return t;
+    });
+    setTrabajadoresState(updatedWorkers);
+    saveTrabajadores(updatedWorkers);
+
+    addLog(`🗑️ Grupo eliminado: ${clean}`, 'warn');
+    triggerAutoSync('Eliminar Grupo', { grupos: updated, trabajadores: updatedWorkers });
+    addToast(`🗑️ Grupo "${clean}" eliminado`);
+  };
+
   const handleSaveSupervisor = (supervisorName: string) => {
     const cleanName = supervisorName.trim();
     if (!cleanName) return;
@@ -1257,8 +1307,12 @@ export default function App() {
 
       if (json && json.status === 'ok' && json.data) {
         const d = json.data;
+        const currentLocal = getTrabajadores();
+        if (currentLocal.length > 0) {
+          d.trabajadores = currentLocal;
+        }
         applyServerData(d, false);
-        syncToServer(d);
+        syncToServer({ ...d, trabajadores: getTrabajadores() });
         addToast('✅ Descarga desde Google Sheets completada');
       } else {
         throw new Error('Respuesta no válida');
@@ -1438,6 +1492,23 @@ export default function App() {
             offlineNomina={offlineNomina}
             onToggleOfflineNomina={handleToggleOfflineNomina}
             onDepurarTrabajadoresAyer={handleDepurarTrabajadoresAyer}
+            onNavigateToGruposLideres={() => setActiveTab('gruposLideres')}
+          />
+        )}
+
+        {activeTab === 'gruposLideres' && (
+          <GruposLideresTab
+            session={session}
+            trabajadores={trabajadores}
+            grupos={grupos}
+            lideres={lideres}
+            onSaveGrupo={handleSaveGrupo}
+            onDeleteGrupo={handleDeleteGrupo}
+            onSaveLider={handleSaveLider}
+            onDeleteLider={handleDeleteLider}
+            onUpdateTrabajadores={handleUpdateTrabajadores}
+            onToast={addToast}
+            onNavigateToCargaNomina={() => setActiveTab('importar')}
           />
         )}
 
