@@ -118,8 +118,8 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="hidden sm:inline">{isOnline ? 'Online' : 'Sin Señal'}</span>
           </span>
 
-          {/* Botón / Indicador de Modo Offline Nómina (Paso 2) */}
-          {onToggleOfflineNomina && (
+          {/* Botón / Indicador de Modo Offline Nómina (Paso 2) - Solo Administrador */}
+          {session?.rol === 'Administrador' && onToggleOfflineNomina && (
             <button
               type="button"
               onClick={onToggleOfflineNomina}

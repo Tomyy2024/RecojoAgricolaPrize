@@ -62,7 +62,9 @@ import {
   mergeAuditoriasArrays,
   isOfflineNominaLocked,
   setOfflineNominaLocked,
-  restoreTrabajadoresFromOfflineCache
+  restoreTrabajadoresFromOfflineCache,
+  depurarTrabajadoresDiaAnterior,
+  normalizeDateString
 } from './utils/storage';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
@@ -228,18 +230,31 @@ export default function App() {
     if (Array.isArray(d.trabajadores)) {
       const isLocked = isOfflineNominaLocked();
       const currentWorkers = getTrabajadores();
+      const isExplicitPurge = d.depurado === true;
 
       // PASO 1 & PASO 2: Protección total de la nómina cargada
-      // 1. Si el Modo Offline está activo y ya hay trabajadores en local, NUNCA sobreescribir ni resetear.
-      // 2. Si el servidor o la red devuelve un arreglo vacío (0 trabajadores), NUNCA borrar los trabajadores existentes.
-      if (isLocked && currentWorkers.length > 0) {
+      // 1. Si el Modo Offline está activo y ya hay trabajadores en local, NUNCA sobreescribir salvo que sea una depuración explícita del Administrador.
+      // 2. Si el servidor o la red devuelve un arreglo vacío (0 trabajadores), NUNCA borrar los trabajadores existentes salvo depuración explícita.
+      if (isLocked && currentWorkers.length > 0 && !isExplicitPurge) {
         // Nómina blindada: no se altera por respuestas del servidor
-      } else if (d.trabajadores.length === 0 && currentWorkers.length > 0) {
+      } else if (d.trabajadores.length === 0 && currentWorkers.length > 0 && !isExplicitPurge) {
         // Preservar nómina local ante respuestas vacías por fluctuaciones de señal
       } else {
+        const userRol = getSession()?.rol;
+        const hoy = getLocalToday();
+
+        // Para rol Trabajador, filtrar registros de días anteriores
+        const rawList = userRol === 'Trabajador'
+          ? d.trabajadores.filter((t: any) => {
+              if (!t.fecha) return true;
+              const fNorm = normalizeDateString(t.fecha);
+              return !fNorm || fNorm >= hoy;
+            })
+          : d.trabajadores;
+
         const seen = new Set<string>();
         const uniqueWorkers: Trabajador[] = [];
-        d.trabajadores.forEach((t: Trabajador, i: number) => {
+        rawList.forEach((t: Trabajador, i: number) => {
           const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
           const rawDni = String(t.dni || '').trim();
           const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
@@ -259,7 +274,7 @@ export default function App() {
           }
         });
 
-        if (uniqueWorkers.length > 0) {
+        if (uniqueWorkers.length > 0 || isExplicitPurge) {
           setTrabajadoresState(uniqueWorkers);
           saveTrabajadores(uniqueWorkers);
         }
@@ -1105,10 +1120,60 @@ export default function App() {
     fetch('/api/trabajadores', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ trabajadores: uniqueWorkers, append: false })
+      body: JSON.stringify({
+        trabajadores: uniqueWorkers,
+        append: false,
+        userRole: session?.rol || 'Administrador',
+        userName: session?.nombre || 'Administrador'
+      })
     }).catch(() => {});
 
     triggerAutoSync('Importar Trabajadores', { trabajadores: uniqueWorkers });
+  };
+
+  const handleDepurarTrabajadoresAyer = async () => {
+    try {
+      const hoy = getLocalToday();
+      addLog(`🧹 Iniciando depuración de trabajadores del día anterior (< ${hoy})...`, 'info');
+
+      // 1. Depuración local instantánea en memoria, localStorage y caché offline
+      const { depurados, eliminados } = depurarTrabajadoresDiaAnterior();
+      setTrabajadoresState(depurados);
+
+      // 2. Depuración en el servidor central
+      let serverEliminados = 0;
+      try {
+        const res = await fetch('/api/depurar-trabajadores', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fechaReferencia: hoy,
+            userRole: session?.rol || 'Administrador',
+            userName: session?.nombre || 'Administrador'
+          })
+        });
+
+        if (res.ok) {
+          const resJson = await res.json();
+          serverEliminados = resJson.eliminadosCount ?? 0;
+        }
+      } catch (err) {
+        console.warn('Servidor offline al depurar:', err);
+      }
+
+      const total = Math.max(eliminados, serverEliminados);
+      addLog(`🧹 Depuración completada: ${total} registros del día anterior eliminados del sistema central y dispositivos.`, 'ok');
+      addToast(`✅ Se depuraron ${total} trabajadores del día anterior. Ya no volverán a restablecerse.`, 'success');
+
+      // 3. Notificar a otros dispositivos via broadcast/sync con bandera depurado: true
+      triggerAutoSync('Depurar Trabajadores Día Anterior', {
+        trabajadores: depurados,
+        depurado: true
+      });
+    } catch (err: any) {
+      console.error('Error depurando trabajadores:', err);
+      addToast('Error ejecutando la depuración', 'error');
+    }
   };
 
   const handleManualSyncPush = async () => {
@@ -1311,6 +1376,7 @@ export default function App() {
             onToggleOfflineNomina={handleToggleOfflineNomina}
             onRestoreOfflineCache={handleRestoreOfflineCache}
             isOnline={isOnline}
+            onDepurarTrabajadoresAyer={handleDepurarTrabajadoresAyer}
           />
         )}
 
@@ -1365,11 +1431,13 @@ export default function App() {
 
         {activeTab === 'importar' && (
           <ImportarTab
+            session={session}
             trabajadores={trabajadores}
             onImportTrabajadores={handleImportTrabajadores}
             onToast={addToast}
             offlineNomina={offlineNomina}
             onToggleOfflineNomina={handleToggleOfflineNomina}
+            onDepurarTrabajadoresAyer={handleDepurarTrabajadoresAyer}
           />
         )}
 

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Trabajador, Lider, UserSession, DetalleJaba, Usuario, ReservaCuadrilla } from '../types';
 import { ScannerModal } from './ScannerModal';
-import { getLocalToday, getLocalISO, getReservas, saveReservas, mergeReservasArrays } from '../utils/storage';
+import { getLocalToday, getLocalISO, getReservas, saveReservas, mergeReservasArrays, normalizeDateString } from '../utils/storage';
 import { 
   Users, 
   Crown, 
@@ -72,6 +72,7 @@ interface TrabajadoresTabProps {
   onToggleOfflineNomina?: (val?: boolean) => void;
   onRestoreOfflineCache?: () => void;
   isOnline?: boolean;
+  onDepurarTrabajadoresAyer?: () => void;
 }
 
 export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
@@ -98,7 +99,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   offlineNomina = true,
   onToggleOfflineNomina,
   onRestoreOfflineCache,
-  isOnline = true
+  isOnline = true,
+  onDepurarTrabajadoresAyer
 }) => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
@@ -119,7 +121,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const [reservaModalSearch, setReservaModalSearch] = useState<string>('');
   const [vistaAsignacion, setVistaAsignacion] = useState<'pendientes' | 'asignados' | 'con_jabas' | 'todos' | 'sin_jabas'>('pendientes');
 
-  // Supervisor checking
+  // Role and supervisor checking
+  const isAdmin = session?.rol === 'Administrador';
   const isSupervisorUser = session.rol === 'Supervisor';
   const sessionSupervisorName = session.nombre;
 
@@ -426,6 +429,15 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     });
   }, [reservasState, reservaModalDateFilter, reservaModalSupervisorFilter, reservaModalSearch, hoyStr, matchesSupervisor, normalizeStr]);
 
+  // Conteo de trabajadores con fecha de días anteriores a hoy
+  const countTrabajadoresAyer = useMemo(() => {
+    return trabajadores.filter((t) => {
+      if (!t.fecha) return false;
+      const fNorm = normalizeDateString(t.fecha);
+      return fNorm && fNorm < hoyStr;
+    }).length;
+  }, [trabajadores, hoyStr]);
+
   // Pre-indexed workers for sub-millisecond search and strict binding
   const indexedTrabajadores = useMemo(() => {
     const seenKey = new Set<string>();
@@ -436,8 +448,19 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       _normFundo: string;
       _normModulo: string;
     })[] = [];
-    for (let i = 0; i < trabajadores.length; i++) {
-      const t = trabajadores[i];
+
+    // Si el usuario tiene rol 'Trabajador', NUNCA deben aparecerle trabajadores del día anterior
+    const isTrabajadorUser = session?.rol === 'Trabajador';
+    const effectiveTrabajadores = isTrabajadorUser
+      ? trabajadores.filter((t) => {
+          if (!t.fecha) return true;
+          const fn = normalizeDateString(t.fecha);
+          return !fn || fn >= hoyStr;
+        })
+      : trabajadores;
+
+    for (let i = 0; i < effectiveTrabajadores.length; i++) {
+      const t = effectiveTrabajadores[i];
       const cleanDni = normalizeDni(t.dni);
       const uniqueKey = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
       if (!seenKey.has(uniqueKey)) {
@@ -454,7 +477,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       }
     }
     return list;
-  }, [trabajadores, normalizeDni, normalizeModulo, normalizeStr]);
+  }, [trabajadores, normalizeDni, normalizeModulo, normalizeStr, session?.rol, hoyStr]);
 
   // Helper para verificar si un trabajador ya cuenta con Grupo, Líder, Reserva de hoy o Grupo en sesión
   const isWorkerAsignado = useCallback(
@@ -2022,82 +2045,103 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         </button>
       </div>
 
-      {/* Banner de Control Modo Offline / Nómina Blindada (Paso 1 & Paso 2) */}
-      <div className={`rounded-xl p-3 sm:p-4 border transition-all shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
-        offlineNomina
-          ? 'bg-amber-50/90 border-amber-300 text-amber-950'
-          : 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
-      }`}>
-        <div className="flex items-start gap-3">
-          <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 shadow-xs ${
-            offlineNomina ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'
-          }`}>
-            {offlineNomina ? <ShieldCheck className="w-5 h-5" /> : <Database className="w-5 h-5" />}
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-extrabold text-xs sm:text-sm">
-                {offlineNomina ? '🔒 Modo Offline Nómina ACTIVO' : '🌐 Modo Sincronización Nube'}
-              </span>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                offlineNomina ? 'bg-amber-200 text-amber-900 border border-amber-300' : 'bg-emerald-200 text-emerald-900 border border-emerald-300'
-              }`}>
-                {offlineNomina ? 'Nómina Fija y Segura' : 'Sincronización Abierta'}
-              </span>
-              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                isOnline ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800 animate-pulse'
-              }`}>
-                {isOnline ? <Wifi className="w-3 h-3 text-green-600" /> : <WifiOff className="w-3 h-3 text-red-600" />}
-                <span>{isOnline ? 'Señal Activa' : 'Sin Señal de Red'}</span>
-              </span>
+      {/* Banner de Control Modo Offline / Nómina Blindada (Solo visible para Administrador) */}
+      {isAdmin && (
+        <div className={`rounded-xl p-3 sm:p-4 border transition-all shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+          offlineNomina
+            ? 'bg-amber-50/90 border-amber-300 text-amber-950'
+            : 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+        }`}>
+          <div className="flex items-start gap-3">
+            <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 shadow-xs ${
+              offlineNomina ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'
+            }`}>
+              {offlineNomina ? <ShieldCheck className="w-5 h-5" /> : <Database className="w-5 h-5" />}
             </div>
-            <p className="text-[11px] sm:text-xs mt-0.5 opacity-90">
-              {offlineNomina
-                ? `Los ${trabajadores.length} trabajadores cargados quedan fijos en el dispositivo. No se reiniciarán ni borrarán si pierdes o recuperas señal.`
-                : 'La nómina se actualiza en tiempo real con el servidor o Google Sheets.'}
-            </p>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-extrabold text-xs sm:text-sm">
+                  {offlineNomina ? '🔒 Modo Offline Nómina ACTIVO' : '🌐 Modo Sincronización Nube'}
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                  offlineNomina ? 'bg-amber-200 text-amber-900 border border-amber-300' : 'bg-emerald-200 text-emerald-900 border border-emerald-300'
+                }`}>
+                  {offlineNomina ? 'Nómina Fija y Segura' : 'Sincronización Abierta'}
+                </span>
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  isOnline ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800 animate-pulse'
+                }`}>
+                  {isOnline ? <Wifi className="w-3 h-3 text-green-600" /> : <WifiOff className="w-3 h-3 text-red-600" />}
+                  <span>{isOnline ? 'Señal Activa' : 'Sin Señal de Red'}</span>
+                </span>
+              </div>
+              <p className="text-[11px] sm:text-xs mt-0.5 opacity-90">
+                {offlineNomina
+                  ? `Los ${trabajadores.length} trabajadores cargados quedan fijos en el dispositivo. No se reiniciarán ni borrarán si pierdes o recuperas señal.`
+                  : 'La nómina se actualiza en tiempo real con el servidor o Google Sheets.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap self-end sm:self-center">
+            {onToggleOfflineNomina && (
+              <button
+                type="button"
+                onClick={() => onToggleOfflineNomina()}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all active:scale-95 shadow-xs flex items-center gap-1.5 ${
+                  offlineNomina
+                    ? 'bg-amber-900 hover:bg-amber-800 text-white'
+                    : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                }`}
+                title="Alternar entre fijar la nómina en el dispositivo o permitir re-sincronización con el servidor"
+              >
+                {offlineNomina ? (
+                  <>
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Nómina Blindada (Click para liberar)</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Activar Modo Offline (Bloquear Nómina)</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {onRestoreOfflineCache && (
+              <button
+                type="button"
+                onClick={onRestoreOfflineCache}
+                className="bg-white hover:bg-gray-100 text-gray-800 border border-gray-300 px-2.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all active:scale-95 shadow-xs flex items-center gap-1"
+                title="Restaurar copia de seguridad de trabajadores guardada en la memoria local del dispositivo"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-gray-600" />
+                <span className="hidden sm:inline">Restaurar Respaldo</span>
+              </button>
+            )}
+
+            {isAdmin && onDepurarTrabajadoresAyer && (
+              <button
+                type="button"
+                onClick={() => {
+                  const confirmMsg = countTrabajadoresAyer > 0
+                    ? `¿Estás seguro de depurar ${countTrabajadoresAyer} trabajadores del día anterior?\n\nSe eliminarán de la nómina en este equipo, en el servidor y en todos los dispositivos de los trabajadores para que no vuelvan a aparecer.`
+                    : '¿Deseas ejecutar la depuración de trabajadores del día anterior?\n\nEsta acción limpia la nómina de días pasados en todos los dispositivos y en el servidor central.';
+                  if (window.confirm(confirmMsg)) {
+                    onDepurarTrabajadoresAyer();
+                  }
+                }}
+                className="bg-red-700 hover:bg-red-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all active:scale-95 shadow-xs flex items-center gap-1.5"
+                title="Depurar trabajadores del día anterior para que no se restablezcan en ningún equipo"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Depurar Día Anterior {countTrabajadoresAyer > 0 ? `(${countTrabajadoresAyer})` : ''}</span>
+              </button>
+            )}
           </div>
         </div>
-
-        <div className="flex items-center gap-2 flex-wrap self-end sm:self-center">
-          {onToggleOfflineNomina && (
-            <button
-              type="button"
-              onClick={() => onToggleOfflineNomina()}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all active:scale-95 shadow-xs flex items-center gap-1.5 ${
-                offlineNomina
-                  ? 'bg-amber-900 hover:bg-amber-800 text-white'
-                  : 'bg-emerald-700 hover:bg-emerald-800 text-white'
-              }`}
-              title="Alternar entre fijar la nómina en el dispositivo o permitir re-sincronización con el servidor"
-            >
-              {offlineNomina ? (
-                <>
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>Nómina Blindada (Click para liberar)</span>
-                </>
-              ) : (
-                <>
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Activar Modo Offline (Bloquear Nómina)</span>
-                </>
-              )}
-            </button>
-          )}
-
-          {onRestoreOfflineCache && (
-            <button
-              type="button"
-              onClick={onRestoreOfflineCache}
-              className="bg-white hover:bg-gray-100 text-gray-800 border border-gray-300 px-2.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all active:scale-95 shadow-xs flex items-center gap-1"
-              title="Restaurar copia de seguridad de trabajadores guardada en la memoria local del dispositivo"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-gray-600" />
-              <span className="hidden sm:inline">Restaurar Respaldo</span>
-            </button>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* ========================================================================= */}
       {/* PASO 1: CONFIGURACIÓN DE CUADRILLA & SELECCIÓN DE PERSONAL */}
@@ -2122,6 +2166,25 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               </div>
 
               <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                {isAdmin && onDepurarTrabajadoresAyer && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const confirmMsg = countTrabajadoresAyer > 0
+                        ? `¿Estás seguro de depurar ${countTrabajadoresAyer} trabajadores del día anterior?\n\nSe eliminarán de la nómina en este equipo, en el servidor y en todos los dispositivos conectados para que no vuelvan a aparecer.`
+                        : '¿Deseas depurar los trabajadores de fechas anteriores a hoy?\n\nEsta acción limpia la nómina de días pasados en todos los equipos.';
+                      if (window.confirm(confirmMsg)) {
+                        onDepurarTrabajadoresAyer();
+                      }
+                    }}
+                    className="bg-white hover:bg-red-50 text-red-700 border border-red-300 text-xs font-bold py-1.5 px-3 rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                    title="Depurar trabajadores del día anterior para que no se restablezcan en ningún equipo"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                    <span>Depurar Día Anterior {countTrabajadoresAyer > 0 ? `(${countTrabajadoresAyer})` : ''}</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => handleRestablecerFiltros(false)}

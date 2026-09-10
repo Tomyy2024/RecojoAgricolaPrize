@@ -1,22 +1,39 @@
-import React, { useState } from 'react';
-import { Trabajador } from '../types';
-import { FileUp, FileText, Check, X, UploadCloud, AlertTriangle, Eye, ShieldCheck, Lock } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Trabajador, UserSession } from '../types';
+import { FileUp, FileText, Check, X, UploadCloud, AlertTriangle, Eye, ShieldCheck, Lock, Trash2, ShieldAlert } from 'lucide-react';
+import { getLocalToday, normalizeDateString } from '../utils/storage';
 
 interface ImportarTabProps {
+  session?: UserSession | null;
   trabajadores: Trabajador[];
   onImportTrabajadores: (nuevos: Trabajador[], replaceExisting?: boolean) => void;
   onToast: (msg: string) => void;
   offlineNomina?: boolean;
   onToggleOfflineNomina?: (val?: boolean) => void;
+  onDepurarTrabajadoresAyer?: () => void;
 }
 
 export const ImportarTab: React.FC<ImportarTabProps> = ({
+  session,
   trabajadores,
   onImportTrabajadores,
   onToast,
   offlineNomina = true,
-  onToggleOfflineNomina
+  onToggleOfflineNomina,
+  onDepurarTrabajadoresAyer
 }) => {
+  const isAdmin = session?.rol === 'Administrador';
+  const hoyStr = getLocalToday();
+
+  // Conteo de trabajadores del día anterior
+  const countTrabajadoresAyer = useMemo(() => {
+    return trabajadores.filter((t) => {
+      if (!t.fecha) return false;
+      const fNorm = normalizeDateString(t.fecha);
+      return fNorm && fNorm < hoyStr;
+    }).length;
+  }, [trabajadores, hoyStr]);
+
   const [mode, setMode] = useState<'file' | 'paste'>('file');
   const [replaceMode, setReplaceMode] = useState<boolean>(true);
   const [pasteText, setPasteText] = useState('');
@@ -91,6 +108,11 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
   };
 
   const handleConfirmImport = () => {
+    if (!isAdmin) {
+      onToast('🚫 Permiso denegado: El único que puede cargar la nómina es el rol de Administrador.');
+      return;
+    }
+
     if (!parsedData || parsedData.length === 0) return;
 
     const existingDnis = new Set(trabajadores.map((t) => String(t.dni).trim()));
@@ -178,84 +200,152 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
               </p>
             </div>
           </div>
-          <span className="bg-[#e8f5e9] text-[#1b5e20] font-bold text-xs px-2.5 py-1 rounded-full border border-[#a5d6a7]">
-            {trabajadores.length} Registrados
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="bg-[#e8f5e9] text-[#1b5e20] font-bold text-xs px-2.5 py-1 rounded-full border border-[#a5d6a7]">
+              {trabajadores.length} Registrados
+            </span>
+          </div>
         </div>
 
-        {/* Tab Toggle */}
-        <div className="flex gap-2 mb-4">
-          <button
-            onClick={() => {
-              setMode('file');
-              setParsedData(null);
-            }}
-            className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              mode === 'file'
-                ? 'bg-[#2e7d32] text-white shadow-md'
-                : 'bg-gray-100 text-[#40493d] hover:bg-gray-200'
-            }`}
-          >
-            <UploadCloud className="w-4 h-4" />
-            <span>📁 Subir Archivo CSV</span>
-          </button>
-          <button
-            onClick={() => {
-              setMode('paste');
-              setParsedData(null);
-            }}
-            className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              mode === 'paste'
-                ? 'bg-[#2e7d32] text-white shadow-md'
-                : 'bg-gray-100 text-[#40493d] hover:bg-gray-200'
-            }`}
-          >
-            <FileText className="w-4 h-4" />
-            <span>📝 Pegar Datos</span>
-          </button>
-        </div>
-
-        {/* Mode 1: File Upload */}
-        {mode === 'file' && (
-          <div className="space-y-3">
-            <div className="border-2 border-dashed border-[#bfcaba] rounded-2xl p-6 text-center bg-[#fcf9f8] hover:bg-[#f1f8e9] transition-colors cursor-pointer relative">
-              <UploadCloud className="w-10 h-10 text-[#2e7d32] mx-auto mb-2 opacity-80" />
-              <div className="font-bold text-xs sm:text-sm text-[#1b5e20] mb-1">
-                Haz clic para seleccionar o arrastra tu archivo CSV
-              </div>
-              <p className="text-[11px] text-[#757575]">
-                Formato esperado: DNI, Nombres, Fundo, Módulo, Supervisor, Grupo
+        {/* Notificación de Rol Restringido si no es Administrador */}
+        {!isAdmin ? (
+          <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-xl p-4 mb-4 flex items-start gap-3">
+            <ShieldAlert className="w-6 h-6 text-amber-700 shrink-0 mt-0.5" />
+            <div>
+              <h3 className="text-sm font-bold text-amber-900">
+                Acceso Restringido para Carga de Nómina
+              </h3>
+              <p className="text-xs text-amber-800 mt-1">
+                El único usuario con autorización para cargar, modificar o reemplazar la nómina de trabajadores es el rol de <strong className="font-bold underline">Administrador</strong>.
               </p>
-              <input
-                type="file"
-                accept=".csv,text/csv,text/plain"
-                onChange={handleFileUpload}
-                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-              />
+              <p className="text-xs text-amber-700 mt-1">
+                Tu rol actual es: <span className="font-semibold bg-white px-2 py-0.5 rounded-md border border-amber-300">{session?.rol || 'Sin definir'}</span>.
+                Para actualizar la nómina general, solicita al Administrador que realice la carga desde su cuenta.
+              </p>
             </div>
+          </div>
+        ) : (
+          <div className="bg-[#e8f5e9] border border-[#a5d6a7] rounded-xl p-3 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-[#2e7d32] shrink-0" />
+              <div>
+                <p className="text-xs font-bold text-[#1b5e20]">
+                  Rol Administrador Activo: Autorizado para cargar la nómina
+                </p>
+                <p className="text-[11px] text-[#2e7d32]">
+                  Los cambios que importes se sincronizarán de inmediato en todos los dispositivos conectados.
+                </p>
+              </div>
+            </div>
+
+            {onDepurarTrabajadoresAyer && (
+              <button
+                type="button"
+                onClick={() => {
+                  const confirmMsg = countTrabajadoresAyer > 0
+                    ? `¿Estás seguro de depurar ${countTrabajadoresAyer} trabajadores del día anterior?\n\nSe eliminarán de la nómina en este equipo, en el servidor y en todos los dispositivos conectados para que no vuelvan a aparecer.`
+                    : '¿Deseas ejecutar la depuración de trabajadores de fechas anteriores a hoy?\n\nEsto asegurará que ningún equipo ni usuario con rol Trabajador vuelva a sincronizar personas de días pasados.';
+                  if (window.confirm(confirmMsg)) {
+                    onDepurarTrabajadoresAyer();
+                  }
+                }}
+                className="bg-red-700 hover:bg-red-800 text-white text-xs font-bold py-1.5 px-3 rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shrink-0 self-start sm:self-auto"
+                title="Depurar y limpiar trabajadores de días anteriores"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Depurar Día Anterior {countTrabajadoresAyer > 0 ? `(${countTrabajadoresAyer})` : ''}</span>
+              </button>
+            )}
           </div>
         )}
 
-        {/* Mode 2: Paste Text */}
-        {mode === 'paste' && (
-          <div className="space-y-3">
-            <label className="block text-xs font-semibold text-[#40493d]">
-              Pega aquí el contenido (una fila por trabajador):
-            </label>
-            <textarea
-              rows={6}
-              placeholder={`DNI,Nombres,Fundo,Módulo,Supervisor,Grupo\n72345678,Juan Pérez Rojas,Arena Azul,M01,Carlos Mendoza,Grupo 01\n45892134,María González,Arena Azul,M01,Carlos Mendoza,Grupo 01`}
-              value={pasteText}
-              onChange={(e) => setPasteText(e.target.value)}
-              className="w-full p-3 font-mono text-xs border border-[#bfcaba] rounded-xl bg-white focus:outline-none focus:border-[#2e7d32]"
-            />
-            <button
-              onClick={() => parseCsvText(pasteText)}
-              className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
-            >
-              <Eye className="w-3.5 h-3.5" />
-              <span>Analizar y Previsualizar</span>
-            </button>
+        {/* Tab Toggle & Formularios de Carga: Exclusivo para Administrador */}
+        {isAdmin ? (
+          <>
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => {
+                  setMode('file');
+                  setParsedData(null);
+                }}
+                className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  mode === 'file'
+                    ? 'bg-[#2e7d32] text-white shadow-md'
+                    : 'bg-gray-100 text-[#40493d] hover:bg-gray-200'
+                }`}
+              >
+                <UploadCloud className="w-4 h-4" />
+                <span>📁 Subir Archivo CSV</span>
+              </button>
+              <button
+                onClick={() => {
+                  setMode('paste');
+                  setParsedData(null);
+                }}
+                className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  mode === 'paste'
+                    ? 'bg-[#2e7d32] text-white shadow-md'
+                    : 'bg-gray-100 text-[#40493d] hover:bg-gray-200'
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                <span>📝 Pegar Datos</span>
+              </button>
+            </div>
+
+            {/* Mode 1: File Upload */}
+            {mode === 'file' && (
+              <div className="space-y-3">
+                <div className="border-2 border-dashed border-[#bfcaba] rounded-2xl p-6 text-center bg-[#fcf9f8] hover:bg-[#f1f8e9] transition-colors cursor-pointer relative">
+                  <UploadCloud className="w-10 h-10 text-[#2e7d32] mx-auto mb-2 opacity-80" />
+                  <div className="font-bold text-xs sm:text-sm text-[#1b5e20] mb-1">
+                    Haz clic para seleccionar o arrastra tu archivo CSV
+                  </div>
+                  <p className="text-[11px] text-[#757575]">
+                    Formato esperado: DNI, Nombres, Fundo, Módulo, Supervisor, Grupo
+                  </p>
+                  <input
+                    type="file"
+                    accept=".csv,text/csv,text/plain"
+                    onChange={handleFileUpload}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Mode 2: Paste Text */}
+            {mode === 'paste' && (
+              <div className="space-y-3">
+                <label className="block text-xs font-semibold text-[#40493d]">
+                  Pega aquí el contenido (una fila por trabajador):
+                </label>
+                <textarea
+                  rows={6}
+                  placeholder={`DNI,Nombres,Fundo,Módulo,Supervisor,Grupo\n72345678,Juan Pérez Rojas,Arena Azul,M01,Carlos Mendoza,Grupo 01\n45892134,María González,Arena Azul,M01,Carlos Mendoza,Grupo 01`}
+                  value={pasteText}
+                  onChange={(e) => setPasteText(e.target.value)}
+                  className="w-full p-3 font-mono text-xs border border-[#bfcaba] rounded-xl bg-white focus:outline-none focus:border-[#2e7d32]"
+                />
+                <button
+                  onClick={() => parseCsvText(pasteText)}
+                  className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Analizar y Previsualizar</span>
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="p-6 text-center bg-gray-50 rounded-xl border border-gray-200">
+            <ShieldAlert className="w-8 h-8 text-amber-600 mx-auto mb-2" />
+            <p className="text-sm font-bold text-gray-800">
+              Carga de nómina inhabilitada para tu usuario
+            </p>
+            <p className="text-xs text-gray-500 mt-1 max-w-md mx-auto">
+              Solo la cuenta con rol <strong>Administrador</strong> tiene autorización para cargar o reemplazar nóminas. Por favor inicia sesión como Administrador para utilizar este módulo.
+            </p>
           </div>
         )}
 

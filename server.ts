@@ -345,10 +345,72 @@ async function startServer() {
     }
   });
 
-  // Fast bulk worker sync endpoint
+  // Endpoint específico para depurar trabajadores del día anterior
+  app.post('/api/depurar-trabajadores', (req, res) => {
+    try {
+      const { userRole, targetDate } = req.body || {};
+      if (userRole && userRole !== 'Administrador') {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Solo el rol Administrador tiene permisos para depurar la nómina de trabajadores'
+        });
+      }
+
+      const today = targetDate || new Date().toISOString().slice(0, 10);
+      const prevCount = (db.trabajadores || []).length;
+
+      // Filtrar y eliminar trabajadores cuya fecha sea anterior a hoy
+      const remaining = (db.trabajadores || []).filter((t: any) => {
+        const tFecha = t.fecha ? normalizeDateServer(t.fecha) : '';
+        if (tFecha && tFecha < today) {
+          return false;
+        }
+        return true;
+      });
+
+      const purgedCount = prevCount - remaining.length;
+      db.trabajadores = remaining;
+      db.fechaUltimaDepuracion = today;
+      db.version = (db.version || 1) + 1;
+      db.lastUpdated = new Date().toISOString();
+      saveDatabase(db);
+
+      // Notificar a todos los clientes inmediatamente con la nómina depurada
+      notifyClients({
+        type: 'sync',
+        action: 'depurar_trabajadores',
+        version: db.version,
+        data: db,
+        fechaUltimaDepuracion: today
+      });
+
+      res.json({
+        status: 'ok',
+        message: `Depuración completada: ${purgedCount} trabajadores de días anteriores eliminados`,
+        purgedCount,
+        eliminadosCount: purgedCount,
+        count: remaining.length,
+        trabajadores: remaining,
+        fechaUltimaDepuracion: today
+      });
+    } catch (err: any) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
+  // Fast bulk worker sync endpoint - Solo Administrador puede cargar o modificar nóminas
   app.post('/api/trabajadores', (req, res) => {
     try {
-      const { trabajadores, append } = req.body || {};
+      const { trabajadores, append, userRole } = req.body || {};
+
+      // Restricción estricta: Solo el rol de Administrador puede cargar nóminas
+      if (userRole && userRole !== 'Administrador') {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Solo el rol Administrador tiene permisos para cargar o modificar la nómina de personal.'
+        });
+      }
+
       if (Array.isArray(trabajadores)) {
         if (append) {
           const map = new Map<string, any>();
@@ -496,9 +558,23 @@ async function startServer() {
           return res.json({ status: 'ok', data: db, version: db.version, ignoredStale: true });
         }
 
+        const isAdmin = incoming.userRole === 'Administrador';
+
         if (Array.isArray(incoming.programas)) db.programas = incoming.programas;
         if (Array.isArray(incoming.programaGeneral)) db.programaGeneral = incoming.programaGeneral;
-        if (Array.isArray(incoming.trabajadores)) db.trabajadores = incoming.trabajadores;
+
+        // REGLA CRÍTICA: Solo el Administrador puede sincronizar o modificar trabajadores a nivel central.
+        // Si el cliente no es Administrador (por ejemplo rol Trabajador o Supervisor), NO se sobreescribe db.trabajadores
+        // para evitar que datos del día anterior cacheados en otros equipos revivan la nómina.
+        if (isAdmin && Array.isArray(incoming.trabajadores)) {
+          const today = new Date().toISOString().slice(0, 10);
+          const minDate = db.fechaUltimaDepuracion || today;
+          db.trabajadores = incoming.trabajadores.filter((t: any) => {
+            const tf = t.fecha ? normalizeDateServer(t.fecha) : '';
+            if (tf && tf < minDate) return false;
+            return true;
+          });
+        }
         if (Array.isArray(incoming.detalleJabas)) db.detalleJabas = incoming.detalleJabas;
         if (Array.isArray(incoming.validaciones)) {
           db.validaciones = sanitizeValidaciones(incoming.validaciones);

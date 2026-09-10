@@ -6,6 +6,7 @@ import {
   DetalleJaba, 
   Lider, 
   UserSession, 
+  UserRole,
   SyncLogEntry, 
   FirebaseConfig,
   ValidacionSupervisor,
@@ -41,7 +42,8 @@ const KEYS = {
   RESERVAS: 'recojoFrutosReservas',
   AUDITORIA_INGRESOS: 'recojoFrutosAuditoriaIngresos',
   OFFLINE_NOMINA_LOCKED: 'recojoFrutosOfflineNominaLocked',
-  TRABAJADORES_OFFLINE_CACHE: 'recojoFrutosTrabajadoresOfflineCache'
+  TRABAJADORES_OFFLINE_CACHE: 'recojoFrutosTrabajadoresOfflineCache',
+  FECHA_ULTIMA_DEPURACION: 'recojoFrutosFechaUltimaDepuracion'
 };
 
 // Date helpers
@@ -240,6 +242,8 @@ export function wipeAllBackupData(clearAuth: boolean = false) {
     localStorage.setItem(KEYS.GRUPOS, JSON.stringify([]));
     localStorage.setItem(KEYS.RESERVAS, JSON.stringify([]));
     localStorage.setItem(KEYS.AUTO_SYNC_QUEUE, JSON.stringify([]));
+    localStorage.removeItem(KEYS.TRABAJADORES_OFFLINE_CACHE);
+    localStorage.removeItem(KEYS.FECHA_ULTIMA_DEPURACION);
 
     // Reset sync timestamps so fresh sync pulls cleanly
     localStorage.removeItem(KEYS.LAST_SYNC);
@@ -419,6 +423,20 @@ export function setOfflineNominaLocked(locked: boolean): void {
   }
 }
 
+export function getFechaUltimaDepuracion(): string {
+  try {
+    return localStorage.getItem(KEYS.FECHA_ULTIMA_DEPURACION) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setFechaUltimaDepuracion(fecha: string): void {
+  try {
+    localStorage.setItem(KEYS.FECHA_ULTIMA_DEPURACION, fecha);
+  } catch {}
+}
+
 export function getTrabajadoresOfflineCache(): Trabajador[] {
   try {
     const raw = localStorage.getItem(KEYS.TRABAJADORES_OFFLINE_CACHE);
@@ -442,24 +460,45 @@ export function restoreTrabajadoresFromOfflineCache(): Trabajador[] {
 export function getTrabajadores(): Trabajador[] {
   try {
     const raw = localStorage.getItem(KEYS.TRABAJADORES);
-    let list: Trabajador[] = raw ? JSON.parse(raw) : [];
+    let list: Trabajador[] = [];
 
-    // Si la lista local quedó vacía pero existe snapshot en cache offline, recuperarlo
+    if (raw === null) {
+      // Primera vez absoluto sin inicializar
+      list = INITIAL_TRABAJADORES;
+      try {
+        localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(INITIAL_TRABAJADORES));
+      } catch {}
+    } else {
+      try {
+        list = JSON.parse(raw);
+      } catch {
+        list = [];
+      }
+    }
+
+    // Si la lista local quedó vacía, SOLO restaurar de caché si NO se ha depurado hoy
+    // y si los trabajadores de la caché pertenecen a hoy en adelante (no restaurar ayer)
     if (!Array.isArray(list) || list.length === 0) {
-      const offlineBackup = getTrabajadoresOfflineCache();
-      if (offlineBackup.length > 0) {
-        list = offlineBackup;
-        try {
-          localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(offlineBackup));
-        } catch {}
-      } else {
-        list = INITIAL_TRABAJADORES;
+      const depuradoHoy = getFechaUltimaDepuracion() === getLocalToday();
+      if (!depuradoHoy) {
+        const offlineBackup = getTrabajadoresOfflineCache();
+        const hoy = getLocalToday();
+        const validBackup = offlineBackup.filter((t) => {
+          if (!t.fecha) return true;
+          return normalizeDateString(t.fecha) >= hoy;
+        });
+        if (validBackup.length > 0) {
+          list = validBackup;
+          try {
+            localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(validBackup));
+          } catch {}
+        }
       }
     }
 
     const seen = new Set<string>();
     const unique: Trabajador[] = [];
-    list.forEach((t, i) => {
+    (Array.isArray(list) ? list : []).forEach((t, i) => {
       const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
       const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
       if (!seen.has(key)) {
@@ -472,14 +511,14 @@ export function getTrabajadores(): Trabajador[] {
     });
     return unique;
   } catch {
-    return INITIAL_TRABAJADORES;
+    return [];
   }
 }
 
 export function saveTrabajadores(trabajadores: Trabajador[]) {
   const seen = new Set<string>();
   const unique: Trabajador[] = [];
-  trabajadores.forEach((t, i) => {
+  (Array.isArray(trabajadores) ? trabajadores : []).forEach((t, i) => {
     const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
     const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
     if (!seen.has(key)) {
@@ -491,12 +530,91 @@ export function saveTrabajadores(trabajadores: Trabajador[]) {
     }
   });
   localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(unique));
-  // Respaldo permanente offline si hay trabajadores cargados
+  // Respaldo permanente offline solo si hay trabajadores cargados válidos
   if (unique.length > 0) {
     try {
       localStorage.setItem(KEYS.TRABAJADORES_OFFLINE_CACHE, JSON.stringify(unique));
     } catch {}
+  } else {
+    // Si la nómina está vacía (borrada o depurada), limpiar caché offline para que no reviva
+    try {
+      localStorage.removeItem(KEYS.TRABAJADORES_OFFLINE_CACHE);
+    } catch {}
   }
+}
+
+/**
+ * Depura los trabajadores de la nómina del día anterior o días previos.
+ * Garantiza que no se queden guardados en la memoria local ni en el caché offline.
+ */
+export function depurarTrabajadoresDiaAnterior(targetDate?: string): { eliminados: number; restantes: Trabajador[]; depurados: Trabajador[] } {
+  const hoy = targetDate || getLocalToday();
+  const rawWorkers = getTrabajadores();
+
+  const eliminadosList: Trabajador[] = [];
+  const restantes: Trabajador[] = [];
+
+  rawWorkers.forEach((t) => {
+    const tFecha = t.fecha ? normalizeDateString(t.fecha) : '';
+    // Si tiene fecha asignada y es anterior a hoy, se depura
+    if (tFecha && tFecha < hoy) {
+      eliminadosList.push(t);
+    } else {
+      restantes.push(t);
+    }
+  });
+
+  // Guardar lista limpia
+  saveTrabajadores(restantes);
+  setFechaUltimaDepuracion(hoy);
+
+  // Asegurar que el cache offline tampoco tenga trabajadores de fechas anteriores
+  try {
+    if (restantes.length > 0) {
+      localStorage.setItem(KEYS.TRABAJADORES_OFFLINE_CACHE, JSON.stringify(restantes));
+    } else {
+      localStorage.removeItem(KEYS.TRABAJADORES_OFFLINE_CACHE);
+    }
+  } catch {}
+
+  // Notificar por evento local
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('trabajadores-depurados', {
+          detail: {
+            fecha: hoy,
+            eliminados: eliminadosList.length,
+            restantes: restantes.length
+          }
+        })
+      );
+    } catch {}
+  }
+
+  return {
+    eliminados: eliminadosList.length,
+    restantes,
+    depurados: restantes
+  };
+}
+
+/**
+ * Filtra los trabajadores según el rol del usuario actual.
+ * Para el rol 'Trabajador', NUNCA deben mostrarse trabajadores con fecha del día anterior.
+ */
+export function filterTrabajadoresParaRol(trabajadores: Trabajador[], rol?: UserRole): Trabajador[] {
+  if (!Array.isArray(trabajadores)) return [];
+  if (rol === 'Trabajador') {
+    const hoy = getLocalToday();
+    return trabajadores.filter((t) => {
+      if (!t.fecha) return true;
+      const fNorm = normalizeDateString(t.fecha);
+      // Excluir tajantemente trabajadores con fecha anterior a hoy para el rol Trabajador
+      return fNorm >= hoy;
+    });
+  }
+  return trabajadores;
 }
 
 // Programas
