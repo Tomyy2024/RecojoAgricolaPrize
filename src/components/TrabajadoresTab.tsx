@@ -14,6 +14,7 @@ import {
   Sparkles, 
   Package, 
   CheckSquare,
+  DownloadCloud,
   Building2,
   MapPin,
   Layers,
@@ -73,6 +74,7 @@ interface TrabajadoresTabProps {
   onRestoreOfflineCache?: () => void;
   isOnline?: boolean;
   onDepurarTrabajadoresAyer?: () => void;
+  onPullFromSheet?: () => void;
 }
 
 export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
@@ -100,7 +102,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   onToggleOfflineNomina,
   onRestoreOfflineCache,
   isOnline = true,
-  onDepurarTrabajadoresAyer
+  onDepurarTrabajadoresAyer,
+  onPullFromSheet
 }) => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
@@ -442,46 +445,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     }).length;
   }, [trabajadores, hoyStr]);
 
-  // Complementar nómina con trabajadores registrados en Registro de Avance (detalleJabas)
-  // para que siempre coincida al 100% con los avances reales del campo y no falte ningún cosechador
+  // Nómina oficial de trabajadores cargada desde el Sheet / Administrador
   const fullTrabajadores = useMemo(() => {
-    const existingDnis = new Set<string>();
-    trabajadores.forEach((t) => {
-      const norm = normalizeDni(t.dni);
-      const raw = String(t.dni || '').trim();
-      if (norm) existingDnis.add(norm);
-      if (raw) existingDnis.add(raw);
-    });
-
-    const extras: Trabajador[] = [];
-    if (Array.isArray(detalleJabas)) {
-      detalleJabas.forEach((d) => {
-        const norm = normalizeDni(d.dni);
-        const raw = String(d.dni || '').trim();
-        const key = norm || raw;
-        if (key && !existingDnis.has(key)) {
-          existingDnis.add(key);
-          if (norm) existingDnis.add(norm);
-          if (raw) existingDnis.add(raw);
-          extras.push({
-            id: d.id || `extra_${key}`,
-            dni: raw || norm,
-            nombres: d.trabajador || `Trabajador ${key}`,
-            supervisor: d.supervisor || '',
-            fundo: d.fundo || 'Santa Teresa',
-            modulo: d.modulo || 'M01',
-            grupo: d.grupo || 'Grupo 01',
-            lider: d.lider || '',
-            jabas: Number(d.jabas) || 0,
-            fecha: d.fecha || ''
-          });
-        }
-      });
-    }
-
-    if (extras.length === 0) return trabajadores;
-    return [...trabajadores, ...extras];
-  }, [trabajadores, detalleJabas, normalizeDni]);
+    return trabajadores;
+  }, [trabajadores]);
 
   // Pre-indexed workers for sub-millisecond search and strict binding
   const indexedTrabajadores = useMemo(() => {
@@ -494,15 +461,14 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       _normModulo: string;
     })[] = [];
 
-    // Si el usuario tiene rol 'Trabajador', NUNCA deben aparecerle trabajadores del día anterior
-    const isTrabajadorUser = session?.rol === 'Trabajador';
-    const effectiveTrabajadores = isTrabajadorUser
-      ? fullTrabajadores.filter((t) => {
-          if (!t.fecha) return true;
-          const fn = normalizeDateString(t.fecha);
-          return !fn || fn >= hoyStr;
-        })
-      : fullTrabajadores;
+    // Si los trabajadores tienen fecha específica, no mostrar de fechas anteriores a la fecha activa consultada
+    const fechaFiltroNorm = normalizeDateString(fechaPersonal) || hoyStr;
+    const effectiveTrabajadores = fullTrabajadores.filter((t) => {
+      if (!t.fecha) return true;
+      const fn = normalizeDateString(t.fecha);
+      if (!fn) return true;
+      return fn === fechaFiltroNorm || fn >= hoyStr;
+    });
 
     for (let i = 0; i < effectiveTrabajadores.length; i++) {
       const t = effectiveTrabajadores[i];
@@ -522,7 +488,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       }
     }
     return list;
-  }, [trabajadores, normalizeDni, normalizeModulo, normalizeStr, session?.rol, hoyStr]);
+  }, [fullTrabajadores, normalizeDni, normalizeModulo, normalizeStr, fechaPersonal, hoyStr]);
 
   // Helper para verificar si un trabajador ya cuenta con Grupo, Líder, Reserva de hoy o Grupo en sesión
   const isWorkerAsignado = useCallback(
@@ -3066,6 +3032,17 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 />
               </div>
               <div className="flex items-center gap-2 flex-wrap">
+                {onPullFromSheet && (
+                  <button
+                    type="button"
+                    onClick={onPullFromSheet}
+                    className="bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold py-2 px-3 rounded-lg shadow-sm flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap transition-all active:scale-95"
+                    title="Jalar y actualizar la nómina directamente desde la pestaña Trabajadores del Google Sheet"
+                  >
+                    <DownloadCloud className="w-3.5 h-3.5 text-emerald-200" />
+                    <span>Jalar de Sheet</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleOpenNewWorkerModal}

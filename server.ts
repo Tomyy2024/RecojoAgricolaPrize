@@ -130,35 +130,13 @@ function loadDatabase() {
 
       const cleanedValidaciones = sanitizeValidaciones(parsed.validaciones);
 
-      // Auto-incorporar trabajadores desde detalleJabas si faltan en trabajadores
-      const existingWorkerDnis = new Set((parsed.trabajadores || []).map((t: any) => String(t.dni || '').trim()));
-      const extraWorkers: any[] = [];
-      if (Array.isArray(parsed.detalleJabas)) {
-        parsed.detalleJabas.forEach((d: any) => {
-          const dni = String(d.dni || '').trim();
-          if (dni && !existingWorkerDnis.has(dni)) {
-            existingWorkerDnis.add(dni);
-            extraWorkers.push({
-              id: d.id || `w_${dni}`,
-              dni: dni,
-              nombres: d.trabajador || `Trabajador ${dni}`,
-              supervisor: d.supervisor || '',
-              fundo: d.fundo || 'Santa Teresa',
-              modulo: d.modulo || 'M01',
-              grupo: d.grupo || 'Grupo 01',
-              lider: d.lider || '',
-              jabas: Number(d.jabas) || 0,
-              fecha: d.fecha || ''
-            });
-          }
-        });
-      }
-      const combinedTrabajadores = extraWorkers.length > 0 ? [...(parsed.trabajadores || []), ...extraWorkers] : (parsed.trabajadores || []);
+      // Usar exactamente la nómina oficial cargada en db
+      const trabajadoresList = Array.isArray(parsed.trabajadores) ? parsed.trabajadores : [];
 
       return {
         ...getInitialData(),
         ...parsed,
-        trabajadores: combinedTrabajadores,
+        trabajadores: trabajadoresList,
         usuarios: Array.from(userMap.values()),
         validaciones: cleanedValidaciones
       };
@@ -220,10 +198,8 @@ async function startServer() {
 
         // 1. Trabajadores
         if (Array.isArray(data.trabajadores) && data.trabajadores.length > 0) {
-          if (!db.trabajadores || db.trabajadores.length === 0 || data.trabajadores.length >= (db.trabajadores.length || 0)) {
-            db.trabajadores = data.trabajadores;
-            changed = true;
-          }
+          db.trabajadores = data.trabajadores;
+          changed = true;
         }
 
         // 2. Usuarios
@@ -555,6 +531,25 @@ async function startServer() {
         trabajadores: remaining,
         fechaUltimaDepuracion: today
       });
+    } catch (err: any) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
+  // Proxy endpoint para exportar desde Google Sheets evitando problemas de CORS en navegador
+  app.post('/api/sheet/proxy-export', async (req, res) => {
+    try {
+      const { url } = req.body || {};
+      if (!url || typeof url !== 'string') {
+        return res.status(400).json({ status: 'error', message: 'URL de Google Apps Script requerida' });
+      }
+      const targetUrl = url.includes('accion=') ? url : (url.includes('?') ? `${url}&accion=export` : `${url}?accion=export`);
+      const fetchRes = await fetch(targetUrl, { method: 'GET', headers: { Accept: 'application/json' } });
+      if (!fetchRes.ok) {
+        return res.status(fetchRes.status).json({ status: 'error', message: `Google Sheets respondió con HTTP ${fetchRes.status}` });
+      }
+      const json = await fetchRes.json();
+      res.json(json);
     } catch (err: any) {
       res.status(500).json({ status: 'error', message: err.message });
     }

@@ -1,124 +1,124 @@
 {
-  "version": 109,
+  "version": 112,
   "usuarios": [
     {
+      "creado": "Tue Aug 18 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "pass": "prize2026",
       "rol": "Administrador",
       "nombre": "Administrador General",
-      "user": "admin",
-      "creado": "Tue Aug 18 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
+      "user": "admin"
     },
     {
       "creado": "Thu Aug 27 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "pass": "ayllu123",
       "user": "rrisco",
       "nombre": "Rogger Risco",
-      "rol": "Supervisor",
-      "pass": "ayllu123"
+      "rol": "Supervisor"
     },
     {
-      "rol": "Supervisor",
-      "pass": "arena123",
       "nombre": "Eduar Maquen",
+      "pass": "arena123",
+      "user": "emaquen",
       "creado": "Thu Aug 27 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "user": "emaquen"
+      "rol": "Supervisor"
     },
     {
-      "pass": "super12345",
-      "rol": "Supervisor",
       "nombre": "Supervisor de Campo",
+      "user": "supervisor1",
       "creado": "Tue Aug 18 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "user": "supervisor1"
-    },
-    {
-      "creado": "Thu Aug 27 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "nombre": "Alejandro Eustaquio",
-      "user": "aeustaquio",
       "rol": "Supervisor",
-      "pass": "santa123"
+      "pass": "super12345"
     },
     {
+      "user": "aeustaquio",
+      "creado": "Thu Aug 27 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "rol": "Supervisor",
+      "pass": "santa123",
+      "nombre": "Alejandro Eustaquio"
+    },
+    {
+      "nombre": "Trabajador de Campo",
       "user": "trabajador1",
       "rol": "Trabajador",
-      "creado": "Tue Aug 18 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "nombre": "Trabajador de Campo",
-      "pass": "campo12345"
-    },
-    {
-      "nombre": "Rosa Quito",
-      "pass": "allpa123",
-      "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "rol": "Trabajador",
-      "user": "rquito"
-    },
-    {
-      "pass": "campo123456",
-      "rol": "Trabajador",
-      "nombre": "Trabajador General",
-      "user": "trabajador",
+      "pass": "campo12345",
       "creado": "Tue Aug 18 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     },
     {
-      "rol": "Trabajador",
       "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "pass": "allpa123",
+      "rol": "Trabajador",
+      "user": "rquito",
+      "nombre": "Rosa Quito"
+    },
+    {
+      "user": "trabajador",
+      "nombre": "Trabajador General",
+      "creado": "Tue Aug 18 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "rol": "Trabajador",
+      "pass": "campo123456"
+    },
+    {
       "user": "dcastro",
       "nombre": "Dayanna Castro",
+      "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "rol": "Trabajador",
       "pass": "teresa123"
     },
     {
       "rol": "Supervisor",
-      "pass": "vivadis123",
       "user": "cvillegas",
+      "creado": "Thu Aug 27 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "nombre": "Carlos Villegas",
-      "creado": "Thu Aug 27 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
+      "pass": "vivadis123"
     },
     {
-      "user": "rrubio",
       "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "rol": "Trabajador",
-      "nombre": "Raquel Rubio",
-      "pass": "74216973"
+      "user": "rrubio",
+      "pass": "74216973",
+      "nombre": "Raquel Rubio"
     },
     {
-      "pass": "48127750",
-      "nombre": "Cinthia More",
       "user": "cmore",
       "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "nombre": "Cinthia More",
+      "pass": "48127750",
       "rol": "Trabajador"
     },
     {
-      "user": "ljimenez",
-      "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "rol": "Supervisor",
       "nombre": "Luis Jimenez",
-      "pass": "46466422"
+      "pass": "46466422",
+      "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "user": "ljimenez",
+      "rol": "Supervisor"
     },
     {
       "nombre": "Nataly Graciano",
       "pass": "46042674",
-      "creado": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "user": "ngraciano",
-      "rol": "Trabajador"
+      "rol": "Trabajador",
+      "creado": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     },
     {
-      "nombre": "Angello Jiménez",
-      "creado": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "pass": "73248472",
       "rol": "Trabajador",
+      "creado": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "nombre": "Angello Jiménez",
       "user": "Ajimenez"
     },
     {
+      "user": "alopez",
       "creado": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "nombre": "Ana Maria Lopez",
-      "user": "alopez",
       "rol": "Trabajador",
       "pass": "48605206"
     },
     {
-      "pass": "45104460",
-      "nombre": "Vasquez Alcalde Luigui Norberto",
       "creado": "Fri Sep 11 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "rol": "Trabajador",
-      "user": "lvasquez"
+      "user": "lvasquez",
+      "pass": "45104460",
+      "nombre": "Vasquez Alcalde Luigui Norberto"
     }
   ],
   "fundos": [
@@ -6824,414 +6824,6 @@
       "id": "IMP_1789139968343_510",
       "tipo": "Cosechador",
       "nombres": "MARQUINA ABANTO KEVIN JEAN CLAUDE ANTONIO"
-    },
-    {
-      "id": "2026-09-10_61256460_M03_6394",
-      "dni": "61256460",
-      "nombres": "CAMPOS CASTILLO ANGEL GRABRIEL",
-      "supervisor": "MORE NIZAMA CINTHIA MARIBEL",
-      "fundo": "Vivadis",
-      "modulo": "M03",
-      "grupo": "Grupo 01",
-      "lider": "Alfaro vigo Leslie",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_62771421_M03_6395",
-      "dni": "62771421",
-      "nombres": "IZQUIERDO VASQUEZ FERNANDA YANELI",
-      "supervisor": "MORE NIZAMA CINTHIA MARIBEL",
-      "fundo": "Vivadis",
-      "modulo": "M03",
-      "grupo": "Grupo 01",
-      "lider": "Alfaro vigo Leslie",
-      "jabas": 1,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_18850880_M04_0342",
-      "dni": "18850880",
-      "nombres": "HUAMAN TORRES WILLIAM HUMBERTO",
-      "supervisor": "VILLEGAS RUIZ CARLOS DAVID",
-      "fundo": "Vivadis",
-      "modulo": "M04",
-      "grupo": "Grupo 02",
-      "lider": "Huingo Cerquin Luz",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_18855344_M04_0342",
-      "dni": "18855344",
-      "nombres": "RAMIREZ HERRERA FIDEL",
-      "supervisor": "VILLEGAS RUIZ CARLOS DAVID",
-      "fundo": "Vivadis",
-      "modulo": "M04",
-      "grupo": "Grupo 02",
-      "lider": "Huingo Cerquin Luz",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_18855996_M04_0343",
-      "dni": "18855996",
-      "nombres": "SILVA SILVA FREDY",
-      "supervisor": "VILLEGAS RUIZ CARLOS DAVID",
-      "fundo": "Vivadis",
-      "modulo": "M04",
-      "grupo": "Grupo 02",
-      "lider": "Huingo Cerquin Luz",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_18857589_M04_0343",
-      "dni": "18857589",
-      "nombres": "IZQUIERDO CORREA JOHNSON",
-      "supervisor": "VILLEGAS RUIZ CARLOS DAVID",
-      "fundo": "Vivadis",
-      "modulo": "M04",
-      "grupo": "Grupo 02",
-      "lider": "Huingo Cerquin Luz",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_18897141_M04_0343",
-      "dni": "18897141",
-      "nombres": "SALDAÑA VASQUEZ AMPARO ELIZABETH",
-      "supervisor": "VILLEGAS RUIZ CARLOS DAVID",
-      "fundo": "Vivadis",
-      "modulo": "M04",
-      "grupo": "Grupo 02",
-      "lider": "Huingo Cerquin Luz",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_26931776_M04_0347",
-      "dni": "26931776",
-      "nombres": "GUEVARA CALDERON JOSE ALEJANDRO",
-      "supervisor": "VILLEGAS RUIZ CARLOS DAVID",
-      "fundo": "Vivadis",
-      "modulo": "M04",
-      "grupo": "Grupo 02",
-      "lider": "Huingo Cerquin Luz",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_40354127_M04_0348",
-      "dni": "40354127",
-      "nombres": "QUISPE ALCALDE ANA ELIZABETH",
-      "supervisor": "VILLEGAS RUIZ CARLOS DAVID",
-      "fundo": "Vivadis",
-      "modulo": "M04",
-      "grupo": "Grupo 02",
-      "lider": "Huingo Cerquin Luz",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_41978935_M04_0349",
-      "dni": "41978935",
-      "nombres": "VARGAS TUCTO ROSA JANET",
-      "supervisor": "VILLEGAS RUIZ CARLOS DAVID",
-      "fundo": "Vivadis",
-      "modulo": "M04",
-      "grupo": "Grupo 02",
-      "lider": "Huingo Cerquin Luz",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_43376543_M04_0351",
-      "dni": "43376543",
-      "nombres": "SERNAQUE ANASTACIO FLORENTINO",
-      "supervisor": "VILLEGAS RUIZ CARLOS DAVID",
-      "fundo": "Vivadis",
-      "modulo": "M04",
-      "grupo": "Grupo 02",
-      "lider": "Huingo Cerquin Luz",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_44317512_M04_0351",
-      "dni": "44317512",
-      "nombres": "YUPANQUI CHAVEZ ELSI",
-      "supervisor": "VILLEGAS RUIZ CARLOS DAVID",
-      "fundo": "Vivadis",
-      "modulo": "M04",
-      "grupo": "Grupo 02",
-      "lider": "Huingo Cerquin Luz",
-      "jabas": 1,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_46136608_M04_0352",
-      "dni": "46136608",
-      "nombres": "CORREA TUMBAJULCA CELIA ROSA",
-      "supervisor": "VILLEGAS RUIZ CARLOS DAVID",
-      "fundo": "Vivadis",
-      "modulo": "M04",
-      "grupo": "Grupo 02",
-      "lider": "Huingo Cerquin Luz",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_76189474_M04_0355",
-      "dni": "76189474",
-      "nombres": "PURIZACA VARGAS JOSE DIEGO",
-      "supervisor": "VILLEGAS RUIZ CARLOS DAVID",
-      "fundo": "Vivadis",
-      "modulo": "M04",
-      "grupo": "Grupo 02",
-      "lider": "Huingo Cerquin Luz",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_19075837_M13_5508",
-      "dni": "19075837",
-      "nombres": "RIVEROS GERONIMO MARI YUSMILDA",
-      "supervisor": "QUITO CHUCAS ROSAISELA",
-      "fundo": "Ayllu Allpa",
-      "modulo": "M13",
-      "grupo": "Grupo 01",
-      "lider": "Quito Chucas Rosa",
-      "jabas": 2,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_40970170_M13_5517",
-      "dni": "40970170",
-      "nombres": "SAONA RODRIGUEZ ELMER PAULINO",
-      "supervisor": "QUITO CHUCAS ROSAISELA",
-      "fundo": "Ayllu Allpa",
-      "modulo": "M13",
-      "grupo": "Grupo 01",
-      "lider": "Quito Chucas Rosa",
-      "jabas": 2,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_44630858_M13_5520",
-      "dni": "44630858",
-      "nombres": "HUAYLLA REYES ROSA ILDA",
-      "supervisor": "QUITO CHUCAS ROSAISELA",
-      "fundo": "Ayllu Allpa",
-      "modulo": "M13",
-      "grupo": "Grupo 01",
-      "lider": "Quito Chucas Rosa",
-      "jabas": 2,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_45474149_M13_5521",
-      "dni": "45474149",
-      "nombres": "MENDOZA ROJAS IRMA",
-      "supervisor": "QUITO CHUCAS ROSAISELA",
-      "fundo": "Ayllu Allpa",
-      "modulo": "M13",
-      "grupo": "Grupo 01",
-      "lider": "Quito Chucas Rosa",
-      "jabas": 2,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_46751902_M13_5525",
-      "dni": "46751902",
-      "nombres": "POLO ESCOBAR AMARILES",
-      "supervisor": "QUITO CHUCAS ROSAISELA",
-      "fundo": "Ayllu Allpa",
-      "modulo": "M13",
-      "grupo": "Grupo 01",
-      "lider": "Quito Chucas Rosa",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_60039604_M13_5526",
-      "dni": "60039604",
-      "nombres": "GONZALES MINCHOLA MICHAEL ALEXANDER",
-      "supervisor": "QUITO CHUCAS ROSAISELA",
-      "fundo": "Ayllu Allpa",
-      "modulo": "M13",
-      "grupo": "Grupo 01",
-      "lider": "Quito Chucas Rosa",
-      "jabas": 1,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_60507985_M13_5527",
-      "dni": "60507985",
-      "nombres": "GONZALES DIONICIO NAYELY YAKELIN",
-      "supervisor": "QUITO CHUCAS ROSAISELA",
-      "fundo": "Ayllu Allpa",
-      "modulo": "M13",
-      "grupo": "Grupo 01",
-      "lider": "Quito Chucas Rosa",
-      "jabas": 1,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_61242519_M13_5528",
-      "dni": "61242519",
-      "nombres": "SANCHEZ LOPEZ DIEGO RUBEN",
-      "supervisor": "QUITO CHUCAS ROSAISELA",
-      "fundo": "Ayllu Allpa",
-      "modulo": "M13",
-      "grupo": "Grupo 01",
-      "lider": "Quito Chucas Rosa",
-      "jabas": 1,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_70843769_M13_5529",
-      "dni": "70843769",
-      "nombres": "PASCUAL SAONA ISMILDA",
-      "supervisor": "QUITO CHUCAS ROSAISELA",
-      "fundo": "Ayllu Allpa",
-      "modulo": "M13",
-      "grupo": "Grupo 01",
-      "lider": "Quito Chucas Rosa",
-      "jabas": 2,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_70962398_M13_5529",
-      "dni": "70962398",
-      "nombres": "DELA CRUZ DIEGO MIJAEL",
-      "supervisor": "QUITO CHUCAS ROSAISELA",
-      "fundo": "Ayllu Allpa",
-      "modulo": "M13",
-      "grupo": "Grupo 01",
-      "lider": "Quito Chucas Rosa",
-      "jabas": 1,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_71691464_M13_5529",
-      "dni": "71691464",
-      "nombres": "POLO MINCHOLA BRIJITH EROBAYZA",
-      "supervisor": "QUITO CHUCAS ROSAISELA",
-      "fundo": "Ayllu Allpa",
-      "modulo": "M13",
-      "grupo": "Grupo 01",
-      "lider": "Quito Chucas Rosa",
-      "jabas": 2,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_77066107_M13_5532",
-      "dni": "77066107",
-      "nombres": "SAAVEDRA LLATAS ALONDRA YANET",
-      "supervisor": "QUITO CHUCAS ROSAISELA",
-      "fundo": "Ayllu Allpa",
-      "modulo": "M13",
-      "grupo": "Grupo 01",
-      "lider": "Quito Chucas Rosa",
-      "jabas": 2,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_77703249_M13_5532",
-      "dni": "77703249",
-      "nombres": "CONTRERAS RODRIGUEZ ALVENIO",
-      "supervisor": "QUITO CHUCAS ROSAISELA",
-      "fundo": "Ayllu Allpa",
-      "modulo": "M13",
-      "grupo": "Grupo 01",
-      "lider": "Quito Chucas Rosa",
-      "jabas": 2,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_41678684_M11_5576",
-      "dni": "41678684",
-      "nombres": "TANTALEAN PINILLOS EDWIN ALBERTO",
-      "supervisor": "JIMENEZ RUIZ LUIS ENRIQUE",
-      "fundo": "Santa Teresa",
-      "modulo": "M11",
-      "grupo": "Grupo 01",
-      "lider": "Lopez Perez Ana Maria",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_10834520_M09_8324",
-      "dni": "10834520",
-      "nombres": "PIZAN GAITAN RUFINO",
-      "supervisor": "AGUILAR CASTRO GEHELEN DAYANNA",
-      "fundo": "Santa Teresa",
-      "modulo": "M09",
-      "grupo": "Grupo 03",
-      "lider": "Camacho ramirez juan",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_18844900_M09_8325",
-      "dni": "18844900",
-      "nombres": "FLORES CASTRO TOMAS",
-      "supervisor": "AGUILAR CASTRO GEHELEN DAYANNA",
-      "fundo": "Santa Teresa",
-      "modulo": "M09",
-      "grupo": "Grupo 03",
-      "lider": "Camacho ramirez juan",
-      "jabas": 2,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_71366779_M09_8329",
-      "dni": "71366779",
-      "nombres": "LINARES CORCUERA CARLOS DANIEL",
-      "supervisor": "AGUILAR CASTRO GEHELEN DAYANNA",
-      "fundo": "Santa Teresa",
-      "modulo": "M09",
-      "grupo": "Grupo 03",
-      "lider": "Camacho ramirez juan",
-      "jabas": 3,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_42093236_M09_5024",
-      "dni": "42093236",
-      "nombres": "BUSTAMANTE GALVEZ NELIDA IBETH",
-      "supervisor": "AGUILAR CASTRO GEHELEN DAYANNA",
-      "fundo": "Santa Teresa",
-      "modulo": "M09",
-      "grupo": "Grupo 01",
-      "lider": "Vásquez Reyez Neyser",
-      "jabas": 2,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_60317094_M09_5026",
-      "dni": "60317094",
-      "nombres": "INUMA CASTERNOQUE GELCI",
-      "supervisor": "AGUILAR CASTRO GEHELEN DAYANNA",
-      "fundo": "Santa Teresa",
-      "modulo": "M09",
-      "grupo": "Grupo 01",
-      "lider": "Vásquez Reyez Neyser",
-      "jabas": 1,
-      "fecha": "2026-09-10"
-    },
-    {
-      "id": "2026-09-10_41262639_M09_0536",
-      "dni": "41262639",
-      "nombres": "SACHUN MORALES DE SAAVEDRA ROSXANA ELIZABETH",
-      "supervisor": "AGUILAR CASTRO GEHELEN DAYANNA",
-      "fundo": "Santa Teresa",
-      "modulo": "M09",
-      "grupo": "Grupo 02",
-      "lider": "Reyes Mendoza yubizat",
-      "jabas": 3,
-      "fecha": "2026-09-10"
     }
   ],
   "programas": [
@@ -15549,145 +15141,145 @@
   ],
   "lideres": [
     {
-      "nombres": "Jorge Luis Vera Cruz",
       "fechaAlta": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "lider": "Jorge Luis Vera Cruz",
       "dni": "48184163",
-      "lider": "Jorge Luis Vera Cruz"
+      "nombres": "Jorge Luis Vera Cruz"
     },
     {
       "dni": "73619236",
       "lider": "Ramirez Lara José Arturo Samuel",
-      "nombres": "Ramirez Lara José Arturo Samuel",
+      "fechaAlta": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "nombres": "Ramirez Lara José Arturo Samuel"
+    },
+    {
+      "dni": "72712553",
+      "fechaAlta": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "lider": "Aracely Del Milagro Campos Llontop",
+      "nombres": "Aracely Del Milagro Campos Llontop"
+    },
+    {
+      "lider": "Caballero Rosas Pool Farid",
+      "dni": "73272173",
+      "nombres": "Caballero Rosas Pool Farid",
       "fechaAlta": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     },
     {
-      "fechaAlta": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "nombres": "Aracely Del Milagro Campos Llontop",
-      "dni": "72712553",
-      "lider": "Aracely Del Milagro Campos Llontop"
-    },
-    {
-      "nombres": "Caballero Rosas Pool Farid",
-      "fechaAlta": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "lider": "Caballero Rosas Pool Farid",
-      "dni": "73272173"
-    },
-    {
-      "dni": "70116018",
       "lider": "Ana rosa Jave Abanto",
+      "dni": "70116018",
       "nombres": "Ana rosa Jave Abanto",
       "fechaAlta": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     },
     {
-      "lider": "Vásquez Reyez Neyser",
-      "dni": "41745016",
       "nombres": "Vásquez Reyez Neyser",
+      "dni": "41745016",
+      "lider": "Vásquez Reyez Neyser",
       "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     },
     {
-      "dni": "73123214",
+      "nombres": "Quito Chucas Rosa",
       "lider": "Quito Chucas Rosa",
       "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "nombres": "Quito Chucas Rosa"
+      "dni": "73123214"
     },
     {
       "nombres": "Escobar Chávez Maryuri",
-      "fechaAlta": "Wed Aug 26 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "lider": "Escobar Chávez Maryuri",
       "dni": "71091611",
-      "lider": "Escobar Chávez Maryuri"
+      "fechaAlta": "Wed Aug 26 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     },
     {
-      "dni": "63346327",
-      "lider": "Luis Gustavo Diaz Diaz",
       "fechaAlta": "Tue Aug 25 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "nombres": "Luis Gustavo Diaz Diaz"
+      "dni": "63346327",
+      "nombres": "Luis Gustavo Diaz Diaz",
+      "lider": "Luis Gustavo Diaz Diaz"
     },
     {
       "dni": "77459996",
-      "fechaAlta": "Wed Aug 26 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "nombres": "Cuenca Roncal Laura",
-      "lider": "Cuenca Roncal Laura"
+      "lider": "Cuenca Roncal Laura",
+      "fechaAlta": "Wed Aug 26 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     },
     {
-      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "lider": "Reyes Mendoza yubizat",
       "nombres": "Reyes Mendoza yubizat",
       "dni": "42862936",
-      "lider": "Reyes Mendoza yubizat"
+      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     },
     {
-      "nombres": "Camacho ramirez juan",
-      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "dni": "18854396",
-      "lider": "Camacho ramirez juan"
+      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "lider": "Camacho ramirez juan",
+      "nombres": "Camacho ramirez juan"
     },
     {
       "lider": "Torres Rondon Alberto",
+      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "dni": "41717558",
-      "nombres": "Torres Rondon Alberto",
-      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
+      "nombres": "Torres Rondon Alberto"
     },
     {
-      "dni": "60036679",
+      "nombres": "bautista torres Nayeli",
+      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "lider": "bautista torres Nayeli",
-      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "nombres": "bautista torres Nayeli"
+      "dni": "60036679"
     },
     {
+      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "dni": "41809697",
-      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "nombres": "Alfaro vigo Leslie",
-      "lider": "Alfaro vigo Leslie"
+      "lider": "Alfaro vigo Leslie",
+      "nombres": "Alfaro vigo Leslie"
     },
     {
-      "dni": "70675551",
       "nombres": "Huingo Cerquin Luz",
-      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "lider": "Huingo Cerquin Luz"
+      "dni": "70675551",
+      "lider": "Huingo Cerquin Luz",
+      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     },
     {
       "lider": "Rubio horna Raquel",
-      "dni": "74216973",
       "nombres": "Rubio horna Raquel",
-      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
+      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "dni": "74216973"
     },
     {
       "lider": "More Nizama Cinthia",
-      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "nombres": "More Nizama Cinthia",
       "dni": "48127750",
-      "nombres": "More Nizama Cinthia"
+      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     },
     {
-      "dni": "46838329",
+      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "nombres": "Correa Olano Fiorela",
-      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "lider": "Correa Olano Fiorela"
+      "lider": "Correa Olano Fiorela",
+      "dni": "46838329"
     },
     {
       "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "dni": "60329183",
       "nombres": "Carranza Tantarico jeanpierre Alexander",
-      "lider": "Carranza Tantarico jeanpierre Alexander"
+      "lider": "Carranza Tantarico jeanpierre Alexander",
+      "dni": "60329183"
     },
     {
-      "lider": "Guanilo Castillo Isabel",
       "nombres": "Guanilo Castillo Isabel",
+      "lider": "Guanilo Castillo Isabel",
       "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "dni": "75842464"
     },
     {
-      "lider": "Diaz Diaz Gustavo",
       "dni": "63346327",
-      "nombres": "Diaz Diaz Gustavo",
-      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
+      "lider": "Diaz Diaz Gustavo",
+      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "nombres": "Diaz Diaz Gustavo"
     },
     {
-      "dni": "48605206",
-      "fechaAlta": "Mon Sep 07 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "lider": "Lopez Perez Ana Maria",
-      "nombres": "Lopez Perez Ana Maria"
+      "nombres": "Lopez Perez Ana Maria",
+      "fechaAlta": "Mon Sep 07 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "dni": "48605206"
     }
   ],
   "reservas": [],
   "auditoriaIngresos": [],
-  "lastUpdated": "2026-09-11T15:46:23.715Z"
+  "lastUpdated": "2026-09-11T16:34:10.803Z"
 }
