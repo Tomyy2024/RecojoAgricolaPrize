@@ -134,6 +134,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const [cuadrillaLider, setCuadrillaLider] = useState('');
   const [cuadrillaLiderDni, setCuadrillaLiderDni] = useState('');
 
+  // Selected Work / Harvest date in Personal tab (defaults to local today)
+  const [fechaPersonal, setFechaPersonal] = useState<string>(() => getLocalToday());
+
   // Search filter and high-performance list pagination
   const [searchTerm, setSearchTerm] = useState('');
   const [step2SearchTerm, setStep2SearchTerm] = useState('');
@@ -344,10 +347,11 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
   const hoyStr = useMemo(() => getLocalToday(), []);
 
-  // Reservas del día de hoy
+  // Reservas de la fecha consultada (por defecto hoy)
   const reservasHoy = useMemo(() => {
-    return reservasState.filter((r) => r.fecha === hoyStr);
-  }, [reservasState, hoyStr]);
+    const targetFecha = fechaPersonal || hoyStr;
+    return reservasState.filter((r) => (r.fecha ? normalizeDateString(r.fecha) : hoyStr) === targetFecha);
+  }, [reservasState, fechaPersonal, hoyStr]);
 
   // Mapa de trabajadores que ya están registrados en alguna reserva de hoy
   const workersInReservasHoyMap = useMemo(() => {
@@ -538,16 +542,16 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     [normalizeDni, normalizeStr, workersInReservasHoyMap, workerAssignedGrupos]
   );
 
-  // Mapa de jabas registradas hoy para cada trabajador (basado en detalleJabas y en t.jabas)
+  // Mapa de jabas registradas para cada trabajador en la fecha seleccionada (basado en detalleJabas)
   const workerJabasTodayMap = useMemo(() => {
     const map: Record<string, number> = {};
-    const hoy = getLocalToday();
+    const targetFecha = fechaPersonal || getLocalToday();
 
     if (Array.isArray(detalleJabas)) {
       detalleJabas.forEach((d) => {
-        const dFecha = String(d.fecha || '').trim();
-        const dTimestamp = String(d.timestamp || '').slice(0, 10);
-        if (dFecha === hoy || dTimestamp === hoy) {
+        // La fecha comercial d.fecha es la fuente primaria y exacta (nunca usar timestamps UTC que desfasen el día)
+        const dFecha = d.fecha ? normalizeDateString(d.fecha) : (d.timestamp ? normalizeDateString(d.timestamp) : '');
+        if (dFecha === targetFecha) {
           const jabas = Number(d.jabas) || 0;
           if (jabas > 0 && d.dni) {
             const norm = normalizeDni(d.dni);
@@ -564,11 +568,11 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       });
     }
 
-    // Complementar con el registro del trabajador si tiene jabas hoy
+    // Complementar con el registro del trabajador si tiene jabas en esa fecha específica
     trabajadores.forEach((t) => {
       const j = Number(t.jabas) || 0;
-      const tFecha = String(t.fecha || '').trim();
-      if (j > 0 && (!tFecha || tFecha === hoy)) {
+      const tFecha = t.fecha ? normalizeDateString(t.fecha) : '';
+      if (j > 0 && tFecha === targetFecha) {
         const norm = normalizeDni(t.dni);
         const raw = String(t.dni || '').trim();
         if (norm && !map[norm]) map[norm] = j;
@@ -582,7 +586,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     });
 
     return map;
-  }, [detalleJabas, trabajadores, normalizeDni, normalizeStr]);
+  }, [detalleJabas, trabajadores, fechaPersonal, normalizeDni, normalizeStr]);
 
   const getWorkerJabasCount = useCallback(
     (workerOrDni: any) => {
@@ -601,9 +605,14 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         0;
 
       if (fromMap > 0) return fromMap;
-      return Number((worker as any).jabas) || 0;
+      const targetFecha = fechaPersonal || getLocalToday();
+      const wFecha = worker.fecha ? normalizeDateString(worker.fecha) : '';
+      if (wFecha && wFecha === targetFecha) {
+        return Number((worker as any).jabas) || 0;
+      }
+      return 0;
     },
-    [workerJabasTodayMap, normalizeDni, normalizeStr]
+    [workerJabasTodayMap, fechaPersonal, normalizeDni, normalizeStr]
   );
 
   const hasWorkerJabas = useCallback(
@@ -1861,7 +1870,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             modulo: targetModulo,
             grupo: t.grupo || assignedGrp,
             lider: t.lider || targetLider || '',
-            fecha: getLocalToday()
+            fecha: fechaPersonal || getLocalToday()
           };
         }
         return t;
@@ -1881,7 +1890,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   };
 
   const handleSaveAvanceFinal = () => {
-    const hoy = getLocalToday();
+    const fechaAvance = fechaPersonal || getLocalToday();
     const nowIso = getLocalISO();
     const detalleList: DetalleJaba[] = [];
 
@@ -1901,8 +1910,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
           cuadrillaGrupo;
 
         detalleList.push({
-          id: `${hoy}_${resolvedDni}_${cuadrillaModulo || 'M01'}_${Date.now().toString().slice(-4)}`,
-          fecha: hoy,
+          id: `${fechaAvance}_${resolvedDni}_${cuadrillaModulo || 'M01'}_${Date.now().toString().slice(-4)}`,
+          fecha: fechaAvance,
           dni: String(resolvedDni),
           trabajador: t ? t.nombres : String(resolvedDni),
           fundo: cuadrillaFundo || 'Santa Teresa',
@@ -1945,7 +1954,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             grupo: d.grupo || t.grupo,
             lider: d.lider || t.lider,
             jabas: (getWorkerJabasCount(t) || 0) + Number(d.jabas || 0),
-            fecha: hoy
+            fecha: fechaAvance
           };
         }
         return t;
@@ -1953,10 +1962,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       onUpdateTrabajadores(updated);
     }
 
-    // Actualizar reservas de hoy: marcar como completadas las reservas cuyos trabajadores recibieron jabas
+    // Actualizar reservas del día: marcar como completadas las reservas cuyos trabajadores recibieron jabas
     const savedDnisSet = new Set(detalleList.map((d) => normalizeDni(d.dni) || String(d.dni).trim()));
     const updatedReservas = reservasState.map((res) => {
-      if (res.fecha !== hoy) return res;
+      if (res.fecha !== fechaAvance) return res;
       const resDnis = (res.trabajadores || []).map((tw) => normalizeDni(tw.dni) || String(tw.dni).trim());
       const hasSavedWorker = resDnis.some((dni) => savedDnisSet.has(dni));
       if (hasSavedWorker) {
@@ -2920,6 +2929,48 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               </div>
             </div>
 
+            {/* Selector de Fecha de Consulta / Registro de Avance */}
+            <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 mb-3 bg-[#f8faf8] border border-[#d0ded0] rounded-xl">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-[#1b5e20]">
+                  <Calendar className="w-4 h-4 text-[#2e7d32]" />
+                  <span>Fecha de Consulta y Registro:</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="date"
+                    value={fechaPersonal}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val) setFechaPersonal(val);
+                    }}
+                    className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-[#a5d6a7] bg-white text-gray-800 shadow-xs focus:outline-none focus:ring-1 focus:ring-[#2e7d32]"
+                  />
+                  {fechaPersonal !== hoyStr ? (
+                    <button
+                      type="button"
+                      onClick={() => setFechaPersonal(hoyStr)}
+                      className="px-2.5 py-1 text-xs font-bold bg-[#2e7d32] text-white hover:bg-[#1b5e20] rounded-lg shadow-xs cursor-pointer transition-all active:scale-95 flex items-center gap-1"
+                      title="Regresar a la fecha de hoy"
+                    >
+                      <span>Ir a Hoy</span>
+                    </button>
+                  ) : (
+                    <span className="text-[11px] bg-[#e8f5e9] text-[#1b5e20] font-bold px-2 py-0.5 rounded-full border border-[#a5d6a7]">
+                      Hoy
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="text-[11px] text-gray-600 flex items-center gap-1.5">
+                <span>Consultando avance del día:</span>
+                <span className="font-bold text-[#1b5e20] bg-white px-2 py-0.5 rounded-md border border-[#c8e6c9]">
+                  {fechaPersonal === hoyStr ? `Hoy (${fechaPersonal})` : fechaPersonal}
+                </span>
+              </div>
+            </div>
+
             {/* Barra de Búsqueda y Botones de Acción Rápida */}
             <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2 mb-3">
               <div className="relative flex-1">
@@ -3305,7 +3356,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                               {tieneJabas && (
                                 <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
                                   <Package className="w-3 h-3 text-emerald-600" />
-                                  <span>{jabasCount} {jabasCount === 1 ? 'jaba' : 'jabas'} hoy</span>
+                                  <span>
+                                    {jabasCount} {jabasCount === 1 ? 'jaba' : 'jabas'} {fechaPersonal === hoyStr ? 'hoy' : `el ${fechaPersonal}`}
+                                  </span>
                                 </span>
                               )}
 
@@ -3583,6 +3636,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
               {/* Indicadores de Métricas en Vivo */}
               <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between sm:justify-end">
+                <div className="bg-white px-3 py-1.5 rounded-xl border border-[#a5d6a7] text-center shadow-xs">
+                  <div className="text-xs font-bold text-[#1b5e20]">{fechaPersonal}</div>
+                  <div className="text-[10px] text-gray-500 uppercase font-semibold">Fecha Registro</div>
+                </div>
                 <div className="bg-white px-3 py-1.5 rounded-xl border border-[#a5d6a7] text-center shadow-xs">
                   <div className="text-xs font-bold text-[#1b5e20]">{step2EffectiveWorkers.length}</div>
                   <div className="text-[10px] text-gray-500 uppercase font-semibold">Personal</div>
