@@ -44,7 +44,7 @@ const TABS: TabConfig[] = [
     id: 'trabajadores',
     label: 'Personal',
     icon: <Users className="w-5 h-5" />,
-    roles: ['Administrador', 'Trabajador']
+    roles: ['Administrador', 'Supervisor', 'Trabajador']
   },
   {
     id: 'validacion',

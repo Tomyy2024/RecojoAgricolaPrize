@@ -177,6 +177,127 @@ async function startServer() {
   // In-memory active database
   let db = loadDatabase();
 
+  // Helper to sync from Cloud Firestore (ensures shared persistence across instances & users)
+  async function syncFromCloudFirestore() {
+    try {
+      const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+      if (!fs.existsSync(configPath)) return;
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      const { initializeApp, getApps } = await import('firebase/app');
+      const { getFirestore, doc, getDoc } = await import('firebase/firestore');
+      const app = getApps().length > 0 ? getApps()[0] : initializeApp(config, 'backend-cloud-sync');
+      const cloudDb = getFirestore(app, config.firestoreDatabaseId);
+      const snap = await getDoc(doc(cloudDb, 'app_state', 'master_data'));
+      if (snap.exists()) {
+        const data = snap.data();
+        let changed = false;
+
+        // 1. Trabajadores
+        if (Array.isArray(data.trabajadores) && data.trabajadores.length > 0) {
+          if (!db.trabajadores || db.trabajadores.length === 0 || data.trabajadores.length >= (db.trabajadores.length || 0)) {
+            db.trabajadores = data.trabajadores;
+            changed = true;
+          }
+        }
+
+        // 2. Usuarios
+        if (Array.isArray(data.usuarios) && data.usuarios.length > 0) {
+          const userMap = new Map<string, any>();
+          DEFAULT_USUARIOS.forEach(u => userMap.set(u.user.toLowerCase(), u));
+          (db.usuarios || []).forEach((u: any) => userMap.set(u.user.toLowerCase(), u));
+          data.usuarios.forEach((u: any) => userMap.set(u.user.toLowerCase(), u));
+          db.usuarios = Array.from(userMap.values());
+          changed = true;
+        }
+
+        // 3. Detalle Jabas
+        if (Array.isArray(data.detalleJabas) && data.detalleJabas.length > (db.detalleJabas?.length || 0)) {
+          db.detalleJabas = data.detalleJabas;
+          changed = true;
+        }
+
+        // 4. Programas & ProgramaGeneral
+        if (Array.isArray(data.programas) && data.programas.length > (db.programas?.length || 0)) {
+          db.programas = data.programas;
+          changed = true;
+        }
+        if (Array.isArray(data.programaGeneral) && data.programaGeneral.length > (db.programaGeneral?.length || 0)) {
+          db.programaGeneral = data.programaGeneral;
+          changed = true;
+        }
+
+        // 5. Validaciones
+        if (Array.isArray(data.validaciones) && data.validaciones.length > (db.validaciones?.length || 0)) {
+          db.validaciones = sanitizeValidaciones(data.validaciones);
+          changed = true;
+        }
+
+        // 6. Lideres & Grupos & Reservas & Modulos
+        if (Array.isArray(data.lideres) && data.lideres.length > 0) {
+          db.lideres = data.lideres;
+          changed = true;
+        }
+        if (Array.isArray(data.grupos) && data.grupos.length > 0) {
+          db.grupos = data.grupos;
+          changed = true;
+        }
+        if (Array.isArray(data.reservas) && data.reservas.length > 0) {
+          db.reservas = data.reservas;
+          changed = true;
+        }
+        if (data.modulos && typeof data.modulos === 'object') {
+          db.modulos = { ...(db.modulos || {}), ...data.modulos };
+          changed = true;
+        }
+
+        if (changed) {
+          db.version = (db.version || 1) + 1;
+          db.lastUpdated = new Date().toISOString();
+          saveDatabase(db);
+          console.log(`✅ [Backend] Base central actualizada desde Firestore: ${db.trabajadores?.length || 0} trabajadores, ${db.usuarios?.length || 0} usuarios.`);
+          notifyClients({ type: 'sync', version: db.version, data: db });
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Backend] Aviso Firestore:', err?.message || err);
+    }
+  }
+
+  // Helper to persist server changes directly to Cloud Firestore
+  async function syncToCloudFirestore(updateData: any) {
+    try {
+      const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+      if (!fs.existsSync(configPath)) return;
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      const { initializeApp, getApps } = await import('firebase/app');
+      const { getFirestore, doc, setDoc } = await import('firebase/firestore');
+      const app = getApps().length > 0 ? getApps()[0] : initializeApp(config, 'backend-cloud-sync');
+      const cloudDb = getFirestore(app, config.firestoreDatabaseId);
+
+      const payload: Record<string, any> = {
+        lastUpdated: new Date().toISOString(),
+        version: db.version || 1
+      };
+      if (Array.isArray(updateData.trabajadores)) payload.trabajadores = updateData.trabajadores;
+      if (Array.isArray(updateData.usuarios)) payload.usuarios = updateData.usuarios;
+      if (Array.isArray(updateData.programas)) payload.programas = updateData.programas;
+      if (Array.isArray(updateData.programaGeneral)) payload.programaGeneral = updateData.programaGeneral;
+      if (Array.isArray(updateData.detalleJabas)) payload.detalleJabas = updateData.detalleJabas;
+      if (Array.isArray(updateData.validaciones)) payload.validaciones = updateData.validaciones;
+      if (Array.isArray(updateData.lideres)) payload.lideres = updateData.lideres;
+      if (Array.isArray(updateData.grupos)) payload.grupos = updateData.grupos;
+      if (Array.isArray(updateData.reservas)) payload.reservas = updateData.reservas;
+      if (updateData.modulos) payload.modulos = updateData.modulos;
+
+      await setDoc(doc(cloudDb, 'app_state', 'master_data'), payload, { merge: true });
+    } catch (err: any) {
+      console.warn('[Backend] Error guardando en Firestore:', err?.message || err);
+    }
+  }
+
+  // Run initial sync on boot
+  syncFromCloudFirestore();
+
   // API Routes
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString(), version: db.version || 1 });
@@ -200,7 +321,10 @@ async function startServer() {
   });
 
   // Get centralized data for all users/PCs
-  app.get('/api/data', (req, res) => {
+  app.get('/api/data', async (req, res) => {
+    if (!db.trabajadores || db.trabajadores.length === 0) {
+      await syncFromCloudFirestore();
+    }
     res.json({
       status: 'ok',
       data: db
@@ -208,7 +332,10 @@ async function startServer() {
   });
 
   // Get all users specifically
-  app.get('/api/usuarios', (req, res) => {
+  app.get('/api/usuarios', async (req, res) => {
+    if (!db.usuarios || db.usuarios.length <= 1) {
+      await syncFromCloudFirestore();
+    }
     res.json({
       status: 'ok',
       usuarios: db.usuarios || []
@@ -216,7 +343,7 @@ async function startServer() {
   });
 
   // Direct login verification against server database with audit recording
-  app.post('/api/login', (req, res) => {
+  app.post('/api/login', async (req, res) => {
     const { user, pass, dispositivo } = req.body || {};
     const uTrim = String(user || '').trim().toLowerCase();
     const pTrim = String(pass || '').trim();
@@ -225,11 +352,20 @@ async function startServer() {
       return res.status(400).json({ status: 'error', message: 'Usuario y contraseña requeridos' });
     }
 
-    const found = (db.usuarios || []).find(
+    let found = (db.usuarios || []).find(
       (u: any) =>
         (u.user?.toLowerCase() === uTrim || u.nombre?.toLowerCase() === uTrim) &&
         (u.pass === pTrim || (u.user?.toLowerCase() === 'admin' && (pTrim === 'prize2026' || pTrim === 'admin123')))
     );
+
+    if (!found) {
+      await syncFromCloudFirestore();
+      found = (db.usuarios || []).find(
+        (u: any) =>
+          (u.user?.toLowerCase() === uTrim || u.nombre?.toLowerCase() === uTrim) &&
+          (u.pass === pTrim || (u.user?.toLowerCase() === 'admin' && (pTrim === 'prize2026' || pTrim === 'admin123')))
+      );
+    }
 
     if (!found) {
       return res.status(401).json({ status: 'error', message: 'Usuario o contraseña incorrectos' });
@@ -453,6 +589,7 @@ async function startServer() {
         db.version = (db.version || 1) + 1;
         db.lastUpdated = new Date().toISOString();
         saveDatabase(db);
+        syncToCloudFirestore({ trabajadores: db.trabajadores });
         notifyClients({ type: 'sync', version: db.version, data: db });
         return res.json({ status: 'ok', count: db.trabajadores.length, data: db.trabajadores });
       }
@@ -568,14 +705,8 @@ async function startServer() {
         if (Array.isArray(incoming.programaGeneral)) db.programaGeneral = incoming.programaGeneral;
 
         // Solo se ignora db.trabajadores si expresamente el rol es 'Trabajador'
-        if (!isWorkerRole && Array.isArray(incoming.trabajadores)) {
-          const today = new Date().toISOString().slice(0, 10);
-          const minDate = db.fechaUltimaDepuracion || today;
-          db.trabajadores = incoming.trabajadores.filter((t: any) => {
-            const tf = t.fecha ? normalizeDateServer(t.fecha) : '';
-            if (tf && tf < minDate) return false;
-            return true;
-          });
+        if (!isWorkerRole && Array.isArray(incoming.trabajadores) && incoming.trabajadores.length > 0) {
+          db.trabajadores = incoming.trabajadores;
         }
         if (Array.isArray(incoming.detalleJabas)) db.detalleJabas = incoming.detalleJabas;
         if (Array.isArray(incoming.validaciones)) {
@@ -603,6 +734,7 @@ async function startServer() {
         db.version = (db.version || 1) + 1;
         db.lastUpdated = new Date().toISOString();
         saveDatabase(db);
+        syncToCloudFirestore(db);
 
         // Push updates to all connected devices immediately
         notifyClients({ type: 'sync', version: db.version, data: db });

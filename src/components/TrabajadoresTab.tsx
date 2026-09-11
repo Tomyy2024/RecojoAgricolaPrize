@@ -613,12 +613,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     [getWorkerJabasCount]
   );
 
-  // Un trabajador se considera completado / asignado si ya tiene Grupo, Líder, Reserva de hoy, o jabas registradas hoy
+  // Un trabajador se considera completado / asignado si ya tiene Grupo, Líder o Reserva activa de hoy
   const isWorkerCompletadoOAsignado = useCallback(
     (workerOrDni: any) => {
-      return isWorkerAsignado(workerOrDni) || hasWorkerJabas(workerOrDni);
+      return isWorkerAsignado(workerOrDni);
     },
-    [isWorkerAsignado, hasWorkerJabas]
+    [isWorkerAsignado]
   );
 
   // Verifica si una reserva ya tiene a todos sus trabajadores con jabas registradas hoy
@@ -3021,7 +3021,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     ? 'bg-purple-600 text-white shadow-xs ring-1 ring-purple-700'
                     : 'bg-purple-50 text-purple-900 border border-purple-200 hover:bg-purple-100'
                 }`}
-                title="Mostrar los trabajadores que ya cuentan con Grupo, Líder, Reserva o Jabas asignadas hoy"
+                title="Mostrar los trabajadores que ya cuentan con Grupo o Líder asignado en la cuadrilla"
               >
                 <Users className="w-3.5 h-3.5" />
                 <span>Ya Asignados</span>
@@ -3129,7 +3129,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       {vistaAsignacion === 'pendientes' || (vistaAsignacion as string) === 'sin_jabas'
                         ? `Mostrando únicamente trabajadores pendientes por asignar (${filteredTrabajadores.length} disponibles). Los asignados se ocultan automáticamente.`
                         : vistaAsignacion === 'asignados'
-                        ? `Mostrando trabajadores que ya tienen Grupo, Líder o Jabas hoy (${filteredTrabajadores.length} asignados).`
+                        ? `Mostrando trabajadores que ya tienen Grupo o Líder asignado (${filteredTrabajadores.length} asignados).`
                         : vistaAsignacion === 'con_jabas'
                         ? `Mostrando trabajadores con avance de jabas registrado hoy (${filteredTrabajadores.length} con jabas).`
                         : `Nómina completa (${filteredTrabajadores.length} trabajadores). Activa filtros seleccionando Supervisor, Fundo o Módulo arriba.`}

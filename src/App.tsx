@@ -83,7 +83,8 @@ import { ShareAppModal } from './components/ShareAppModal';
 import { Toast, ToastMessage } from './components/Toast';
 import { 
   subscribeToFirestoreMasterData, 
-  syncAllDataToFirestore 
+  syncAllDataToFirestore,
+  fetchAllDataFromFirestore
 } from './lib/firebase';
 
 export default function App() {
@@ -135,7 +136,7 @@ export default function App() {
       setActiveTab('trabajadores');
     } else if (
       session.rol === 'Supervisor' &&
-      !['programaGeneral', 'programa', 'validacion'].includes(activeTab)
+      !['programaGeneral', 'programa', 'trabajadores', 'validacion', 'gruposLideres'].includes(activeTab)
     ) {
       setActiveTab('programaGeneral');
     }
@@ -381,14 +382,31 @@ export default function App() {
         const json = await res.json();
         if (json && json.status === 'ok' && json.data) {
           applyServerData(json.data, silent);
-          fetchedFromServer = true;
+          if (Array.isArray(json.data.trabajadores) && json.data.trabajadores.length > 0) {
+            fetchedFromServer = true;
+          }
         }
       }
     } catch {
       // Server not reachable (e.g. static host like Netlify)
     }
 
-    // 2. If server API not available (Netlify / Static deploy), fetch from Google Sheets Cloud Backend
+    // 2. Query Cloud Firestore directly (shared cross-device and cross-user database)
+    if (!fetchedFromServer) {
+      try {
+        const cloudData = await fetchAllDataFromFirestore();
+        if (cloudData) {
+          applyServerData(cloudData, silent);
+          if (Array.isArray(cloudData.trabajadores) && cloudData.trabajadores.length > 0) {
+            fetchedFromServer = true;
+          }
+        }
+      } catch (err) {
+        console.warn('Firestore fetch error in fetchCentralizedData:', err);
+      }
+    }
+
+    // 3. Fallback: Google Sheets Cloud Backend
     if (!fetchedFromServer) {
       const url = getGsheetUrl();
       if (url) {

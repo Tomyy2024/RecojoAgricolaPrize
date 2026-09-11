@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserSession, Usuario, AuditoriaIngreso } from '../types';
 import { getUsuarios, saveUsuarios, getGsheetUrl, addAuditoriaIngreso } from '../utils/storage';
+import { fetchAllDataFromFirestore } from '../lib/firebase';
 import { Sprout, Lock, User, KeyRound, Wifi, RefreshCw, Clock } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -17,13 +18,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onToast }) =>
   const [userList, setUserList] = useState<Usuario[]>(() => getUsuarios());
   const [serverOnline, setServerOnline] = useState<boolean>(true);
 
-  // Synchronize master user catalog from central server or Google Sheets immediately on load
+  // Synchronize master user catalog from central server, Firestore, or Google Sheets immediately on load
   const syncServerUsers = async () => {
     try {
       const res = await fetch('/api/usuarios');
       if (res.ok) {
         const json = await res.json();
-        if (json && json.status === 'ok' && Array.isArray(json.usuarios) && json.usuarios.length > 0) {
+        if (json && json.status === 'ok' && Array.isArray(json.usuarios) && json.usuarios.length > 1) {
           setUserList(json.usuarios);
           saveUsuarios(json.usuarios);
           setServerOnline(true);
@@ -32,6 +33,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onToast }) =>
       }
     } catch {
       setServerOnline(false);
+    }
+
+    // Cloud Firestore fallback: Pull users from Firestore (shared cross-device database)
+    try {
+      const cloudData = await fetchAllDataFromFirestore();
+      if (cloudData && Array.isArray(cloudData.usuarios) && cloudData.usuarios.length > 0) {
+        setUserList(cloudData.usuarios);
+        saveUsuarios(cloudData.usuarios);
+        setServerOnline(true);
+        return;
+      }
+    } catch {
+      // Local fallback
     }
 
     // Fallback for Netlify / Static Host: Pull users from Google Sheets
@@ -105,24 +119,39 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onToast }) =>
           setLoading(false);
           return;
         }
-      } else if (res.status === 401) {
-        setError('Usuario o contraseña incorrectos');
-        setLoading(false);
-        return;
       }
+      // If server returned 401, check if user exists in local or cloud storage before failing
     } catch {
       // Offline fallback
       setServerOnline(false);
     }
 
-    // 2. Offline fallback matching local storage
-    const currentUsers = getUsuarios();
-    const foundIndex = currentUsers.findIndex(
+    // 2. Offline / Cloud fallback matching local storage or Firestore
+    let currentUsers = getUsuarios();
+    let foundIndex = currentUsers.findIndex(
       u => (
         u.user.toLowerCase() === userTrim.toLowerCase() ||
         u.nombre.toLowerCase() === userTrim.toLowerCase()
       ) && (u.pass === passTrim || (u.user?.toLowerCase() === 'admin' && (passTrim === 'prize2026' || passTrim === 'admin123')))
     );
+
+    if (foundIndex === -1) {
+      try {
+        const cloudData = await fetchAllDataFromFirestore();
+        if (cloudData && Array.isArray(cloudData.usuarios)) {
+          currentUsers = cloudData.usuarios;
+          saveUsuarios(currentUsers);
+          foundIndex = currentUsers.findIndex(
+            u => (
+              u.user.toLowerCase() === userTrim.toLowerCase() ||
+              u.nombre.toLowerCase() === userTrim.toLowerCase()
+            ) && (u.pass === passTrim || (u.user?.toLowerCase() === 'admin' && (passTrim === 'prize2026' || passTrim === 'admin123')))
+          );
+        }
+      } catch {
+        // Ignored
+      }
+    }
 
     if (foundIndex !== -1) {
       const found = currentUsers[foundIndex];
