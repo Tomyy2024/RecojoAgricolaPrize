@@ -130,9 +130,35 @@ function loadDatabase() {
 
       const cleanedValidaciones = sanitizeValidaciones(parsed.validaciones);
 
+      // Auto-incorporar trabajadores desde detalleJabas si faltan en trabajadores
+      const existingWorkerDnis = new Set((parsed.trabajadores || []).map((t: any) => String(t.dni || '').trim()));
+      const extraWorkers: any[] = [];
+      if (Array.isArray(parsed.detalleJabas)) {
+        parsed.detalleJabas.forEach((d: any) => {
+          const dni = String(d.dni || '').trim();
+          if (dni && !existingWorkerDnis.has(dni)) {
+            existingWorkerDnis.add(dni);
+            extraWorkers.push({
+              id: d.id || `w_${dni}`,
+              dni: dni,
+              nombres: d.trabajador || `Trabajador ${dni}`,
+              supervisor: d.supervisor || '',
+              fundo: d.fundo || 'Santa Teresa',
+              modulo: d.modulo || 'M01',
+              grupo: d.grupo || 'Grupo 01',
+              lider: d.lider || '',
+              jabas: Number(d.jabas) || 0,
+              fecha: d.fecha || ''
+            });
+          }
+        });
+      }
+      const combinedTrabajadores = extraWorkers.length > 0 ? [...(parsed.trabajadores || []), ...extraWorkers] : (parsed.trabajadores || []);
+
       return {
         ...getInitialData(),
         ...parsed,
+        trabajadores: combinedTrabajadores,
         usuarios: Array.from(userMap.values()),
         validaciones: cleanedValidaciones
       };

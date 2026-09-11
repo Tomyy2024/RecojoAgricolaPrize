@@ -442,6 +442,47 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     }).length;
   }, [trabajadores, hoyStr]);
 
+  // Complementar nómina con trabajadores registrados en Registro de Avance (detalleJabas)
+  // para que siempre coincida al 100% con los avances reales del campo y no falte ningún cosechador
+  const fullTrabajadores = useMemo(() => {
+    const existingDnis = new Set<string>();
+    trabajadores.forEach((t) => {
+      const norm = normalizeDni(t.dni);
+      const raw = String(t.dni || '').trim();
+      if (norm) existingDnis.add(norm);
+      if (raw) existingDnis.add(raw);
+    });
+
+    const extras: Trabajador[] = [];
+    if (Array.isArray(detalleJabas)) {
+      detalleJabas.forEach((d) => {
+        const norm = normalizeDni(d.dni);
+        const raw = String(d.dni || '').trim();
+        const key = norm || raw;
+        if (key && !existingDnis.has(key)) {
+          existingDnis.add(key);
+          if (norm) existingDnis.add(norm);
+          if (raw) existingDnis.add(raw);
+          extras.push({
+            id: d.id || `extra_${key}`,
+            dni: raw || norm,
+            nombres: d.trabajador || `Trabajador ${key}`,
+            supervisor: d.supervisor || '',
+            fundo: d.fundo || 'Santa Teresa',
+            modulo: d.modulo || 'M01',
+            grupo: d.grupo || 'Grupo 01',
+            lider: d.lider || '',
+            jabas: Number(d.jabas) || 0,
+            fecha: d.fecha || ''
+          });
+        }
+      });
+    }
+
+    if (extras.length === 0) return trabajadores;
+    return [...trabajadores, ...extras];
+  }, [trabajadores, detalleJabas, normalizeDni]);
+
   // Pre-indexed workers for sub-millisecond search and strict binding
   const indexedTrabajadores = useMemo(() => {
     const seenKey = new Set<string>();
@@ -456,12 +497,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     // Si el usuario tiene rol 'Trabajador', NUNCA deben aparecerle trabajadores del día anterior
     const isTrabajadorUser = session?.rol === 'Trabajador';
     const effectiveTrabajadores = isTrabajadorUser
-      ? trabajadores.filter((t) => {
+      ? fullTrabajadores.filter((t) => {
           if (!t.fecha) return true;
           const fn = normalizeDateString(t.fecha);
           return !fn || fn >= hoyStr;
         })
-      : trabajadores;
+      : fullTrabajadores;
 
     for (let i = 0; i < effectiveTrabajadores.length; i++) {
       const t = effectiveTrabajadores[i];
@@ -587,6 +628,40 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
     return map;
   }, [detalleJabas, trabajadores, fechaPersonal, normalizeDni, normalizeStr]);
+
+  // Consulta directa y estricta al Registro de Avance (detalleJabas) para la fecha consultada
+  // Calcula con precisión matemática el total real de jabas del día y los trabajadores participantes
+  const avanceDiaStats = useMemo(() => {
+    const targetFecha = fechaPersonal || getLocalToday();
+    let totalJabasDia = 0;
+    const dnisConJabas = new Set<string>();
+    let totalRegistros = 0;
+
+    if (Array.isArray(detalleJabas)) {
+      detalleJabas.forEach((d) => {
+        const dFecha = d.fecha ? normalizeDateString(d.fecha) : (d.timestamp ? normalizeDateString(d.timestamp) : '');
+        if (dFecha === targetFecha) {
+          const j = Number(d.jabas) || 0;
+          totalJabasDia += j;
+          totalRegistros++;
+          const norm = normalizeDni(d.dni);
+          const raw = String(d.dni || '').trim();
+          if (norm) dnisConJabas.add(norm);
+          if (raw) dnisConJabas.add(raw);
+          if (d.trabajador) {
+            dnisConJabas.add(`NAME_${normalizeStr(d.trabajador)}`);
+          }
+        }
+      });
+    }
+
+    return {
+      targetFecha,
+      totalJabasDia,
+      totalPersonasConJabas: dnisConJabas.size,
+      totalRegistros
+    };
+  }, [detalleJabas, fechaPersonal, normalizeDni, normalizeStr]);
 
   const getWorkerJabasCount = useCallback(
     (workerOrDni: any) => {
@@ -2929,8 +3004,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               </div>
             </div>
 
-            {/* Selector de Fecha de Consulta / Registro de Avance */}
-            <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 mb-3 bg-[#f8faf8] border border-[#d0ded0] rounded-xl">
+            {/* Selector de Fecha de Consulta / Registro de Avance y Métricas Reales */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3 mb-3 bg-[#f8faf8] border border-[#d0ded0] rounded-xl shadow-xs">
               <div className="flex items-center gap-2 flex-wrap">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-[#1b5e20]">
                   <Calendar className="w-4 h-4 text-[#2e7d32]" />
@@ -2963,11 +3038,18 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 </div>
               </div>
 
-              <div className="text-[11px] text-gray-600 flex items-center gap-1.5">
-                <span>Consultando avance del día:</span>
-                <span className="font-bold text-[#1b5e20] bg-white px-2 py-0.5 rounded-md border border-[#c8e6c9]">
-                  {fechaPersonal === hoyStr ? `Hoy (${fechaPersonal})` : fechaPersonal}
-                </span>
+              {/* Métricas Reales consultadas directamente de Registro de Avance */}
+              <div className="flex items-center gap-2 flex-wrap text-xs">
+                <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-[#ffe082] shadow-xs">
+                  <Package className="w-4 h-4 text-[#ff8f00]" />
+                  <span className="text-gray-600 font-medium">Jabas Reales del Día:</span>
+                  <span className="font-extrabold text-[#e65100] text-sm font-mono">{avanceDiaStats.totalJabasDia}</span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-[#c8e6c9] shadow-xs">
+                  <Users className="w-4 h-4 text-[#2e7d32]" />
+                  <span className="text-gray-600 font-medium">Con Avance Registrado:</span>
+                  <span className="font-extrabold text-[#1b5e20] text-sm font-mono">{countConJabas} pers.</span>
+                </div>
               </div>
             </div>
 
@@ -3094,16 +3176,16 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     ? 'bg-amber-600 text-white shadow-xs ring-1 ring-amber-700'
                     : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
                 }`}
-                title="Mostrar los trabajadores que ya tienen jabas registradas hoy"
+                title="Mostrar los trabajadores que tienen avance registrado en la fecha consultada"
               >
                 <Package className="w-3.5 h-3.5" />
                 <span>Con Jabas</span>
                 <span
-                  className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
+                  className={`px-2 py-0.5 text-[10px] rounded-full font-extrabold ${
                     vistaAsignacion === 'con_jabas' ? 'bg-amber-800 text-white' : 'bg-amber-200 text-amber-900'
                   }`}
                 >
-                  {countConJabas}
+                  {countConJabas} pers. · {avanceDiaStats.totalJabasDia} jabas
                 </span>
               </button>
 
@@ -3182,7 +3264,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                         : vistaAsignacion === 'asignados'
                         ? `Mostrando trabajadores que ya tienen Grupo o Líder asignado (${filteredTrabajadores.length} asignados).`
                         : vistaAsignacion === 'con_jabas'
-                        ? `Mostrando trabajadores con avance de jabas registrado hoy (${filteredTrabajadores.length} con jabas).`
+                        ? `Mostrando ${filteredTrabajadores.length} trabajadores con avance en ${fechaPersonal === hoyStr ? 'el día de hoy' : `la fecha ${fechaPersonal}`} · Total acumulado: ${avanceDiaStats.totalJabasDia} jabas reales de avance.`
                         : `Nómina completa (${filteredTrabajadores.length} trabajadores). Activa filtros seleccionando Supervisor, Fundo o Módulo arriba.`}
                     </span>
                   </span>
@@ -3207,7 +3289,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       <Package className="w-6 h-6" />
                     </div>
                     <h4 className="text-sm font-bold text-gray-900">
-                      Aún no hay trabajadores con jabas registradas hoy
+                      Aún no hay trabajadores con jabas registradas en la fecha ({fechaPersonal})
                     </h4>
                     <p className="text-xs text-gray-600 mt-1 max-w-md mx-auto">
                       Selecciona a los trabajadores en "Solo Pendientes" para registrar su avance de cosecha.
