@@ -50,6 +50,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const [periodo, setPeriodo] = useState<'todo' | 'hoy' | 'semana' | 'mes' | 'año'>('todo');
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
+  const [diaSeleccionado, setDiaSeleccionado] = useState<string>('');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Bonificación Diaria Settings & Filters
@@ -88,7 +89,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     return true;
   };
 
-  // Filtered collections
+  // Filtered collections based on period
   const filteredProgramas = useMemo(() => {
     return programas.filter((p) => isDateInPeriod(p.fecha || p.fechaRegistro));
   }, [programas, periodo, desde, hasta]);
@@ -104,6 +105,120 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const filteredValidaciones = useMemo(() => {
     return validaciones.filter((v) => isDateInPeriod(v.fecha || v.fechaRegistro));
   }, [validaciones, periodo, desde, hasta]);
+
+  // Distinct available dates matching the active period and filters
+  const availableDatesInPeriod = useMemo(() => {
+    const datesSet = new Set<string>();
+
+    const checkAndAdd = (raw?: string) => {
+      if (!raw) return;
+      const norm = normalizeDateString(raw) || (raw.length >= 10 ? normalizeDateString(raw.slice(0, 10)) : '');
+      if (norm && isDateInPeriod(norm)) {
+        datesSet.add(norm);
+      }
+    };
+
+    detalleJabas.forEach((d) => checkAndAdd(d.fecha || d.timestamp));
+    validaciones.forEach((v) => checkAndAdd(v.fecha || v.fechaRegistro));
+    programas.forEach((p) => checkAndAdd(p.fecha || p.fechaRegistro));
+    trabajadores.forEach((t) => checkAndAdd(t.fecha));
+
+    // If today is within period, ensure today is present
+    if (isDateInPeriod(todayStr)) {
+      datesSet.add(todayStr);
+    }
+
+    return Array.from(datesSet).sort().reverse(); // newest first
+  }, [detalleJabas, validaciones, programas, trabajadores, periodo, desde, hasta, todayStr]);
+
+  // Daily breakdown for every date in the selected period
+  const diasDesglose = useMemo(() => {
+    return availableDatesInPeriod.map((fStr) => {
+      const dnisOnDate = new Set<string>();
+
+      // 1. From detalleJabas
+      let jabasRec = 0;
+      detalleJabas.forEach((dj) => {
+        const norm = normalizeDateString(dj.fecha) || (dj.timestamp ? normalizeDateString(dj.timestamp.slice(0, 10)) : '');
+        if (norm === fStr) {
+          jabasRec += Number(dj.jabas) || 0;
+          if (dj.dni?.trim()) dnisOnDate.add(dj.dni.trim());
+          else if (dj.trabajador?.trim()) dnisOnDate.add(dj.trabajador.trim());
+        }
+      });
+
+      // 2. From validaciones
+      let jabasVal = 0;
+      validaciones.forEach((val) => {
+        const norm = normalizeDateString(val.fecha) || (val.fechaRegistro ? normalizeDateString(val.fechaRegistro.slice(0, 10)) : '');
+        if (norm === fStr) {
+          jabasVal += Number(val.jabasConformes) || Number(val.totalJabas) || 0;
+          if (val.items && Array.isArray(val.items)) {
+            val.items.forEach((it) => {
+              if (it.dni?.trim()) dnisOnDate.add(it.dni.trim());
+              else if (it.nombres?.trim()) dnisOnDate.add(it.nombres.trim());
+            });
+          }
+        }
+      });
+
+      // 3. From programas
+      let jabasProg = 0;
+      programas.forEach((prog) => {
+        const norm = normalizeDateString(prog.fecha) || (prog.fechaRegistro ? normalizeDateString(prog.fechaRegistro.slice(0, 10)) : '');
+        if (norm === fStr) {
+          jabasProg += Number(prog.jabas) || 0;
+          if (prog.avance) {
+            Object.keys(prog.avance).forEach((k) => {
+              if (k?.trim()) dnisOnDate.add(k.trim());
+            });
+          }
+        }
+      });
+
+      if (jabasRec === 0 && jabasProg > 0) {
+        jabasRec = jabasProg;
+      }
+
+      // 4. From trabajadores
+      trabajadores.forEach((t) => {
+        const norm = normalizeDateString(t.fecha);
+        if (norm === fStr) {
+          if (t.dni?.trim()) dnisOnDate.add(t.dni.trim());
+        }
+      });
+
+      // Fallbacks if no explicit dnis found for this date
+      let personalCount = dnisOnDate.size;
+      if (personalCount === 0) {
+        if (fStr === todayStr && trabajadores.length > 0) {
+          personalCount = trabajadores.length;
+        } else {
+          validaciones.forEach((val) => {
+            const norm = normalizeDateString(val.fecha) || (val.fechaRegistro ? normalizeDateString(val.fechaRegistro.slice(0, 10)) : '');
+            if (norm === fStr) {
+              personalCount = Math.max(personalCount, val.totalTrabajadores || val.trabajadoresConformes || 0);
+            }
+          });
+        }
+      }
+
+      return {
+        fecha: fStr,
+        fechaFormateada: formatDateDDMMAAAA(fStr),
+        isToday: fStr === todayStr,
+        personal: personalCount,
+        validadas: jabasVal,
+        recogidas: jabasRec
+      };
+    });
+  }, [availableDatesInPeriod, detalleJabas, validaciones, programas, trabajadores, todayStr]);
+
+  // Selected Day data if one is clicked/chosen
+  const diaSeleccionadoData = useMemo(() => {
+    if (!diaSeleccionado) return null;
+    return diasDesglose.find((d) => d.fecha === diaSeleccionado) || null;
+  }, [diaSeleccionado, diasDesglose]);
 
   // Comprehensive General Metrics Aggregations
   const metrics = useMemo(() => {
@@ -128,16 +243,20 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       jabasTareo += j;
       if (d.dni) trabSet.add(d.dni);
 
-      const f = d.fundo ? d.fundo.trim() : 'Sin Fundo';
-      if (!fundoMap[f]) fundoMap[f] = { jabas: 0, tareo: 0, ejecucion: 0 };
-      fundoMap[f].jabas += j;
-      fundoMap[f].tareo += j;
+      // If a day is selected, filter chart to that day
+      const dDate = normalizeDateString(d.fecha) || (d.timestamp ? normalizeDateString(d.timestamp.slice(0, 10)) : '');
+      if (!diaSeleccionado || dDate === diaSeleccionado) {
+        const f = d.fundo ? d.fundo.trim() : 'Sin Fundo';
+        if (!fundoMap[f]) fundoMap[f] = { jabas: 0, tareo: 0, ejecucion: 0 };
+        fundoMap[f].jabas += j;
+        fundoMap[f].tareo += j;
 
-      const m = d.modulo ? d.modulo.trim() : 'Sin Módulo';
-      moduloMap[m] = (moduloMap[m] || 0) + j;
+        const m = d.modulo ? d.modulo.trim() : 'Sin Módulo';
+        moduloMap[m] = (moduloMap[m] || 0) + j;
 
-      const g = d.grupo ? d.grupo.trim() : 'Sin Grupo';
-      grupoMap[g] = (grupoMap[g] || 0) + j;
+        const g = d.grupo ? d.grupo.trim() : 'Sin Grupo';
+        grupoMap[g] = (grupoMap[g] || 0) + j;
+      }
     });
 
     // Programas (Execution parts)
@@ -145,13 +264,16 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       const j = Number(p.jabas) || 0;
       jabasEjecucionPartes += j;
 
-      const f = p.fundo ? p.fundo.trim() : 'Sin Fundo';
-      if (!fundoMap[f]) fundoMap[f] = { jabas: 0, tareo: 0, ejecucion: 0 };
-      fundoMap[f].ejecucion += j;
+      const pDate = normalizeDateString(p.fecha) || (p.fechaRegistro ? normalizeDateString(p.fechaRegistro.slice(0, 10)) : '');
+      if (!diaSeleccionado || pDate === diaSeleccionado) {
+        const f = p.fundo ? p.fundo.trim() : 'Sin Fundo';
+        if (!fundoMap[f]) fundoMap[f] = { jabas: 0, tareo: 0, ejecucion: 0 };
+        fundoMap[f].ejecucion += j;
 
-      // If no tareo was registered yet, count execution jabas for fundo chart
-      if (fundoMap[f].tareo === 0) {
-        fundoMap[f].jabas += j;
+        // If no tareo was registered yet, count execution jabas for fundo chart
+        if (fundoMap[f].tareo === 0) {
+          fundoMap[f].jabas += j;
+        }
       }
 
       if (p.avance) {
@@ -165,6 +287,18 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     let jabasValidadas = 0;
     filteredValidaciones.forEach((v) => {
       jabasValidadas += Number(v.jabasConformes) || Number(v.totalJabas) || 0;
+      if (v.items && Array.isArray(v.items)) {
+        v.items.forEach((it) => {
+          if (it.dni) trabSet.add(it.dni);
+        });
+      }
+    });
+
+    // Also collect from trabajadores list
+    trabajadores.forEach((t) => {
+      if (!t.fecha || isDateInPeriod(t.fecha)) {
+        if (t.dni) trabSet.add(t.dni);
+      }
     });
 
     // Grand total: if tareo records exist use jabasTareo, otherwise use jabasEjecucionPartes
@@ -187,11 +321,11 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       jabasTareo,
       jabasEjecucionPartes,
       jabasValidadas,
-      uniqueTrabajadores: trabSet.size || trabajadores.length,
+      uniqueTrabajadores: Math.max(trabSet.size, trabajadores.length),
       jabasByFundo: sortedFundos,
       jabasByGrupo: sortedGrupos
     };
-  }, [filteredProgramas, filteredProgramaGeneral, filteredDetalleJabas, filteredValidaciones, trabajadores]);
+  }, [filteredProgramas, filteredProgramaGeneral, filteredDetalleJabas, filteredValidaciones, trabajadores, diaSeleccionado]);
 
   // ----------------------------------------------------------------------------------
   // PASO 2: CÁLCULO DE BONIFICACIÓN DIARIA DE TRABAJADORES (FILTRAR POR DÍA)
@@ -622,7 +756,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
             <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#e0e0e0]">
               <div className="flex items-center justify-between text-gray-500 text-xs mb-1">
-                <span className="font-bold text-[#40493d] uppercase tracking-wider">Total Cosechado Hoy</span>
+                <span className="font-bold text-[#40493d] uppercase tracking-wider">Total Recogido Hoy</span>
                 <BarChart3 className="w-4 h-4 text-[#2e7d32]" />
               </div>
               <div className="text-2xl sm:text-3xl font-extrabold text-[#1b5e20] leading-none mb-1">
@@ -778,22 +912,40 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   Filtros del Panel
                 </h3>
               </div>
-              <div className="flex items-center gap-1 text-[11px] text-[#757575]">
+              <div className="flex items-center gap-1.5 text-[11px] text-[#757575] flex-wrap">
                 <span>Mostrando:</span>
-                <strong className="text-[#1b5e20]">
-                  {periodo === 'todo' ? 'Todo el histórico' : periodo === 'hoy' ? `Hoy (${formatDateDDMMAAAA(todayStr)})` : periodo}
+                <strong className="text-[#1b5e20] font-extrabold">
+                  {diaSeleccionado
+                    ? `Día seleccionado: ${formatDateDDMMAAAA(diaSeleccionado)}`
+                    : periodo === 'todo'
+                    ? 'Todo el histórico'
+                    : periodo === 'hoy'
+                    ? `Hoy (${formatDateDDMMAAAA(todayStr)})`
+                    : periodo}
                 </strong>
+                {diaSeleccionado && (
+                  <button
+                    type="button"
+                    onClick={() => setDiaSeleccionado('')}
+                    className="ml-1 text-[11px] text-emerald-800 bg-emerald-100 hover:bg-emerald-200 px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer"
+                  >
+                    ✕ Ver todos los días
+                  </button>
+                )}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
               <div>
                 <label className="block text-[11px] font-semibold text-[#40493d] mb-1">
                   Período de Tiempo
                 </label>
                 <select
                   value={periodo}
-                  onChange={(e) => setPeriodo(e.target.value as 'todo' | 'hoy' | 'semana' | 'mes' | 'año')}
+                  onChange={(e) => {
+                    setPeriodo(e.target.value as 'todo' | 'hoy' | 'semana' | 'mes' | 'año');
+                    setDiaSeleccionado('');
+                  }}
                   className="w-full px-3 py-2 text-xs rounded-xl border border-[#bfcaba] bg-white focus:outline-none focus:border-[#2e7d32]"
                 >
                   <option value="todo">Todo el histórico</option>
@@ -811,7 +963,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 <input
                   type="date"
                   value={desde}
-                  onChange={(e) => setDesde(e.target.value)}
+                  onChange={(e) => {
+                    setDesde(e.target.value);
+                    setDiaSeleccionado('');
+                  }}
                   className="w-full px-3 py-2 text-xs rounded-xl border border-[#bfcaba] bg-white focus:outline-none focus:border-[#2e7d32]"
                 />
               </div>
@@ -823,74 +978,314 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 <input
                   type="date"
                   value={hasta}
-                  onChange={(e) => setHasta(e.target.value)}
+                  onChange={(e) => {
+                    setHasta(e.target.value);
+                    setDiaSeleccionado('');
+                  }}
                   className="w-full px-3 py-2 text-xs rounded-xl border border-[#bfcaba] bg-white focus:outline-none focus:border-[#2e7d32]"
                 />
               </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-[#40493d] mb-1">
+                  Día Específico
+                </label>
+                <select
+                  value={diaSeleccionado}
+                  onChange={(e) => setDiaSeleccionado(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-[#bfcaba] bg-white focus:outline-none focus:border-[#2e7d32] font-semibold text-gray-800"
+                >
+                  <option value="">Todos los días ({diasDesglose.length})</option>
+                  {diasDesglose.map((d) => (
+                    <option key={d.fecha} value={d.fecha}>
+                      {d.fechaFormateada} {d.isToday ? '(Hoy)' : ''} — {d.personal} pers. / {d.validadas} val.
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
+
+            {/* Quick Day Chips Bar */}
+            {diasDesglose.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-[#f0f0f0] flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] sm:text-[11px] font-bold text-[#40493d] uppercase tracking-wider mr-1">
+                  Seleccionar Día:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDiaSeleccionado('')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    !diaSeleccionado
+                      ? 'bg-[#1b5e20] text-white shadow-xs'
+                      : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                  }`}
+                >
+                  Todos los días ({diasDesglose.length})
+                </button>
+                {diasDesglose.map((d) => {
+                  const isSelected = diaSeleccionado === d.fecha;
+                  return (
+                    <button
+                      key={d.fecha}
+                      type="button"
+                      onClick={() => setDiaSeleccionado(isSelected ? '' : d.fecha)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        isSelected
+                          ? 'bg-[#2e7d32] text-white shadow-xs ring-2 ring-[#1b5e20]/30'
+                          : 'bg-emerald-50 hover:bg-emerald-100 text-[#1b5e20] border border-emerald-200'
+                      }`}
+                      title={`Filtrar métricas para ${d.fechaFormateada}`}
+                    >
+                      <span>{d.fechaFormateada}</span>
+                      {d.isToday && (
+                        <span className={`text-[9px] px-1 rounded font-black ${isSelected ? 'bg-white/20 text-white' : 'bg-emerald-200 text-emerald-950'}`}>
+                          Hoy
+                        </span>
+                      )}
+                      <span className={`text-[10px] ${isSelected ? 'text-emerald-100' : 'text-[#2e7d32]'}`}>
+                        ({d.personal} pers. · {d.validadas} val.)
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* KPI Cards Grid */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* Jabas Totales */}
-            <div className="bg-gradient-to-br from-[#1b5e20] to-[#2e7d32] rounded-2xl p-4 text-white shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between opacity-80 text-xs mb-1">
-                <span className="font-semibold uppercase tracking-wider">Jabas Cosechadas</span>
-                <Package className="w-4 h-4" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* 1. Jabas Recogidas (Cambiado de Jabas Cosechadas) */}
+            <div className="bg-gradient-to-br from-[#1b5e20] to-[#2e7d32] rounded-2xl p-4 text-white shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between opacity-90 text-xs mb-1">
+                  <span className="font-semibold uppercase tracking-wider">Jabas Recogidas</span>
+                  <Package className="w-4 h-4" />
+                </div>
+                <div className="text-3xl sm:text-4xl font-black leading-none mb-1">
+                  {(diaSeleccionadoData ? diaSeleccionadoData.recogidas : metrics.totalJabas).toLocaleString()}
+                </div>
+                <div className="text-[11px] text-emerald-100 pt-1 border-t border-emerald-700/50 flex items-center justify-between">
+                  {diaSeleccionadoData ? (
+                    <>
+                      <span>Día {diaSeleccionadoData.fechaFormateada}</span>
+                      <span className="font-bold">Total período: {metrics.totalJabas.toLocaleString()}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Tareo: {metrics.jabasTareo}</span>
+                      <span>Partes: {metrics.jabasEjecucionPartes}</span>
+                    </>
+                  )}
+                </div>
               </div>
-              <div className="text-3xl sm:text-4xl font-black leading-none mb-1">
-                {metrics.totalJabas.toLocaleString()}
+
+              {/* Mini desglose de días recogidos si hay varios */}
+              {diasDesglose.length > 1 && (
+                <div className="mt-2.5 pt-2 border-t border-white/20">
+                  <div className="text-[10px] font-semibold text-emerald-100 mb-1 flex items-center justify-between">
+                    <span>Recogidas por día:</span>
+                    {diaSeleccionado && (
+                      <button
+                        type="button"
+                        onClick={() => setDiaSeleccionado('')}
+                        className="text-[10px] underline font-bold hover:text-white"
+                      >
+                        Ver total
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto pr-0.5">
+                    {diasDesglose.map((d) => {
+                      const isSel = diaSeleccionado === d.fecha;
+                      return (
+                        <button
+                          key={d.fecha}
+                          type="button"
+                          onClick={() => setDiaSeleccionado(isSel ? '' : d.fecha)}
+                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded border transition-all cursor-pointer ${
+                            isSel
+                              ? 'bg-white text-[#1b5e20] border-white'
+                              : 'bg-white/10 hover:bg-white/20 text-white border-white/20'
+                          }`}
+                        >
+                          {d.fechaFormateada.slice(0, 5)}: {d.recogidas}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 2. Personal Activo (Total y de cada día seleccionado) */}
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#e0e0e0] hover:shadow-md transition-shadow flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between text-gray-500 text-xs mb-1">
+                  <span className="font-semibold text-[#40493d] uppercase tracking-wider">Personal Activo</span>
+                  <Users className="w-4 h-4 text-[#ff8f00]" />
+                </div>
+                <div className="text-2xl sm:text-3xl font-extrabold text-[#1b5e20] leading-none mb-1">
+                  {diaSeleccionadoData ? diaSeleccionadoData.personal : metrics.uniqueTrabajadores}
+                  <span className="text-xs font-bold text-gray-500 ml-1.5">
+                    {diaSeleccionadoData ? 'del día' : 'en total'}
+                  </span>
+                </div>
+                <div className="text-[10px] text-[#757575] mt-0.5">
+                  {diaSeleccionadoData ? (
+                    <div className="flex items-center justify-between">
+                      <span>Día {diaSeleccionadoData.fechaFormateada}</span>
+                      <span className="font-bold text-emerald-800">Total nómina: {metrics.uniqueTrabajadores} pers.</span>
+                    </div>
+                  ) : (
+                    <span>Total de personal activo en el período ({diasDesglose.length} fecha{diasDesglose.length === 1 ? '' : 's'})</span>
+                  )}
+                </div>
               </div>
-              <div className="text-[11px] text-green-100 flex items-center justify-between pt-1 border-t border-green-700/40">
-                <span>Tareo: {metrics.jabasTareo}</span>
-                <span>Partes: {metrics.jabasEjecucionPartes}</span>
+
+              {/* Desglose de personal por cada día seleccionado */}
+              {diasDesglose.length > 0 && (
+                <div className="mt-2.5 pt-2 border-t border-gray-100">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-[#40493d] mb-1">
+                    <span>Personal por cada día:</span>
+                    {diaSeleccionado ? (
+                      <button
+                        type="button"
+                        onClick={() => setDiaSeleccionado('')}
+                        className="text-[10px] text-emerald-700 hover:text-emerald-900 font-bold underline cursor-pointer"
+                      >
+                        Ver total
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                        Total: {metrics.uniqueTrabajadores}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-0.5">
+                    {diasDesglose.map((dia) => {
+                      const isSel = diaSeleccionado === dia.fecha;
+                      return (
+                        <button
+                          key={dia.fecha}
+                          type="button"
+                          onClick={() => setDiaSeleccionado(isSel ? '' : dia.fecha)}
+                          className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                            isSel
+                              ? 'bg-[#1b5e20] text-white border-[#1b5e20] shadow-xs'
+                              : 'bg-emerald-50/80 hover:bg-emerald-100 text-emerald-900 border-emerald-200'
+                          }`}
+                          title={`Click para ver solo el día ${dia.fechaFormateada}`}
+                        >
+                          <span>{dia.fechaFormateada.slice(0, 5)}:</span>
+                          <span className="font-extrabold">{dia.personal} pers.</span>
+                          {dia.isToday && (
+                            <span className={`text-[9px] px-1 rounded font-black ${isSel ? 'bg-white/20 text-white' : 'bg-emerald-200 text-emerald-950'}`}>
+                              Hoy
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 3. Programas y Lotes */}
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#e0e0e0] hover:shadow-md transition-shadow flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between text-gray-500 text-xs mb-1">
+                  <span className="font-semibold text-[#40493d] uppercase tracking-wider">Lotes Atendidos</span>
+                  <Layers className="w-4 h-4 text-[#2e7d32]" />
+                </div>
+                <div className="text-2xl sm:text-3xl font-extrabold text-[#2e7d32] leading-none mb-1">
+                  {metrics.totalLotes}
+                </div>
+                <div className="text-[10px] text-[#757575] mt-1">
+                  En {metrics.totalProgramas} programas de campo
+                </div>
+              </div>
+              <div className="mt-2.5 pt-2 border-t border-gray-100 text-[11px] text-gray-500">
+                {diaSeleccionado ? `Filtrado por día ${formatDateDDMMAAAA(diaSeleccionado)}` : 'Cobertura de labores en campo'}
               </div>
             </div>
 
-            {/* Personal Activo */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#e0e0e0] hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between text-gray-500 text-xs mb-1">
-                <span className="font-semibold text-[#40493d] uppercase tracking-wider">Personal Activo</span>
-                <Users className="w-4 h-4 text-[#ff8f00]" />
+            {/* 4. Jabas Validadas (Total y del día seleccionado cuando seleccione días) */}
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#e0e0e0] hover:shadow-md transition-shadow flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between text-gray-500 text-xs mb-1">
+                  <span className="font-semibold text-[#40493d] uppercase tracking-wider">Jabas Validadas</span>
+                  <ShieldCheck className="w-4 h-4 text-[#2e7d32]" />
+                </div>
+                <div className="text-2xl sm:text-3xl font-extrabold text-[#ff8f00] leading-none mb-1">
+                  {(diaSeleccionadoData ? diaSeleccionadoData.validadas : metrics.jabasValidadas).toLocaleString()}
+                  <span className="text-xs font-bold text-gray-500 ml-1.5">
+                    {diaSeleccionadoData ? 'del día' : 'total'}
+                  </span>
+                </div>
+                <div className="text-[10px] text-[#757575] mt-0.5">
+                  {diaSeleccionadoData ? (
+                    <div className="flex items-center justify-between">
+                      <span>Día {diaSeleccionadoData.fechaFormateada}</span>
+                      <span className="font-bold text-amber-800">Total período: {metrics.jabasValidadas.toLocaleString()}</span>
+                    </div>
+                  ) : (
+                    <span>
+                      {metrics.totalJabas > 0
+                        ? `${Math.min(100, Math.round((metrics.jabasValidadas / metrics.totalJabas) * 100))}% de avance validado`
+                        : 'Control de supervisión'}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="text-2xl sm:text-3xl font-extrabold text-[#1b5e20] leading-none mb-1">
-                {metrics.uniqueTrabajadores}
-              </div>
-              <div className="text-[10px] text-[#757575] mt-1">
-                {metrics.uniqueTrabajadores > 0 && metrics.totalJabas > 0
-                  ? `Promedio: ${(metrics.totalJabas / metrics.uniqueTrabajadores).toFixed(1)} jabas/persona`
-                  : 'En cuadrillas activas'}
-              </div>
-            </div>
 
-            {/* Programas y Lotes */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#e0e0e0] hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between text-gray-500 text-xs mb-1">
-                <span className="font-semibold text-[#40493d] uppercase tracking-wider">Lotes Atendidos</span>
-                <Layers className="w-4 h-4 text-[#2e7d32]" />
-              </div>
-              <div className="text-2xl sm:text-3xl font-extrabold text-[#2e7d32] leading-none mb-1">
-                {metrics.totalLotes}
-              </div>
-              <div className="text-[10px] text-[#757575] mt-1">
-                En {metrics.totalProgramas} programas de campo
-              </div>
-            </div>
-
-            {/* Validaciones de Supervisores */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#e0e0e0] hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between text-gray-500 text-xs mb-1">
-                <span className="font-semibold text-[#40493d] uppercase tracking-wider">Jabas Validadas</span>
-                <ShieldCheck className="w-4 h-4 text-[#2e7d32]" />
-              </div>
-              <div className="text-2xl sm:text-3xl font-extrabold text-[#ff8f00] leading-none mb-1">
-                {metrics.jabasValidadas.toLocaleString()}
-              </div>
-              <div className="text-[10px] text-[#757575] mt-1">
-                {metrics.totalJabas > 0
-                  ? `${Math.min(100, Math.round((metrics.jabasValidadas / metrics.totalJabas) * 100))}% de avance validado`
-                  : 'Control de supervisión'}
-              </div>
+              {/* Desglose de jabas validadas por cada día seleccionado */}
+              {diasDesglose.length > 0 && (
+                <div className="mt-2.5 pt-2 border-t border-gray-100">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-[#40493d] mb-1">
+                    <span>Validadas por cada día:</span>
+                    {diaSeleccionado ? (
+                      <button
+                        type="button"
+                        onClick={() => setDiaSeleccionado('')}
+                        className="text-[10px] text-amber-700 hover:text-amber-900 font-bold underline cursor-pointer"
+                      >
+                        Ver total
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                        Total: {metrics.jabasValidadas.toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-0.5">
+                    {diasDesglose.map((dia) => {
+                      const isSel = diaSeleccionado === dia.fecha;
+                      return (
+                        <button
+                          key={dia.fecha}
+                          type="button"
+                          onClick={() => setDiaSeleccionado(isSel ? '' : dia.fecha)}
+                          className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                            isSel
+                              ? 'bg-[#ff8f00] text-white border-[#ff8f00] shadow-xs'
+                              : 'bg-amber-50/80 hover:bg-amber-100 text-amber-900 border-amber-200'
+                          }`}
+                          title={`Click para filtrar día ${dia.fechaFormateada}`}
+                        >
+                          <span>{dia.fechaFormateada.slice(0, 5)}:</span>
+                          <span className="font-extrabold">{dia.validadas.toLocaleString()} jabas</span>
+                          {dia.isToday && (
+                            <span className={`text-[9px] px-1 rounded font-black ${isSel ? 'bg-white/20 text-white' : 'bg-amber-200 text-amber-950'}`}>
+                              Hoy
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -904,7 +1299,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 </h3>
               </div>
               <span className="text-xs text-[#2e7d32] font-extrabold bg-[#e8f5e9] px-2.5 py-1 rounded-full border border-[#a5d6a7]">
-                Total: {metrics.totalJabas.toLocaleString()} jabas
+                Total: {metrics.jabasByFundo.reduce((sum, f) => sum + f.count, 0).toLocaleString()} jabas {diaSeleccionado ? `(Día ${formatDateDDMMAAAA(diaSeleccionado)})` : `(Total)`}
               </span>
             </div>
 
@@ -986,7 +1381,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   <div key={g.grupo} className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-3 text-center">
                     <span className="text-[11px] font-bold text-gray-700 block truncate">{g.grupo}</span>
                     <span className="text-xl font-extrabold text-[#1b5e20] block mt-0.5">{g.count}</span>
-                    <span className="text-[10px] text-gray-500">jabas cosechadas</span>
+                    <span className="text-[10px] text-gray-500">jabas recogidas</span>
                   </div>
                 ))}
               </div>

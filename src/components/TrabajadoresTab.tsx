@@ -487,12 +487,34 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       const l = String(t.lider || '').trim().toLowerCase();
       const hasGrupo = g !== '' && g !== 'sin grupo' && g !== 'sin asignar' && g !== 'ninguno' && g !== 'general';
       const hasLider = l !== '' && l !== 'sin asignar' && l !== 'sin lider' && l !== 'sin líder' && l !== 'ninguno';
-      if (hasGrupo || hasLider) return true;
 
       const norm = normalizeDni(t.dni);
       const raw = String(t.dni ?? '').trim();
       const id = t.id || '';
       const nameKey = t.nombres ? `NAME_${normalizeStr(t.nombres)}` : '';
+
+      // Verificar si tiene grupo asignado en la sesión de cuadrilla actual
+      const sessionGrp =
+        (norm && workerAssignedGrupos[norm]) ||
+        (raw && workerAssignedGrupos[raw]) ||
+        (id && workerAssignedGrupos[id]) ||
+        (nameKey && workerAssignedGrupos[nameKey]);
+      if (sessionGrp) {
+        const sLower = sessionGrp.trim().toLowerCase();
+        if (sLower !== 'sin grupo' && sLower !== 'sin asignar' && sLower !== '') {
+          return true;
+        }
+        return false;
+      }
+
+      // Si el trabajador tiene asignado grupo o líder en su nómina, está asignado
+      if (hasGrupo || hasLider) return true;
+
+      // Si en su ficha dice expresamente "Sin Grupo" o grupo vacío y no tiene líder, es PENDIENTE
+      const isSinGrupo = !g || g === 'sin grupo' || g === 'sin asignar' || g === 'ninguno' || g === 'general';
+      if (isSinGrupo && !hasLider) {
+        return false;
+      }
 
       // Verificar si está registrado en alguna reserva de hoy
       if (
@@ -501,17 +523,14 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         (id && workersInReservasHoyMap.has(id)) ||
         (nameKey && workersInReservasHoyMap.has(nameKey))
       ) {
-        return true;
-      }
-
-      // Verificar si tiene grupo asignado en la sesión de cuadrilla
-      const sessionGrp =
-        (norm && workerAssignedGrupos[norm]) ||
-        (raw && workerAssignedGrupos[raw]) ||
-        (id && workerAssignedGrupos[id]) ||
-        (nameKey && workerAssignedGrupos[nameKey]);
-      if (sessionGrp && sessionGrp.trim().toLowerCase() !== 'sin grupo') {
-        return true;
+        const resInfo =
+          (norm && workersInReservasHoyMap.get(norm)) ||
+          (raw && workersInReservasHoyMap.get(raw)) ||
+          (id && workersInReservasHoyMap.get(id)) ||
+          (nameKey && workersInReservasHoyMap.get(nameKey));
+        if (resInfo && resInfo.grupo && resInfo.grupo.trim().toLowerCase() !== 'sin grupo') {
+          return true;
+        }
       }
 
       return false;
@@ -1345,11 +1364,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     }
 
     // Limpiar de reservas de hoy para los trabajadores scoped
-    const updatedReservas = reservasState.map((r) => {
-      if (r.fecha !== hoyStr) return r;
-      return {
-        ...r,
-        trabajadores: (r.trabajadores || []).filter((w) => {
+    const updatedReservas = reservasState
+      .map((r) => {
+        if (r.fecha !== hoyStr) return r;
+        const remaining = (r.trabajadores || []).filter((w) => {
           const norm = normalizeDni(w.dni);
           const raw = String(w.dni || '').trim();
           const nName = normalizeStr(w.nombres);
@@ -1359,11 +1377,24 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             (w.id && scopedKeys.has(w.id)) ||
             (nName && scopedKeys.has(`NAME_${nName}`))
           );
-        })
-      };
-    });
+        });
+        return {
+          ...r,
+          totalTrabajadores: remaining.length,
+          trabajadores: remaining
+        };
+      })
+      .filter((r) => r.fecha !== hoyStr || (r.trabajadores && r.trabajadores.length > 0));
+
     setReservasState(updatedReservas);
     saveReservas(updatedReservas);
+
+    // Sincronizar reservas limpias con el servidor central para que todos los dispositivos vean el cambio
+    fetch('/api/reservas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reservas: updatedReservas, replaceAll: true })
+    }).catch(() => {});
 
     setWorkerAssignedGrupos({});
     setVistaAsignacion('pendientes');
@@ -1657,6 +1688,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     const updated = reservasState.filter((r) => r.id !== reservaId);
     setReservasState(updated);
     saveReservas(updated);
+    // Sincronizar eliminación en servidor central
+    fetch(`/api/reservas/${reservaId}`, { method: 'DELETE' }).catch(() => {});
     if (onDeleteReserva) {
       onDeleteReserva(reservaId);
     }
@@ -2045,8 +2078,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         </button>
       </div>
 
-      {/* Banner de Control Modo Offline / Nómina Blindada (Visible para Administrador y Trabajador) */}
-      {(isAdmin || session?.rol === 'Trabajador') && (
+      {/* Banner de Control Modo Offline / Nómina Blindada (Visible para todos los roles incluido Trabajador) */}
+      {(isAdmin || session?.rol === 'Trabajador' || session?.rol === 'Supervisor' || !session?.rol) && (
         <div className={`rounded-xl p-3 sm:p-4 border transition-all shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
           offlineNomina
             ? 'bg-amber-50/90 border-amber-300 text-amber-950'
@@ -2216,6 +2249,26 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     Reservas por Supervisor ({countSupervisoresConReservaHoy} hoy / {reservasState.length} total)
                   </span>
                 </button>
+
+                {onToggleOfflineNomina && (
+                  <button
+                    type="button"
+                    onClick={() => onToggleOfflineNomina()}
+                    className={`text-xs font-bold py-1.5 px-3 rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer transition-all ${
+                      offlineNomina
+                        ? 'bg-amber-100 text-amber-950 border border-amber-400 hover:bg-amber-200'
+                        : 'bg-white hover:bg-emerald-50 text-[#1b5e20] border border-emerald-300'
+                    }`}
+                    title={
+                      offlineNomina
+                        ? 'Nómina bloqueada: no se alterará ante pérdidas de señal o sincronizaciones de red. Click para desbloquear.'
+                        : 'Bloquear nómina en este dispositivo para trabajar con el personal fijo sin alteraciones de red.'
+                    }
+                  >
+                    {offlineNomina ? <Lock className="w-3.5 h-3.5 text-amber-900" /> : <ShieldCheck className="w-3.5 h-3.5 text-[#2e7d32]" />}
+                    <span>{offlineNomina ? '🔒 Nómina Bloqueada' : 'Bloquear Nómina'}</span>
+                  </button>
+                )}
               </div>
             </div>
 

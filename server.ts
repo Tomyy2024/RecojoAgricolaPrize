@@ -398,16 +398,16 @@ async function startServer() {
     }
   });
 
-  // Fast bulk worker sync endpoint - Solo Administrador puede cargar o modificar nóminas
+  // Fast bulk worker sync endpoint - Administrador y Supervisor pueden actualizar nómina
   app.post('/api/trabajadores', (req, res) => {
     try {
       const { trabajadores, append, userRole } = req.body || {};
 
-      // Restricción estricta: Solo el rol de Administrador puede cargar nóminas
-      if (userRole && userRole !== 'Administrador') {
+      // Restricción estricta: Rol Trabajador no puede modificar la nómina central
+      if (userRole === 'Trabajador') {
         return res.status(403).json({
           status: 'error',
-          message: 'Solo el rol Administrador tiene permisos para cargar o modificar la nómina de personal.'
+          message: 'El rol Trabajador no tiene permisos para cargar o modificar la nómina de personal.'
         });
       }
 
@@ -513,13 +513,16 @@ async function startServer() {
   // Save or update reservation(s) by supervisor
   app.post('/api/reservas', (req, res) => {
     try {
-      const { reserva, reservas } = req.body;
-      const incomingList = reserva ? [reserva] : Array.isArray(reservas) ? reservas : [];
-      if (incomingList.length === 0) {
-        return res.status(400).json({ status: 'error', message: 'No se envió reserva válida' });
+      const { reserva, reservas, replaceAll } = req.body || {};
+      if (replaceAll && Array.isArray(reservas)) {
+        db.reservas = reservas;
+      } else {
+        const incomingList = reserva ? [reserva] : Array.isArray(reservas) ? reservas : [];
+        if (incomingList.length === 0) {
+          return res.status(400).json({ status: 'error', message: 'No se envió reserva válida' });
+        }
+        db.reservas = mergeReservas(db.reservas || [], incomingList);
       }
-
-      db.reservas = mergeReservas(db.reservas || [], incomingList);
       db.version = (db.version || 1) + 1;
       db.lastUpdated = new Date().toISOString();
       saveDatabase(db);
@@ -558,15 +561,14 @@ async function startServer() {
           return res.json({ status: 'ok', data: db, version: db.version, ignoredStale: true });
         }
 
-        const isAdmin = incoming.userRole === 'Administrador';
+        const isWorkerRole = incoming.userRole === 'Trabajador';
+        const isAdmin = incoming.userRole === 'Administrador' || !incoming.userRole || incoming.userRole === 'admin';
 
         if (Array.isArray(incoming.programas)) db.programas = incoming.programas;
         if (Array.isArray(incoming.programaGeneral)) db.programaGeneral = incoming.programaGeneral;
 
-        // REGLA CRÍTICA: Solo el Administrador puede sincronizar o modificar trabajadores a nivel central.
-        // Si el cliente no es Administrador (por ejemplo rol Trabajador o Supervisor), NO se sobreescribe db.trabajadores
-        // para evitar que datos del día anterior cacheados en otros equipos revivan la nómina.
-        if (isAdmin && Array.isArray(incoming.trabajadores)) {
+        // Solo se ignora db.trabajadores si expresamente el rol es 'Trabajador'
+        if (!isWorkerRole && Array.isArray(incoming.trabajadores)) {
           const today = new Date().toISOString().slice(0, 10);
           const minDate = db.fechaUltimaDepuracion || today;
           db.trabajadores = incoming.trabajadores.filter((t: any) => {
@@ -588,7 +590,11 @@ async function startServer() {
         if (Array.isArray(incoming.lideres)) db.lideres = incoming.lideres;
         if (Array.isArray(incoming.grupos)) db.grupos = incoming.grupos;
         if (Array.isArray(incoming.reservas)) {
-          db.reservas = mergeReservas(db.reservas || [], incoming.reservas);
+          if (isAdmin) {
+            db.reservas = incoming.reservas;
+          } else {
+            db.reservas = mergeReservas(db.reservas || [], incoming.reservas);
+          }
         }
         if (incoming.modulos && typeof incoming.modulos === 'object') {
           db.modulos = { ...(db.modulos || {}), ...incoming.modulos };

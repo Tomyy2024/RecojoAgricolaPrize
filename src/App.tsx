@@ -270,9 +270,18 @@ export default function App() {
 
           // Buscar si el trabajador ya existía en local para no pisar su grupo o líder si la hoja de Drive viene vacía
           const existingLocal = (cleanDni ? localWorkersMap.get(cleanDni) : null) || (t.id ? localWorkersMap.get(t.id) : null);
-          const grupoFinal = (t.grupo ? String(t.grupo).trim() : '') || (existingLocal?.grupo ? String(existingLocal.grupo).trim() : '');
-          const liderFinal = (t.lider ? String(t.lider).trim() : '') || (existingLocal?.lider ? String(existingLocal.lider).trim() : '');
-          const supFinal = (t.supervisor ? String(t.supervisor).trim() : '') || (existingLocal?.supervisor ? String(existingLocal.supervisor).trim() : '');
+          // Si el servidor o la nube envía expresamente el campo grupo (incluso vacío ""),
+          // respetamos el valor recibido para permitir desasignar trabajadores.
+          // Solo si t.grupo es undefined o null, usamos el valor local previo.
+          const grupoFinal = t.grupo !== undefined && t.grupo !== null
+            ? String(t.grupo).trim()
+            : (existingLocal?.grupo ? String(existingLocal.grupo).trim() : '');
+          const liderFinal = t.lider !== undefined && t.lider !== null
+            ? String(t.lider).trim()
+            : (existingLocal?.lider ? String(existingLocal.lider).trim() : '');
+          const supFinal = t.supervisor !== undefined && t.supervisor !== null
+            ? String(t.supervisor).trim()
+            : (existingLocal?.supervisor ? String(existingLocal.supervisor).trim() : '');
 
           if (!seen.has(key)) {
             seen.add(key);
@@ -441,7 +450,13 @@ export default function App() {
   // Server Sync Mutation Trigger
   const syncToServer = useCallback(async (payloadOverride?: any) => {
     try {
-      const payload = payloadOverride || {
+      const activeSession = session || getSession();
+      const currentRole = activeSession?.rol || 'Administrador';
+      const currentName = activeSession?.nombre || 'Administrador';
+
+      const basePayload = {
+        userRole: currentRole,
+        userName: currentName,
         programas: getProgramas(),
         programaGeneral: getProgramaGeneral(),
         trabajadores: getTrabajadores(),
@@ -452,6 +467,10 @@ export default function App() {
         grupos: getGrupos(),
         reservas: getReservas()
       };
+
+      const payload = payloadOverride
+        ? { ...basePayload, ...payloadOverride, userRole: payloadOverride.userRole || currentRole }
+        : basePayload;
 
       // Broadcast to all tabs on this machine instantly
       try {
@@ -473,7 +492,7 @@ export default function App() {
     } catch (e) {
       console.warn('Server sync offline:', e);
     }
-  }, [applyServerData]);
+  }, [applyServerData, session]);
 
   // Live Real-Time Polling + SSE + BroadcastChannel + Window Focus
   useEffect(() => {
@@ -545,26 +564,33 @@ export default function App() {
     };
   }, [fetchCentralizedData, applyServerData]);
 
-  // Background Auto-fetch from Google Sheets if configured
+  // Background Auto-fetch from Google Sheets if configured and server not authoritative
   useEffect(() => {
     const autoPullOnStart = async () => {
       const url = getGsheetUrl();
       if (!url) return;
       try {
+        // Verificar si el servidor ya tiene datos de trabajadores
+        const sRes = await fetch('/api/data').catch(() => null);
+        if (sRes && sRes.ok) {
+          const sJson = await sRes.json().catch(() => null);
+          if (sJson && sJson.status === 'ok' && sJson.data && (sJson.data.trabajadores || []).length > 0) {
+            // El servidor central ya cuenta con la nómina autoritativa más reciente
+            return;
+          }
+        }
+
         const res = await fetch(`${url}?accion=export`);
         if (!res.ok) return;
         const json = await res.json();
         if (json && json.status === 'ok' && json.data) {
           const d = json.data;
-          // CRITICAL: Si ya existen trabajadores activos en el dispositivo,
-          // NUNCA permitir que la hoja 'Trabajadores' de Google Drive sobreescriba la nómina activa del día
           const currentLocal = getTrabajadores();
           if (currentLocal.length > 0) {
             d.trabajadores = currentLocal;
           }
           applyServerData(d, true);
           addLog('☁️ Datos sincronizados automáticamente con Google Sheets', 'ok');
-          // Enviar al servidor central asegurando que la nómina local activa no sea pisada por la hoja de Drive
           syncToServer({ ...d, trabajadores: getTrabajadores() });
         }
       } catch {
@@ -872,14 +898,27 @@ export default function App() {
     saveTrabajadores(updatedWorkers);
     addLog(`👥 Nómina de personal actualizada (${updatedWorkers.length} trabajadores)`, 'ok');
 
+    const activeSession = session || getSession();
+    const currentRole = activeSession?.rol || 'Administrador';
+    const currentName = activeSession?.nombre || 'Administrador';
+
     // Fast direct push to server API so other devices and SSE receive immediately
     fetch('/api/trabajadores', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ trabajadores: updatedWorkers, append: false })
+      body: JSON.stringify({
+        trabajadores: updatedWorkers,
+        append: false,
+        userRole: currentRole,
+        userName: currentName
+      })
     }).catch(() => {});
 
-    triggerAutoSync('Actualización Personal', { trabajadores: updatedWorkers });
+    triggerAutoSync('Actualización Personal', {
+      trabajadores: updatedWorkers,
+      userRole: currentRole,
+      userName: currentName
+    });
   };
 
   const handleSaveTrabajador = (worker: Trabajador) => {
@@ -893,15 +932,28 @@ export default function App() {
     setTrabajadoresState(updated);
     saveTrabajadores(updated);
 
+    const activeSession = session || getSession();
+    const currentRole = activeSession?.rol || 'Administrador';
+    const currentName = activeSession?.nombre || 'Administrador';
+
     // Fast direct push to server API
     fetch('/api/trabajadores', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ trabajadores: updated, append: false })
+      body: JSON.stringify({
+        trabajadores: updated,
+        append: false,
+        userRole: currentRole,
+        userName: currentName
+      })
     }).catch(() => {});
 
     addLog(`👷 Trabajador registrado con Supervisor, Fundo, Módulo, Grupo y Líder: ${worker.nombres} (DNI: ${worker.dni})`, 'ok');
-    triggerAutoSync('Registro Trabajador', { trabajadores: updated });
+    triggerAutoSync('Registro Trabajador', {
+      trabajadores: updated,
+      userRole: currentRole,
+      userName: currentName
+    });
     addToast(`✅ Trabajador "${worker.nombres}" guardado con éxito`, 'success');
   };
 
