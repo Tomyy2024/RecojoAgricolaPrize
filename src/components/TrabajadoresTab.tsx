@@ -79,6 +79,8 @@ interface TrabajadoresTabProps {
   isOnline?: boolean;
   onDepurarTrabajadoresAyer?: () => void;
   onCargarNominaDesdeSheet?: (customUrl?: string) => Promise<{ success: boolean; count?: number; pendientes?: number; asignados?: number; error?: string }>;
+  onCargarAvanceDesdeSheet?: (customUrl?: string, avanceRows?: any[]) => Promise<{ success: boolean; totalRegistros?: number; personasConJabasEnFecha?: number; jabasEnFecha?: number; fechaConsultada?: string; error?: string }>;
+  onUpdateDetalleJabas?: (updated: DetalleJaba[]) => void;
 }
 
 export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
@@ -107,7 +109,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   onRestoreOfflineCache,
   isOnline = true,
   onDepurarTrabajadoresAyer,
-  onCargarNominaDesdeSheet
+  onCargarNominaDesdeSheet,
+  onCargarAvanceDesdeSheet,
+  onUpdateDetalleJabas
 }) => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
@@ -193,13 +197,22 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannerMode, setScannerMode] = useState<'worker' | 'leader'>('worker');
 
-  // Modal y acciones de Carga de Nómina desde Google Sheets
+  // Modal y acciones de Carga de Nómina y Registro de Avance desde Google Sheets
   const [showModalCargarNomina, setShowModalCargarNomina] = useState(false);
+  const [tipoHojaCarga, setTipoHojaCarga] = useState<'trabajadores' | 'registro_avance'>('registro_avance');
   const [sheetUrlInput, setSheetUrlInput] = useState(getGsheetUrl());
   const [isCargandoSheet, setIsCargandoSheet] = useState(false);
+  const [isCargandoAvance, setIsCargandoAvance] = useState(false);
   const [modoCargaNomina, setModoCargaNomina] = useState<'sheet' | 'pegar'>('sheet');
   const [pegarNominaTexto, setPegarNominaTexto] = useState('');
+  const [pegarAvanceTexto, setPegarAvanceTexto] = useState('');
   const [cargaSheetResumen, setCargaSheetResumen] = useState<{ count: number; pendientes: number; asignados: number } | null>(null);
+  const [cargaAvanceResumen, setCargaAvanceResumen] = useState<{
+    totalRegistros: number;
+    personasConJabas: number;
+    jabasEnFecha: number;
+    fechaConsultada: string;
+  } | null>(null);
 
   // Derive unique lists for dropdowns
   const supervisoresList = useMemo(() => {
@@ -461,11 +474,13 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   // para que siempre coincida al 100% con los avances reales del campo y no falte ningún cosechador
   const fullTrabajadores = useMemo(() => {
     const existingDnis = new Set<string>();
+    const existingNames = new Set<string>();
     trabajadores.forEach((t) => {
       const norm = normalizeDni(t.dni);
       const raw = String(t.dni || '').trim();
       if (norm) existingDnis.add(norm);
       if (raw) existingDnis.add(raw);
+      if (t.nombres) existingNames.add(normalizeStr(t.nombres));
     });
 
     const extras: Trabajador[] = [];
@@ -473,19 +488,22 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       detalleJabas.forEach((d) => {
         const norm = normalizeDni(d.dni);
         const raw = String(d.dni || '').trim();
-        const key = norm || raw;
-        if (key && !existingDnis.has(key)) {
+        const normName = d.trabajador ? normalizeStr(d.trabajador) : '';
+        const key = norm || raw || (normName ? `name_${normName}` : '');
+
+        if (key && !existingDnis.has(key) && (!normName || !existingNames.has(normName))) {
           existingDnis.add(key);
           if (norm) existingDnis.add(norm);
           if (raw) existingDnis.add(raw);
+          if (normName) existingNames.add(normName);
           extras.push({
             id: d.id || `extra_${key}`,
-            dni: raw || norm,
+            dni: raw || norm || '',
             nombres: d.trabajador || `Trabajador ${key}`,
             supervisor: d.supervisor || '',
             fundo: d.fundo || 'Santa Teresa',
             modulo: d.modulo || 'M01',
-            grupo: d.grupo || 'Grupo 01',
+            grupo: d.grupo || '',
             lider: d.lider || '',
             jabas: Number(d.jabas) || 0,
             fecha: d.fecha || ''
@@ -496,7 +514,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
     if (extras.length === 0) return trabajadores;
     return [...trabajadores, ...extras];
-  }, [trabajadores, detalleJabas, normalizeDni]);
+  }, [trabajadores, detalleJabas, normalizeDni, normalizeStr]);
 
   // Pre-indexed workers for sub-millisecond search and strict binding
   const indexedTrabajadores = useMemo(() => {
@@ -537,7 +555,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       }
     }
     return list;
-  }, [trabajadores, normalizeDni, normalizeModulo, normalizeStr, session?.rol, hoyStr]);
+  }, [fullTrabajadores, normalizeDni, normalizeModulo, normalizeStr, session?.rol, hoyStr]);
 
   // Helper para verificar si un trabajador ya cuenta con Grupo, Líder, Reserva de hoy o Grupo en sesión
   const isWorkerAsignado = useCallback(
@@ -609,7 +627,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         const dFecha = d.fecha ? normalizeDateString(d.fecha) : (d.timestamp ? normalizeDateString(d.timestamp) : '');
         if (dFecha === targetFecha) {
           const jabas = Number(d.jabas) || 0;
-          if (jabas > 0 && d.dni) {
+          if (jabas > 0) {
             const norm = normalizeDni(d.dni);
             const raw = String(d.dni || '').trim();
             if (norm) map[norm] = (map[norm] || 0) + jabas;
@@ -645,11 +663,11 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   }, [detalleJabas, trabajadores, fechaPersonal, normalizeDni, normalizeStr]);
 
   // Consulta directa y estricta al Registro de Avance (detalleJabas) para la fecha consultada
-  // Calcula con precisión matemática el total real de jabas del día y los trabajadores participantes
+  // Calcula con precisión matemática el total real de jabas del día y las personas participantes
   const avanceDiaStats = useMemo(() => {
     const targetFecha = fechaPersonal || getLocalToday();
     let totalJabasDia = 0;
-    const dnisConJabas = new Set<string>();
+    const uniquePersons = new Set<string>();
     let totalRegistros = 0;
 
     if (Array.isArray(detalleJabas)) {
@@ -661,10 +679,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
           totalRegistros++;
           const norm = normalizeDni(d.dni);
           const raw = String(d.dni || '').trim();
-          if (norm) dnisConJabas.add(norm);
-          if (raw) dnisConJabas.add(raw);
-          if (d.trabajador) {
-            dnisConJabas.add(`NAME_${normalizeStr(d.trabajador)}`);
+          const personKey = norm || raw || (d.trabajador ? `NAME_${normalizeStr(d.trabajador)}` : (d.id ? `ID_${d.id}` : ''));
+          if (personKey) {
+            uniquePersons.add(personKey);
           }
         }
       });
@@ -673,7 +690,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return {
       targetFecha,
       totalJabasDia,
-      totalPersonasConJabas: dnisConJabas.size,
+      totalPersonasConJabas: uniquePersons.size,
       totalRegistros
     };
   }, [detalleJabas, fechaPersonal, normalizeDni, normalizeStr]);
@@ -807,10 +824,17 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     () => scopedTrabajadores.filter((t) => !hasWorkerJabas(t)).length,
     [scopedTrabajadores, hasWorkerJabas]
   );
+  const hasCuadrillaFilter = Boolean(cuadrillaSupervisor || cuadrillaFundo || cuadrillaModulo || searchTerm);
+
   const countConJabas = useMemo(
     () => scopedTrabajadores.filter((t) => hasWorkerJabas(t)).length,
     [scopedTrabajadores, hasWorkerJabas]
   );
+
+  const countConJabasTotal = useMemo(() => {
+    if (hasCuadrillaFilter) return countConJabas;
+    return Math.max(avanceDiaStats.totalPersonasConJabas, countConJabas);
+  }, [hasCuadrillaFilter, countConJabas, avanceDiaStats.totalPersonasConJabas]);
   const countPendientes = useMemo(
     () => scopedTrabajadores.filter((t) => !isWorkerCompletadoOAsignado(t)).length,
     [scopedTrabajadores, isWorkerCompletadoOAsignado]
@@ -1602,6 +1626,199 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     setWorkerAssignedGrupos({});
     setVistaAsignacion('pendientes');
     onToast(`✅ Se importaron ${parsed.length} trabajadores (${pCount} pendientes, ${aCount} asignados)`, 'success');
+  };
+
+  // Ejecuta la conexión y descarga directa desde la hoja 'Registro_Avance' del Google Sheet
+  const handleEjecutarCargaAvanceSheet = async () => {
+    setIsCargandoAvance(true);
+    setCargaAvanceResumen(null);
+    try {
+      const cleanUrl = sheetUrlInput.trim();
+      if (cleanUrl) {
+        saveGsheetUrl(cleanUrl);
+      }
+
+      let res: { success: boolean; totalRegistros?: number; personasConJabasEnFecha?: number; jabasEnFecha?: number; fechaConsultada?: string; error?: string } | undefined;
+      if (onCargarAvanceDesdeSheet) {
+        res = await onCargarAvanceDesdeSheet(cleanUrl || undefined);
+      } else {
+        const resp = await fetch('/api/cargar-avance-sheet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: cleanUrl, userRole: session?.rol })
+        });
+        const json = await resp.json();
+        if (json.status === 'ok') {
+          if (onUpdateDetalleJabas && Array.isArray(json.detalleJabas)) {
+            onUpdateDetalleJabas(json.detalleJabas);
+          }
+          if (onUpdateTrabajadores && Array.isArray(json.trabajadores)) {
+            onUpdateTrabajadores(json.trabajadores);
+          }
+          res = {
+            success: true,
+            totalRegistros: json.totalRegistros,
+            personasConJabasEnFecha: json.personasConJabasEnFecha,
+            jabasEnFecha: json.jabasEnFecha,
+            fechaConsultada: json.fechaConsultada
+          };
+        } else {
+          throw new Error(json.message || 'Error al conectar con Google Sheets');
+        }
+      }
+
+      if (res && res.success) {
+        setCargaAvanceResumen({
+          totalRegistros: res.totalRegistros || 0,
+          personasConJabas: res.personasConJabasEnFecha || 0,
+          jabasEnFecha: res.jabasEnFecha || 0,
+          fechaConsultada: res.fechaConsultada || normalizeDateString(fechaPersonal || getLocalToday())
+        });
+        setVistaAsignacion('con_jabas');
+        onToast(`✅ Registro de Avance sincronizado: ${res.personasConJabasEnFecha} personas con jabas (${res.jabasEnFecha} jabas)`, 'success');
+      }
+    } catch (err: any) {
+      onToast(`❌ Error al cargar Registro de Avance: ${err?.message || 'Error de conexión'}`, 'error');
+    } finally {
+      setIsCargandoAvance(false);
+    }
+  };
+
+  // Procesar pegado de filas directamente desde la pestaña 'Registro_Avance'
+  const handleProcesarPegadoAvance = async () => {
+    if (!pegarAvanceTexto.trim()) {
+      onToast('⚠️ Pega el contenido copiado de la hoja Registro_Avance', 'warning');
+      return;
+    }
+
+    try {
+      const lines = pegarAvanceTexto.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (lines.length === 0) {
+        onToast('⚠️ No se encontraron líneas de datos', 'warning');
+        return;
+      }
+
+      const firstLower = lines[0].toLowerCase();
+      const hasHeader = firstLower.includes('dni') || firstLower.includes('fecha') || firstLower.includes('jabas') || firstLower.includes('supervisor') || firstLower.includes('id');
+      const dataLines = hasHeader ? lines.slice(1) : lines;
+
+      const parsedRecords: DetalleJaba[] = [];
+      dataLines.forEach((line, idx) => {
+        const sep = line.includes('\t') ? '\t' : line.includes(';') ? ';' : ',';
+        const cols = line.split(sep).map((c) => c.trim().replace(/^["']|["']$/g, ''));
+        if (cols.length < 2) return;
+
+        let id = '';
+        let fecha = '';
+        let timestamp = '';
+        let supervisor = '';
+        let fundo = '';
+        let modulo = '';
+        let grupo = '';
+        let lider = '';
+        let dni = '';
+        let trabajador = '';
+        let jabas = 0;
+
+        if (cols.length >= 10) {
+          // Formato estándar de Registro_Avance (11 columnas: ID, Fecha, Timestamp, Supervisor, Fundo, Modulo, Grupo, Lider, DNI, Trabajador, Jabas)
+          id = cols[0];
+          fecha = normalizeDateString(cols[1]);
+          timestamp = cols[2];
+          supervisor = cols[3];
+          fundo = cols[4];
+          modulo = cols[5];
+          grupo = cols[6];
+          lider = cols[7];
+          dni = cols[8].replace(/\D/g, '') || cols[8].trim();
+          trabajador = cols[9];
+          jabas = Number(cols[10]) || 0;
+        } else if (cols.length >= 7) {
+          fecha = normalizeDateString(cols[0]);
+          supervisor = cols[1];
+          fundo = cols[2];
+          modulo = cols[3];
+          dni = cols[4].replace(/\D/g, '') || cols[4].trim();
+          trabajador = cols[5];
+          jabas = Number(cols[6]) || 0;
+        } else if (cols.length >= 3) {
+          dni = cols[0].replace(/\D/g, '') || cols[0].trim();
+          trabajador = cols[1];
+          jabas = Number(cols[2]) || 0;
+        }
+
+        const effectiveFecha = fecha || normalizeDateString(fechaPersonal || getLocalToday());
+        const effectiveDni = dni || (id ? id.split('_')[1] : '');
+        const effectiveId = id || `${effectiveFecha}_${effectiveDni}_${modulo || 'M01'}_${idx}`;
+
+        if (effectiveDni || trabajador) {
+          parsedRecords.push({
+            id: effectiveId,
+            fecha: effectiveFecha,
+            timestamp: timestamp || new Date().toISOString(),
+            supervisor: supervisor || '',
+            fundo: fundo || 'Santa Teresa',
+            modulo: modulo || 'M01',
+            grupo: grupo || '',
+            lider: lider || '',
+            dni: effectiveDni,
+            trabajador: trabajador || `Trabajador ${effectiveDni}`,
+            jabas: jabas
+          });
+        }
+      });
+
+      if (parsedRecords.length === 0) {
+        onToast('❌ No se reconocieron registros válidos. Verifica las columnas.', 'error');
+        return;
+      }
+
+      setIsCargandoAvance(true);
+      let res: { success: boolean; totalRegistros?: number; personasConJabasEnFecha?: number; jabasEnFecha?: number; fechaConsultada?: string; error?: string } | undefined;
+      if (onCargarAvanceDesdeSheet) {
+        res = await onCargarAvanceDesdeSheet(undefined, parsedRecords);
+      } else {
+        const resp = await fetch('/api/cargar-avance-sheet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ avanceRows: parsedRecords, userRole: session?.rol })
+        });
+        const json = await resp.json();
+        if (json.status === 'ok') {
+          if (onUpdateDetalleJabas && Array.isArray(json.detalleJabas)) {
+            onUpdateDetalleJabas(json.detalleJabas);
+          }
+          if (onUpdateTrabajadores && Array.isArray(json.trabajadores)) {
+            onUpdateTrabajadores(json.trabajadores);
+          }
+          res = {
+            success: true,
+            totalRegistros: json.totalRegistros,
+            personasConJabasEnFecha: json.personasConJabasEnFecha,
+            jabasEnFecha: json.jabasEnFecha,
+            fechaConsultada: json.fechaConsultada
+          };
+        } else {
+          throw new Error(json.message || 'Error al procesar registros');
+        }
+      }
+
+      if (res && res.success) {
+        setCargaAvanceResumen({
+          totalRegistros: res.totalRegistros || parsedRecords.length,
+          personasConJabas: res.personasConJabasEnFecha || 0,
+          jabasEnFecha: res.jabasEnFecha || 0,
+          fechaConsultada: res.fechaConsultada || normalizeDateString(fechaPersonal || getLocalToday())
+        });
+        setPegarAvanceTexto('');
+        setVistaAsignacion('con_jabas');
+        onToast(`✅ Registro de Avance importado: ${parsedRecords.length} filas procesadas (${res.personasConJabasEnFecha} personas con jabas)`, 'success');
+      }
+    } catch (err: any) {
+      onToast(`❌ Error al importar Registro de Avance: ${err?.message || 'Error desconocido'}`, 'error');
+    } finally {
+      setIsCargandoAvance(false);
+    }
   };
 
   // Restablecimiento automático y manual de filtros y cuadrilla
@@ -3167,8 +3384,28 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-[#c8e6c9] shadow-xs">
                   <Users className="w-4 h-4 text-[#2e7d32]" />
                   <span className="text-gray-600 font-medium">Con Avance Registrado:</span>
-                  <span className="font-extrabold text-[#1b5e20] text-sm font-mono">{countConJabas} pers.</span>
+                  <span className="font-extrabold text-[#1b5e20] text-sm font-mono">
+                    {avanceDiaStats.totalPersonasConJabas} pers.
+                    {hasCuadrillaFilter && countConJabas !== avanceDiaStats.totalPersonasConJabas ? (
+                      <span className="text-[11px] font-normal text-gray-500 ml-1">({countConJabas} en filtro)</span>
+                    ) : null}
+                  </span>
                 </div>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTipoHojaCarga('registro_avance');
+                      setShowModalCargarNomina(true);
+                      setCargaAvanceResumen(null);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2e7d32] hover:bg-[#1b5e20] text-white font-bold text-xs shadow-xs cursor-pointer transition-all active:scale-95"
+                    title="Cargar / Sincronizar Registro de Avance (Jabas) desde Google Sheets"
+                  >
+                    <UploadCloud className="w-3.5 h-3.5" />
+                    <span>Cargar Registro de Avance</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -3318,7 +3555,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     vistaAsignacion === 'con_jabas' ? 'bg-amber-800 text-white' : 'bg-amber-200 text-amber-900'
                   }`}
                 >
-                  {countConJabas} pers. · {avanceDiaStats.totalJabasDia} jabas
+                  {countConJabasTotal} pers. · {avanceDiaStats.totalJabasDia} jabas
                 </span>
               </button>
 
@@ -4931,17 +5168,25 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl border border-emerald-100 flex flex-col max-h-[90vh] overflow-hidden">
             {/* Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-gray-100 shrink-0">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
-                  <FileSpreadsheet className="w-5 h-5 text-emerald-700" />
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                  tipoHojaCarga === 'registro_avance' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+                }`}>
+                  {tipoHojaCarga === 'registro_avance' ? (
+                    <Package className="w-5 h-5 text-amber-700" />
+                  ) : (
+                    <FileSpreadsheet className="w-5 h-5 text-emerald-700" />
+                  )}
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-gray-900 leading-tight">
-                    Cargar Nómina desde Google Sheets
+                    {tipoHojaCarga === 'registro_avance' ? 'Sincronizar Registro de Avance (Jabas)' : 'Cargar Nómina desde Google Sheets'}
                   </h3>
                   <p className="text-xs text-gray-500">
-                    Conecta directamente con la pestaña <b className="text-emerald-700 font-semibold">"Trabajadores"</b> del Sheet para actualizar listas de pendientes y asignados.
+                    {tipoHojaCarga === 'registro_avance'
+                      ? 'Lee la pestaña "Registro_Avance" del Sheet para actualizar personas y jabas cosechadas.'
+                      : 'Conecta con la pestaña "Trabajadores" del Sheet para actualizar listas de pendientes y asignados.'}
                   </p>
                 </div>
               </div>
@@ -4954,24 +5199,82 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               </button>
             </div>
 
-            {/* Metrics overview */}
-            <div className="grid grid-cols-3 gap-2 py-3 shrink-0">
-              <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl p-2.5 text-center">
-                <span className="text-[10px] text-emerald-700 uppercase font-bold tracking-wider block">Pendientes</span>
-                <span className="text-lg font-black text-emerald-900">{countPendientes}</span>
-                <span className="text-[10px] text-emerald-600 block">Sin Grupo / Líder</span>
-              </div>
-              <div className="bg-purple-50/80 border border-purple-200 rounded-xl p-2.5 text-center">
-                <span className="text-[10px] text-purple-700 uppercase font-bold tracking-wider block">Asignados</span>
-                <span className="text-lg font-black text-purple-900">{countAsignados}</span>
-                <span className="text-[10px] text-purple-600 block">Con Grupo o Líder</span>
-              </div>
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-center">
-                <span className="text-[10px] text-gray-600 uppercase font-bold tracking-wider block">Total Nómina</span>
-                <span className="text-lg font-black text-gray-900">{countTodos}</span>
-                <span className="text-[10px] text-gray-500 block">En Sistema</span>
-              </div>
+            {/* Selector de Hoja de Google Sheets: Registro_Avance vs Trabajadores */}
+            <div className="flex bg-gray-100 p-1 rounded-xl my-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setTipoHojaCarga('registro_avance')}
+                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  tipoHojaCarga === 'registro_avance'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Package className="w-3.5 h-3.5" />
+                <span>1. Registro de Avance (Jabas)</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                  tipoHojaCarga === 'registro_avance' ? 'bg-amber-800 text-white' : 'bg-amber-100 text-amber-800'
+                }`}>
+                  {avanceDiaStats.totalPersonasConJabas} pers.
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTipoHojaCarga('trabajadores')}
+                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  tipoHojaCarga === 'trabajadores'
+                    ? 'bg-emerald-700 text-white shadow-xs'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>2. Nómina General</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                  tipoHojaCarga === 'trabajadores' ? 'bg-emerald-900 text-white' : 'bg-emerald-100 text-emerald-800'
+                }`}>
+                  {countTodos}
+                </span>
+              </button>
             </div>
+
+            {/* Metrics overview */}
+            {tipoHojaCarga === 'registro_avance' ? (
+              <div className="grid grid-cols-3 gap-2 pb-3 shrink-0">
+                <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-2 text-center">
+                  <span className="text-[10px] text-amber-700 uppercase font-bold tracking-wider block">Personas con Jabas</span>
+                  <span className="text-base font-black text-amber-900">{avanceDiaStats.totalPersonasConJabas}</span>
+                  <span className="text-[10px] text-amber-600 block">En {avanceDiaStats.targetFecha}</span>
+                </div>
+                <div className="bg-orange-50/80 border border-orange-200 rounded-xl p-2 text-center">
+                  <span className="text-[10px] text-orange-700 uppercase font-bold tracking-wider block">Jabas Totales</span>
+                  <span className="text-base font-black text-orange-900">{avanceDiaStats.totalJabasDia}</span>
+                  <span className="text-[10px] text-orange-600 block">Cosechadas Hoy</span>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 rounded-xl p-2 text-center">
+                  <span className="text-[10px] text-gray-600 uppercase font-bold tracking-wider block">Registros</span>
+                  <span className="text-base font-black text-gray-900">{avanceDiaStats.totalRegistros}</span>
+                  <span className="text-[10px] text-gray-500 block">En Memoria</span>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2 pb-3 shrink-0">
+                <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl p-2 text-center">
+                  <span className="text-[10px] text-emerald-700 uppercase font-bold tracking-wider block">Pendientes</span>
+                  <span className="text-base font-black text-emerald-900">{countPendientes}</span>
+                  <span className="text-[10px] text-emerald-600 block">Sin Grupo / Líder</span>
+                </div>
+                <div className="bg-purple-50/80 border border-purple-200 rounded-xl p-2 text-center">
+                  <span className="text-[10px] text-purple-700 uppercase font-bold tracking-wider block">Asignados</span>
+                  <span className="text-base font-black text-purple-900">{countAsignados}</span>
+                  <span className="text-[10px] text-purple-600 block">Con Grupo o Líder</span>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 rounded-xl p-2 text-center">
+                  <span className="text-[10px] text-gray-600 uppercase font-bold tracking-wider block">Total Nómina</span>
+                  <span className="text-base font-black text-gray-900">{countTodos}</span>
+                  <span className="text-[10px] text-gray-500 block">En Sistema</span>
+                </div>
+              </div>
+            )}
 
             {/* Tabs selector */}
             <div className="flex border-b border-gray-200 mb-3 shrink-0">
@@ -4980,7 +5283,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 onClick={() => setModoCargaNomina('sheet')}
                 className={`flex-1 py-2 text-xs font-bold border-b-2 flex items-center justify-center gap-1.5 cursor-pointer ${
                   modoCargaNomina === 'sheet'
-                    ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50'
+                    ? tipoHojaCarga === 'registro_avance'
+                      ? 'border-amber-600 text-amber-800 bg-amber-50/50'
+                      : 'border-emerald-600 text-emerald-800 bg-emerald-50/50'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
                 }`}
               >
@@ -4992,7 +5297,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 onClick={() => setModoCargaNomina('pegar')}
                 className={`flex-1 py-2 text-xs font-bold border-b-2 flex items-center justify-center gap-1.5 cursor-pointer ${
                   modoCargaNomina === 'pegar'
-                    ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50'
+                    ? tipoHojaCarga === 'registro_avance'
+                      ? 'border-amber-600 text-amber-800 bg-amber-50/50'
+                      : 'border-emerald-600 text-emerald-800 bg-emerald-50/50'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
                 }`}
               >
@@ -5003,105 +5310,234 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
             {/* Content Area */}
             <div className="overflow-y-auto space-y-3 flex-1 pr-1 text-xs">
-              {modoCargaNomina === 'sheet' ? (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block font-bold text-gray-700 text-xs mb-1">
-                      URL del Web App de Google Sheets (Apps Script /exec):
-                    </label>
-                    <input
-                      type="text"
-                      value={sheetUrlInput}
-                      onChange={(e) => setSheetUrlInput(e.target.value)}
-                      placeholder="https://script.google.com/macros/s/.../exec"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:border-emerald-600 focus:outline-none bg-white"
-                    />
-                  </div>
-
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-emerald-950 space-y-1.5 leading-relaxed">
-                    <div className="flex items-center gap-1.5 font-bold text-emerald-900">
-                      <Info className="w-4 h-4 text-emerald-700 shrink-0" />
-                      <span>Estructura leída de la pestaña "Trabajadores" del Sheet:</span>
+              {tipoHojaCarga === 'registro_avance' ? (
+                modoCargaNomina === 'sheet' ? (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block font-bold text-gray-700 text-xs mb-1">
+                        URL del Web App de Google Sheets (Apps Script /exec):
+                      </label>
+                      <input
+                        type="text"
+                        value={sheetUrlInput}
+                        onChange={(e) => setSheetUrlInput(e.target.value)}
+                        placeholder="https://script.google.com/macros/s/.../exec"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:border-amber-600 focus:outline-none bg-white"
+                      />
                     </div>
-                    <ul className="list-disc pl-5 space-y-0.5 text-[11px] text-emerald-900">
-                      <li><b>Columna A:</b> DNI</li>
-                      <li><b>Columna B:</b> Nombres y Apellidos</li>
-                      <li><b>Columna C:</b> Fundo (Ej: Santa Teresa)</li>
-                      <li><b>Columna D:</b> Módulo (Ej: M01)</li>
-                      <li><b>Columna E:</b> Grupo → <span className="underline">Si está vacío o dice "Sin Grupo", queda como <b>Solo Pendiente</b></span>.</li>
-                      <li><b>Columna F:</b> Supervisor</li>
-                      <li><b>Columna G:</b> Líder → <span className="underline">Si está vacío o dice "Sin Líder", queda como <b>Solo Pendiente</b></span>.</li>
-                      <li><b>Columna H:</b> Tipo (Cosechador, Apoyo, etc.)</li>
-                    </ul>
-                  </div>
 
-                  {cargaSheetResumen && (
-                    <div className="bg-emerald-100/80 border border-emerald-300 rounded-xl p-3 text-emerald-950 flex items-start gap-2 animate-in fade-in">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
-                      <div>
-                        <div className="font-bold text-emerald-900">
-                          ¡Nómina cargada exitosamente!
-                        </div>
-                        <div className="text-[11px] text-emerald-800">
-                          Se procesaron <b>{cargaSheetResumen.count}</b> trabajadores: <b>{cargaSheetResumen.pendientes}</b> pendientes (sin grupo ni líder) y <b>{cargaSheetResumen.asignados}</b> asignados.
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-950 space-y-1.5 leading-relaxed">
+                      <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                        <Info className="w-4 h-4 text-amber-700 shrink-0" />
+                        <span>Estructura leída de la pestaña "Registro_Avance" del Sheet:</span>
+                      </div>
+                      <p className="text-[11px] text-amber-900">
+                        Se lee el registro histórico y del día actual con las 11 columnas estándar:
+                      </p>
+                      <ul className="list-disc pl-5 space-y-0.5 text-[11px] text-amber-900">
+                        <li><b>Columnas A-D:</b> ID, Fecha, Timestamp, Supervisor</li>
+                        <li><b>Columnas E-H:</b> Fundo, Módulo, Grupo, Líder</li>
+                        <li><b>Columnas I-K:</b> DNI, Trabajador (Nombres), Jabas</li>
+                      </ul>
+                      <p className="text-[10px] text-amber-800 italic mt-1">
+                        * Cada persona con jabas asignadas se consolida con su DNI/Nombre sin omitir ningún cosechador.
+                      </p>
+                    </div>
+
+                    {cargaAvanceResumen && (
+                      <div className="bg-amber-100/90 border border-amber-300 rounded-xl p-3 text-amber-950 flex items-start gap-2 animate-in fade-in">
+                        <CheckCircle2 className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-bold text-amber-900">
+                            ¡Registro de Avance sincronizado con éxito!
+                          </div>
+                          <div className="text-[11px] text-amber-800">
+                            Se procesaron <b>{cargaAvanceResumen.totalRegistros}</b> registros: <b>{cargaAvanceResumen.personasConJabas}</b> personas con <b>{cargaAvanceResumen.jabasEnFecha}</b> jabas en fecha <b>{cargaAvanceResumen.fechaConsultada}</b>.
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    disabled={isCargandoSheet}
-                    onClick={handleEjecutarCargaNominaSheet}
-                    className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:bg-emerald-400 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
-                  >
-                    {isCargandoSheet ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>Conectando con Google Sheets y actualizando nómina...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Download className="w-4 h-4" />
-                        <span>📥 Conectar y Cargar Nómina desde Sheet</span>
-                      </>
                     )}
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-blue-950 text-[11px]">
-                    <div className="font-bold mb-1 flex items-center gap-1.5 text-blue-900">
-                      <Info className="w-4 h-4 text-blue-700 shrink-0" />
-                      <span>Instrucciones para pegar:</span>
+
+                    <button
+                      type="button"
+                      disabled={isCargandoAvance}
+                      onClick={handleEjecutarCargaAvanceSheet}
+                      className="w-full bg-amber-700 hover:bg-amber-800 disabled:bg-amber-400 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+                    >
+                      {isCargandoAvance ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Descargando pestaña Registro_Avance desde Sheet...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" />
+                          <span>📥 Conectar y Cargar Registro de Avance desde Sheet</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-950 text-[11px]">
+                      <div className="font-bold mb-1 flex items-center gap-1.5 text-amber-900">
+                        <Info className="w-4 h-4 text-amber-700 shrink-0" />
+                        <span>Instrucciones para pegar Registro de Avance:</span>
+                      </div>
+                      <p>
+                        Selecciona las filas en la hoja <b>Registro_Avance</b> (Columnas A hasta K: ID, Fecha, Timestamp, Supervisor, Fundo, Módulo, Grupo, Líder, DNI, Trabajador, Jabas), presiona <b>Ctrl+C</b> y pégalas a continuación:
+                      </p>
                     </div>
-                    <p>
-                      Selecciona las filas en tu Google Sheet (Columnas A hasta H: DNI, Nombres, Fundo, Módulo, Grupo, Supervisor, Líder, Tipo), presiona <b>Ctrl+C</b> y pégalas en el cuadro siguiente.
-                    </p>
-                  </div>
 
-                  <div>
-                    <label className="block font-bold text-gray-700 text-xs mb-1">
-                      Pega aquí las filas copiadas del Sheet o Excel:
-                    </label>
-                    <textarea
-                      rows={6}
-                      value={pegarNominaTexto}
-                      onChange={(e) => setPegarNominaTexto(e.target.value)}
-                      placeholder="DNI&#9;NOMBRES&#9;FUNDO&#9;MODULO&#9;GRUPO&#9;SUPERVISOR&#9;LIDER&#9;TIPO&#10;72345678&#9;PEREZ JUAN&#9;Santa Teresa&#9;M01&#9;&#9;CARLOS LOPEZ&#9;&#9;Cosechador"
-                      className="w-full p-2.5 border border-gray-300 rounded-xl text-xs font-mono focus:border-emerald-600 focus:outline-none bg-white resize-none"
-                    />
-                  </div>
+                    <div>
+                      <label className="block font-bold text-gray-700 text-xs mb-1">
+                        Pega aquí las filas copiadas de Registro_Avance:
+                      </label>
+                      <textarea
+                        rows={6}
+                        value={pegarAvanceTexto}
+                        onChange={(e) => setPegarAvanceTexto(e.target.value)}
+                        placeholder="ID&#9;FECHA&#9;TIMESTAMP&#9;SUPERVISOR&#9;FUNDO&#9;MODULO&#9;GRUPO&#9;LIDER&#9;DNI&#9;TRABAJADOR&#9;JABAS&#10;REC_01&#9;11/09/2026&#9;2026-09-11 08:00&#9;CARLOS&#9;Santa Teresa&#9;M01&#9;G01&#9;JUAN&#9;72345678&#9;PEREZ JUAN&#9;25"
+                        className="w-full p-2.5 border border-gray-300 rounded-xl text-xs font-mono focus:border-amber-600 focus:outline-none bg-white resize-none"
+                      />
+                    </div>
 
-                  <button
-                    type="button"
-                    onClick={handleProcesarPegadoNomina}
-                    className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
-                  >
-                    <UploadCloud className="w-4 h-4" />
-                    <span>📋 Procesar e Importar Nómina Pegada</span>
-                  </button>
-                </div>
+                    {cargaAvanceResumen && (
+                      <div className="bg-amber-100/90 border border-amber-300 rounded-xl p-3 text-amber-950 flex items-start gap-2 animate-in fade-in">
+                        <CheckCircle2 className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-bold text-amber-900">
+                            ¡Registro de Avance importado exitosamente!
+                          </div>
+                          <div className="text-[11px] text-amber-800">
+                            Se importaron <b>{cargaAvanceResumen.totalRegistros}</b> registros: <b>{cargaAvanceResumen.personasConJabas}</b> personas con jabas.
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={isCargandoAvance}
+                      onClick={handleProcesarPegadoAvance}
+                      className="w-full bg-amber-700 hover:bg-amber-800 disabled:bg-amber-400 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+                    >
+                      {isCargandoAvance ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Procesando registros pegados...</span>
+                        </>
+                      ) : (
+                        <>
+                          <UploadCloud className="w-4 h-4" />
+                          <span>📋 Procesar e Importar Registro de Avance Pegado</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )
+              ) : (
+                /* Flujo Nómina Trabajadores */
+                modoCargaNomina === 'sheet' ? (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block font-bold text-gray-700 text-xs mb-1">
+                        URL del Web App de Google Sheets (Apps Script /exec):
+                      </label>
+                      <input
+                        type="text"
+                        value={sheetUrlInput}
+                        onChange={(e) => setSheetUrlInput(e.target.value)}
+                        placeholder="https://script.google.com/macros/s/.../exec"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:border-emerald-600 focus:outline-none bg-white"
+                      />
+                    </div>
+
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-emerald-950 space-y-1.5 leading-relaxed">
+                      <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                        <Info className="w-4 h-4 text-emerald-700 shrink-0" />
+                        <span>Estructura leída de la pestaña "Trabajadores" del Sheet:</span>
+                      </div>
+                      <ul className="list-disc pl-5 space-y-0.5 text-[11px] text-emerald-900">
+                        <li><b>Columna A:</b> DNI</li>
+                        <li><b>Columna B:</b> Nombres y Apellidos</li>
+                        <li><b>Columna C:</b> Fundo (Ej: Santa Teresa)</li>
+                        <li><b>Columna D:</b> Módulo (Ej: M01)</li>
+                        <li><b>Columna E:</b> Grupo → <span className="underline">Si está vacío o dice "Sin Grupo", queda como <b>Solo Pendiente</b></span>.</li>
+                        <li><b>Columna F:</b> Supervisor</li>
+                        <li><b>Columna G:</b> Líder → <span className="underline">Si está vacío o dice "Sin Líder", queda como <b>Solo Pendiente</b></span>.</li>
+                        <li><b>Columna H:</b> Tipo (Cosechador, Apoyo, etc.)</li>
+                      </ul>
+                    </div>
+
+                    {cargaSheetResumen && (
+                      <div className="bg-emerald-100/80 border border-emerald-300 rounded-xl p-3 text-emerald-950 flex items-start gap-2 animate-in fade-in">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-bold text-emerald-900">
+                            ¡Nómina cargada exitosamente!
+                          </div>
+                          <div className="text-[11px] text-emerald-800">
+                            Se procesaron <b>{cargaSheetResumen.count}</b> trabajadores: <b>{cargaSheetResumen.pendientes}</b> pendientes (sin grupo ni líder) y <b>{cargaSheetResumen.asignados}</b> asignados.
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={isCargandoSheet}
+                      onClick={handleEjecutarCargaNominaSheet}
+                      className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:bg-emerald-400 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+                    >
+                      {isCargandoSheet ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Conectando con Google Sheets y actualizando nómina...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" />
+                          <span>📥 Conectar y Cargar Nómina desde Sheet</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-blue-950 text-[11px]">
+                      <div className="font-bold mb-1 flex items-center gap-1.5 text-blue-900">
+                        <Info className="w-4 h-4 text-blue-700 shrink-0" />
+                        <span>Instrucciones para pegar nómina:</span>
+                      </div>
+                      <p>
+                        Selecciona las filas en tu Google Sheet (Columnas A hasta H: DNI, Nombres, Fundo, Módulo, Grupo, Supervisor, Líder, Tipo), presiona <b>Ctrl+C</b> y pégalas en el cuadro siguiente.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-gray-700 text-xs mb-1">
+                        Pega aquí las filas copiadas del Sheet o Excel:
+                      </label>
+                      <textarea
+                        rows={6}
+                        value={pegarNominaTexto}
+                        onChange={(e) => setPegarNominaTexto(e.target.value)}
+                        placeholder="DNI&#9;NOMBRES&#9;FUNDO&#9;MODULO&#9;GRUPO&#9;SUPERVISOR&#9;LIDER&#9;TIPO&#10;72345678&#9;PEREZ JUAN&#9;Santa Teresa&#9;M01&#9;&#9;CARLOS LOPEZ&#9;&#9;Cosechador"
+                        className="w-full p-2.5 border border-gray-300 rounded-xl text-xs font-mono focus:border-emerald-600 focus:outline-none bg-white resize-none"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleProcesarPegadoNomina}
+                      className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+                    >
+                      <UploadCloud className="w-4 h-4" />
+                      <span>📋 Procesar e Importar Nómina Pegada</span>
+                    </button>
+                  </div>
+                )
               )}
             </div>
 

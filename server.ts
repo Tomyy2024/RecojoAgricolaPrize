@@ -59,6 +59,24 @@ function normalizeDateServer(str?: string): string {
   if (slashMatch) {
     return `${slashMatch[3]}-${slashMatch[2].padStart(2, '0')}-${slashMatch[1].padStart(2, '0')}`;
   }
+
+  // Textual month format e.g. "Fri Sep 11 2026 00:00:00 GMT-0500" or "Sep 11 2026"
+  const textDateMatch = s.match(/([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})/);
+  if (textDateMatch) {
+    const mStr = textDateMatch[1].toLowerCase();
+    const months: Record<string, string> = {
+      jan: '01', ene: '01', feb: '02', mar: '03', apr: '04', abr: '04',
+      may: '05', jun: '06', jul: '07', aug: '08', ago: '08', sep: '09',
+      set: '09', oct: '10', nov: '11', dec: '12', dic: '12'
+    };
+    const m = months[mStr];
+    if (m) {
+      const day = textDateMatch[2].padStart(2, '0');
+      const year = textDateMatch[3];
+      return `${year}-${m}-${day}`;
+    }
+  }
+
   const p = new Date(s);
   if (!isNaN(p.getTime())) {
     const y = p.getFullYear();
@@ -772,6 +790,150 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error('Error en cargar-nomina-sheet:', err);
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
+  // Endpoint para cargar y consolidar registros de la hoja 'Registro_Avance' de Google Sheets
+  app.post('/api/cargar-avance-sheet', async (req, res) => {
+    try {
+      const { url, avanceRows, userRole } = req.body || {};
+      if (userRole === 'Trabajador') {
+        return res.status(403).json({
+          status: 'error',
+          message: 'No tienes permisos para actualizar el registro de avance.'
+        });
+      }
+
+      let incomingRows: any[] = [];
+
+      // 1. Si se envían filas directamente (ej. pegadas desde el Sheet o procesadas en cliente)
+      if (Array.isArray(avanceRows) && avanceRows.length > 0) {
+        incomingRows = avanceRows;
+      } else {
+        // 2. Si se solicita consultar la URL del Google Sheets Web App
+        const targetUrl = url || 'https://script.google.com/macros/s/AKfycbwUwC4PwsVrEGdGItPkAwu8-k8lJePnEIwitNhakUGqHEKWLZLr_i49FMMDh-fog0y2/exec';
+        const fetchUrl = targetUrl.includes('?') ? `${targetUrl}&accion=export` : `${targetUrl}?accion=export`;
+
+        const response = await fetch(fetchUrl);
+        if (!response.ok) {
+          return res.status(502).json({
+            status: 'error',
+            message: `Error al conectar con Google Sheets Web App (HTTP ${response.status})`
+          });
+        }
+
+        const json: any = await response.json();
+        if (json && json.status === 'ok' && json.data && Array.isArray(json.data.detalleJabas)) {
+          incomingRows = json.data.detalleJabas;
+        } else {
+          return res.status(400).json({
+            status: 'error',
+            message: 'No se encontraron registros de avance en la respuesta de Google Sheets.'
+          });
+        }
+      }
+
+      if (incomingRows.length === 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'No se encontraron filas válidas para importar.'
+        });
+      }
+
+      // Normalizar y consolidar con db.detalleJabas
+      const existingMap = new Map<string, any>();
+      (db.detalleJabas || []).forEach((d: any) => {
+        const key = d.id || `${normalizeDateServer(d.fecha)}_${String(d.dni || '').trim()}_${d.modulo || ''}_${d.timestamp || ''}`;
+        existingMap.set(key, d);
+      });
+
+      let addedCount = 0;
+      let updatedCount = 0;
+      const workersToAdd: any[] = [];
+      const existingWorkerDnis = new Set<string>((db.trabajadores || []).map((t: any) => String(t.dni || '').trim()));
+
+      incomingRows.forEach((row: any, idx: number) => {
+        const rawDni = String(row.dni || '').trim();
+        const cleanDni = rawDni.replace(/\D/g, '');
+        const effectiveDni = cleanDni || rawDni;
+        const normFecha = normalizeDateServer(row.fecha) || '2026-09-11';
+        const timestamp = row.timestamp || new Date().toISOString();
+        const rowId = row.id || `${normFecha}_${effectiveDni}_${row.modulo || 'M01'}_${idx}`;
+        const jabas = Number(row.jabas) || 0;
+
+        const normalizedRecord = {
+          id: rowId,
+          fecha: normFecha,
+          timestamp: timestamp,
+          supervisor: String(row.supervisor || '').trim(),
+          fundo: String(row.fundo || 'Santa Teresa').trim(),
+          modulo: String(row.modulo || 'M01').trim(),
+          grupo: String(row.grupo || '').trim(),
+          lider: String(row.lider || '').trim(),
+          dni: effectiveDni,
+          trabajador: String(row.trabajador || '').trim() || `Trabajador ${effectiveDni}`,
+          jabas: jabas
+        };
+
+        if (existingMap.has(rowId)) {
+          updatedCount++;
+        } else {
+          addedCount++;
+        }
+        existingMap.set(rowId, normalizedRecord);
+
+        // Si el trabajador no existe en el roster de trabajadores, registrarlo automáticamente
+        if (effectiveDni && !existingWorkerDnis.has(effectiveDni)) {
+          existingWorkerDnis.add(effectiveDni);
+          workersToAdd.push({
+            id: `w_${effectiveDni}`,
+            dni: effectiveDni,
+            nombres: normalizedRecord.trabajador,
+            fundo: normalizedRecord.fundo,
+            modulo: normalizedRecord.modulo,
+            supervisor: normalizedRecord.supervisor,
+            grupo: normalizedRecord.grupo,
+            lider: normalizedRecord.lider,
+            tipo: 'Cosechero',
+            jabas: jabas,
+            fecha: normFecha
+          });
+        }
+      });
+
+      db.detalleJabas = Array.from(existingMap.values());
+      if (workersToAdd.length > 0) {
+        db.trabajadores = [...(db.trabajadores || []), ...workersToAdd];
+      }
+
+      db.version = (db.version || 1) + 1;
+      db.lastUpdated = new Date().toISOString();
+      saveDatabase(db);
+      syncToCloudFirestore({ detalleJabas: db.detalleJabas, trabajadores: db.trabajadores });
+      notifyClients({ type: 'sync', version: db.version, data: db });
+
+      // Calcular resumen de jabas por fecha para feedback
+      const targetFecha = incomingRows[0]?.fecha ? normalizeDateServer(incomingRows[0].fecha) : '2026-09-11';
+      const statsForDate = (db.detalleJabas || []).filter((d: any) => normalizeDateServer(d.fecha) === targetFecha);
+      const uniquePersonsForDate = new Set(statsForDate.map((d: any) => String(d.dni || '').trim() || d.trabajador)).size;
+      const totalJabasForDate = statsForDate.reduce((acc: number, d: any) => acc + (Number(d.jabas) || 0), 0);
+
+      res.json({
+        status: 'ok',
+        message: `Registro de Avance cargado: ${incomingRows.length} registros procesados (${addedCount} nuevos, ${updatedCount} actualizados)`,
+        totalRegistros: db.detalleJabas.length,
+        nuevos: addedCount,
+        actualizados: updatedCount,
+        trabajadoresAgregados: workersToAdd.length,
+        fechaConsultada: targetFecha,
+        personasConJabasEnFecha: uniquePersonsForDate,
+        jabasEnFecha: totalJabasForDate,
+        detalleJabas: db.detalleJabas,
+        trabajadores: db.trabajadores
+      });
+    } catch (err: any) {
+      console.error('Error en cargar-avance-sheet:', err);
       res.status(500).json({ status: 'error', message: err.message });
     }
   });

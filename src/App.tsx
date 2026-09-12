@@ -1462,6 +1462,52 @@ export default function App() {
     }
   };
 
+  const handleUpdateDetalleJabas = (updated: DetalleJaba[]) => {
+    setDetalleJabasState(updated);
+    saveDetalleJabas(updated);
+    triggerAutoSync('DetalleJabas Actualizado', { detalleJabas: updated });
+  };
+
+  const handleCargarAvanceDesdeSheet = async (customUrl?: string, avanceRows?: any[]) => {
+    const url = customUrl || getGsheetUrl();
+    addToast('📥 Sincronizando registros de la hoja "Registro_Avance"...');
+    addLog('📥 Cargando datos desde la hoja "Registro_Avance" de Google Sheets...', 'info');
+
+    try {
+      const res = await fetch('/api/cargar-avance-sheet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, avanceRows, userRole: session?.rol })
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === 'ok' && Array.isArray(json.detalleJabas)) {
+          setDetalleJabasState(json.detalleJabas);
+          saveDetalleJabas(json.detalleJabas);
+          if (Array.isArray(json.trabajadores)) {
+            setTrabajadoresState(json.trabajadores);
+            saveTrabajadores(json.trabajadores);
+          }
+          addToast(`✅ Registro de Avance sincronizado: ${json.personasConJabasEnFecha} personas con jabas (${json.jabasEnFecha} jabas)`);
+          addLog(`✅ Avance actualizado desde Sheet: ${json.totalRegistros} registros totales (${json.personasConJabasEnFecha} personas con jabas)`, 'ok');
+          return {
+            success: true,
+            totalRegistros: json.totalRegistros,
+            personasConJabasEnFecha: json.personasConJabasEnFecha,
+            jabasEnFecha: json.jabasEnFecha,
+            fechaConsultada: json.fechaConsultada
+          };
+        }
+      }
+      throw new Error('No se pudo cargar el Registro de Avance.');
+    } catch (err: any) {
+      const errMsg = err?.message || 'Error de conexión';
+      addToast(`❌ Error al cargar Registro de Avance: ${errMsg}`);
+      addLog(`❌ Error cargando avance desde Google Sheets: ${errMsg}`, 'err');
+      return { success: false, error: errMsg };
+    }
+  };
+
   // If unauthenticated, show field-ready login
   if (!session) {
     return (
@@ -1570,6 +1616,8 @@ export default function App() {
             isOnline={isOnline}
             onDepurarTrabajadoresAyer={handleDepurarTrabajadoresAyer}
             onCargarNominaDesdeSheet={handleCargarNominaDesdeSheet}
+            onCargarAvanceDesdeSheet={handleCargarAvanceDesdeSheet}
+            onUpdateDetalleJabas={handleUpdateDetalleJabas}
           />
         )}
 

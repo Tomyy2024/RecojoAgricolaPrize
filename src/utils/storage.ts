@@ -85,7 +85,41 @@ export function normalizeDateString(d?: any): string {
     return `${slashMatch[3]}-${slashMatch[2].padStart(2, '0')}-${slashMatch[1].padStart(2, '0')}`;
   }
 
-  // 3. If JavaScript Date string (e.g. "Tue Aug 25 2026 00:00:00 GMT-0500" or similar)
+  // 3. If textual month format e.g. "Fri Sep 11 2026 00:00:00 GMT-0500" or "Sep 11 2026"
+  const textDateMatch = str.match(/([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})/);
+  if (textDateMatch) {
+    const mStr = textDateMatch[1].toLowerCase();
+    const months: Record<string, string> = {
+      jan: '01', ene: '01', feb: '02', mar: '03', apr: '04', abr: '04',
+      may: '05', jun: '06', jul: '07', aug: '08', ago: '08', sep: '09',
+      set: '09', oct: '10', nov: '11', dec: '12', dic: '12'
+    };
+    const m = months[mStr];
+    if (m) {
+      const day = textDateMatch[2].padStart(2, '0');
+      const year = textDateMatch[3];
+      return `${year}-${m}-${day}`;
+    }
+  }
+
+  // 4. If textual format e.g. "11 Sep 2026" or "11 de Septiembre de 2026"
+  const textDateMatch2 = str.match(/(\d{1,2})\s+(?:de\s+)?([A-Za-z]{3,})\s+(?:de\s+)?(\d{4})/);
+  if (textDateMatch2) {
+    const day = textDateMatch2[1].padStart(2, '0');
+    const mStr = textDateMatch2[2].slice(0, 3).toLowerCase();
+    const months: Record<string, string> = {
+      jan: '01', ene: '01', feb: '02', mar: '03', apr: '04', abr: '04',
+      may: '05', jun: '06', jul: '07', aug: '08', ago: '08', sep: '09',
+      set: '09', oct: '10', nov: '11', dec: '12', dic: '12'
+    };
+    const m = months[mStr];
+    if (m) {
+      const year = textDateMatch2[3];
+      return `${year}-${m}-${day}`;
+    }
+  }
+
+  // 5. If JavaScript Date string that can be parsed
   const parsed = new Date(str);
   if (!isNaN(parsed.getTime())) {
     const year = parsed.getFullYear();
