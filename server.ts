@@ -130,13 +130,35 @@ function loadDatabase() {
 
       const cleanedValidaciones = sanitizeValidaciones(parsed.validaciones);
 
-      // Usar exactamente la nómina oficial cargada en db
-      const trabajadoresList = Array.isArray(parsed.trabajadores) ? parsed.trabajadores : [];
+      // Auto-incorporar trabajadores desde detalleJabas si faltan en trabajadores
+      const existingWorkerDnis = new Set((parsed.trabajadores || []).map((t: any) => String(t.dni || '').trim()));
+      const extraWorkers: any[] = [];
+      if (Array.isArray(parsed.detalleJabas)) {
+        parsed.detalleJabas.forEach((d: any) => {
+          const dni = String(d.dni || '').trim();
+          if (dni && !existingWorkerDnis.has(dni)) {
+            existingWorkerDnis.add(dni);
+            extraWorkers.push({
+              id: d.id || `w_${dni}`,
+              dni: dni,
+              nombres: d.trabajador || `Trabajador ${dni}`,
+              supervisor: d.supervisor || '',
+              fundo: d.fundo || 'Santa Teresa',
+              modulo: d.modulo || 'M01',
+              grupo: '',
+              lider: '',
+              jabas: Number(d.jabas) || 0,
+              fecha: d.fecha || ''
+            });
+          }
+        });
+      }
+      const combinedTrabajadores = extraWorkers.length > 0 ? [...(parsed.trabajadores || []), ...extraWorkers] : (parsed.trabajadores || []);
 
       return {
         ...getInitialData(),
         ...parsed,
-        trabajadores: trabajadoresList,
+        trabajadores: combinedTrabajadores,
         usuarios: Array.from(userMap.values()),
         validaciones: cleanedValidaciones
       };
@@ -198,8 +220,10 @@ async function startServer() {
 
         // 1. Trabajadores
         if (Array.isArray(data.trabajadores) && data.trabajadores.length > 0) {
-          db.trabajadores = data.trabajadores;
-          changed = true;
+          if (!db.trabajadores || db.trabajadores.length === 0 || data.trabajadores.length >= (db.trabajadores.length || 0)) {
+            db.trabajadores = data.trabajadores;
+            changed = true;
+          }
         }
 
         // 2. Usuarios
@@ -536,25 +560,6 @@ async function startServer() {
     }
   });
 
-  // Proxy endpoint para exportar desde Google Sheets evitando problemas de CORS en navegador
-  app.post('/api/sheet/proxy-export', async (req, res) => {
-    try {
-      const { url } = req.body || {};
-      if (!url || typeof url !== 'string') {
-        return res.status(400).json({ status: 'error', message: 'URL de Google Apps Script requerida' });
-      }
-      const targetUrl = url.includes('accion=') ? url : (url.includes('?') ? `${url}&accion=export` : `${url}?accion=export`);
-      const fetchRes = await fetch(targetUrl, { method: 'GET', headers: { Accept: 'application/json' } });
-      if (!fetchRes.ok) {
-        return res.status(fetchRes.status).json({ status: 'error', message: `Google Sheets respondió con HTTP ${fetchRes.status}` });
-      }
-      const json = await fetchRes.json();
-      res.json(json);
-    } catch (err: any) {
-      res.status(500).json({ status: 'error', message: err.message });
-    }
-  });
-
   // Fast bulk worker sync endpoint - Administrador y Supervisor pueden actualizar nómina
   app.post('/api/trabajadores', (req, res) => {
     try {
@@ -616,6 +621,157 @@ async function startServer() {
       }
       res.status(400).json({ status: 'error', message: 'Formato de trabajadores no válido' });
     } catch (err: any) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
+  // Endpoint para desasignar todos los trabajadores (quedan todos como 'Sin Grupo ni Líder' / Pendientes)
+  app.post('/api/desasignar-todos-trabajadores', (req, res) => {
+    try {
+      const { userRole, filtroSupervisor, filtroFundo, filtroModulo } = req.body || {};
+      if (userRole === 'Trabajador') {
+        return res.status(403).json({
+          status: 'error',
+          message: 'No tienes permisos para modificar asignaciones de personal.'
+        });
+      }
+
+      let countDesasignados = 0;
+      db.trabajadores = (db.trabajadores || []).map((t: any) => {
+        // Si hay filtros aplicados, desasignar solo los que coincidan
+        if (filtroSupervisor && t.supervisor && t.supervisor !== filtroSupervisor) return t;
+        if (filtroFundo && t.fundo && t.fundo !== filtroFundo) return t;
+        if (filtroModulo && t.modulo && t.modulo !== filtroModulo) return t;
+
+        const hadGrupo = t.grupo && t.grupo.trim() !== '' && t.grupo.toLowerCase() !== 'sin grupo';
+        const hadLider = t.lider && t.lider.trim() !== '' && !t.lider.toLowerCase().includes('sin');
+        if (hadGrupo || hadLider) {
+          countDesasignados++;
+        }
+        return {
+          ...t,
+          grupo: '',
+          lider: ''
+        };
+      });
+
+      // Limpiar también reservas de hoy si las hubiera
+      const today = new Date().toISOString().slice(0, 10);
+      if (Array.isArray(db.reservas)) {
+        db.reservas = db.reservas.filter((r: any) => r.fecha !== today);
+      }
+
+      db.version = (db.version || 1) + 1;
+      db.lastUpdated = new Date().toISOString();
+      saveDatabase(db);
+      syncToCloudFirestore({ trabajadores: db.trabajadores, reservas: db.reservas });
+      notifyClients({ type: 'sync', version: db.version, data: db });
+
+      res.json({
+        status: 'ok',
+        message: `Se desasignaron ${countDesasignados} trabajadores con éxito`,
+        countDesasignados,
+        trabajadores: db.trabajadores
+      });
+    } catch (err: any) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
+  // Endpoint para cargar directamente la nómina de trabajadores desde la hoja 'Trabajadores' de Google Sheets
+  app.post('/api/cargar-nomina-sheet', async (req, res) => {
+    try {
+      const { url, userRole } = req.body || {};
+      if (userRole === 'Trabajador') {
+        return res.status(403).json({
+          status: 'error',
+          message: 'No tienes permisos para cargar la nómina de personal.'
+        });
+      }
+
+      const targetUrl = url || 'https://script.google.com/macros/s/AKfycbwUwC4PwsVrEGdGItPkAwu8-k8lJePnEIwitNhakUGqHEKWLZLr_i49FMMDh-fog0y2/exec';
+      const fetchUrl = targetUrl.includes('?') ? `${targetUrl}&accion=export` : `${targetUrl}?accion=export`;
+
+      const response = await fetch(fetchUrl);
+      if (!response.ok) {
+        return res.status(502).json({
+          status: 'error',
+          message: `Error al conectar con Google Sheets Web App (HTTP ${response.status})`
+        });
+      }
+
+      const json: any = await response.json();
+      if (!json || json.status !== 'ok' || !json.data) {
+        return res.status(502).json({
+          status: 'error',
+          message: 'La respuesta de Google Sheets no contiene datos válidos o no tiene la versión del script requerida.'
+        });
+      }
+
+      const incomingTrabajadores = json.data.trabajadores;
+      if (!Array.isArray(incomingTrabajadores) || incomingTrabajadores.length === 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'La hoja "Trabajadores" en Google Sheets está vacía o no fue encontrada.'
+        });
+      }
+
+      // Normalizar trabajadores respetando estrictamente las columnas del sheet Trabajadores
+      const seen = new Set<string>();
+      const normalizedWorkers: any[] = [];
+      let countPendientes = 0;
+      let countAsignados = 0;
+
+      incomingTrabajadores.forEach((t: any, i: number) => {
+        const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
+        const rawDni = String(t.dni || '').trim();
+        const dni = cleanDni || rawDni;
+        const key = dni ? dni : `idx_${i}_${t.nombres}`;
+
+        if (!seen.has(key)) {
+          seen.add(key);
+          const grupo = t.grupo && String(t.grupo).trim().toLowerCase() !== 'sin grupo' ? String(t.grupo).trim() : '';
+          const lider = t.lider && !String(t.lider).trim().toLowerCase().includes('sin') ? String(t.lider).trim() : '';
+
+          if (grupo || lider) {
+            countAsignados++;
+          } else {
+            countPendientes++;
+          }
+
+          normalizedWorkers.push({
+            id: t.id || `w_${dni || i}`,
+            dni: dni,
+            nombres: String(t.nombres || '').trim(),
+            fundo: String(t.fundo || 'Arena Azul').trim(),
+            modulo: String(t.modulo || 'M01').trim(),
+            supervisor: String(t.supervisor || '').trim(),
+            grupo: grupo,
+            lider: lider,
+            tipo: String(t.tipo || 'Cosechador').trim(),
+            jabas: 0,
+            fecha: t.fecha || ''
+          });
+        }
+      });
+
+      db.trabajadores = normalizedWorkers;
+      db.version = (db.version || 1) + 1;
+      db.lastUpdated = new Date().toISOString();
+      saveDatabase(db);
+      syncToCloudFirestore({ trabajadores: db.trabajadores });
+      notifyClients({ type: 'sync', version: db.version, data: db });
+
+      res.json({
+        status: 'ok',
+        message: `Nómina cargada exitosamente desde hoja 'Trabajadores': ${normalizedWorkers.length} trabajadores`,
+        count: normalizedWorkers.length,
+        pendientes: countPendientes,
+        asignados: countAsignados,
+        trabajadores: normalizedWorkers
+      });
+    } catch (err: any) {
+      console.error('Error en cargar-nomina-sheet:', err);
       res.status(500).json({ status: 'error', message: err.message });
     }
   });

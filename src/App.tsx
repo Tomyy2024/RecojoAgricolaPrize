@@ -218,7 +218,7 @@ export default function App() {
   }, [addToast, addLog]);
 
   // Universal Data Applier from Server/Broadcast
-  const applyServerData = useCallback((d: any, silent = true, forceWorkers = false) => {
+  const applyServerData = useCallback((d: any, silent = true) => {
     if (!d || typeof d !== 'object') return;
 
     if (Array.isArray(d.programas)) {
@@ -233,20 +233,19 @@ export default function App() {
       const isLocked = isOfflineNominaLocked();
       const currentWorkers = getTrabajadores();
       const isExplicitPurge = d.depurado === true;
-      const shouldForce = forceWorkers || d.forceWorkersUpdate === true || (!silent && !isLocked);
 
-      // PASO 1 & PASO 2: Protección de la nómina
-      // 1. Si el Modo Offline está activo y ya hay trabajadores en local, no sobreescribir salvo que sea forzado o depuración explícita.
-      // 2. Si el servidor o la red devuelve un arreglo vacío (0 trabajadores), no borrar los trabajadores existentes salvo depuración explícita.
-      if (isLocked && currentWorkers.length > 0 && !isExplicitPurge && !shouldForce) {
-        // Nómina blindada en modo offline
+      // PASO 1 & PASO 2: Protección total de la nómina cargada
+      // 1. Si el Modo Offline está activo y ya hay trabajadores en local, NUNCA sobreescribir salvo que sea una depuración explícita del Administrador.
+      // 2. Si el servidor o la red devuelve un arreglo vacío (0 trabajadores), NUNCA borrar los trabajadores existentes salvo depuración explícita.
+      if (isLocked && currentWorkers.length > 0 && !isExplicitPurge) {
+        // Nómina blindada: no se altera por respuestas del servidor ni de Google Sheets
       } else if (d.trabajadores.length === 0 && currentWorkers.length > 0 && !isExplicitPurge) {
-        // Preservar nómina local ante respuestas vacías por fluctuaciones de red
+        // Preservar nómina local ante respuestas vacías por fluctuaciones de señal
       } else {
         const userRol = getSession()?.rol;
         const hoy = getLocalToday();
 
-        // Mapa de trabajadores locales existentes
+        // Mapa de trabajadores locales existentes para preservar siempre el grupo y líder asignado
         const localWorkersMap = new Map<string, Trabajador>();
         currentWorkers.forEach((lw) => {
           const cDni = String(lw.dni || '').replace(/\s+/g, '').trim();
@@ -263,7 +262,6 @@ export default function App() {
             })
           : d.trabajadores;
 
-        const isFromSheet = Boolean(d.isFromSheet);
         const seen = new Set<string>();
         const uniqueWorkers: Trabajador[] = [];
         rawList.forEach((t: Trabajador, i: number) => {
@@ -271,21 +269,17 @@ export default function App() {
           const rawDni = String(t.dni || '').trim();
           const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
 
-          // Buscar si el trabajador ya existía en local
+          // Buscar si el trabajador ya existía en local para no pisar su grupo o líder si la hoja de Drive viene vacía
           const existingLocal = (cleanDni ? localWorkersMap.get(cleanDni) : null) || (t.id ? localWorkersMap.get(t.id) : null);
-          
-          // Si proviene directamente del Sheet (isFromSheet), tomar estrictamente los campos de grupo y líder del sheet
-          // para que el balance de Pendientes y Asignados coincida exactamente con la hoja de cálculo
-          const grupoFinal = isFromSheet
-            ? (t.grupo ? String(t.grupo).trim() : '')
-            : (t.grupo !== undefined && t.grupo !== null
-                ? String(t.grupo).trim()
-                : (existingLocal?.grupo ? String(existingLocal.grupo).trim() : ''));
-          const liderFinal = isFromSheet
-            ? (t.lider ? String(t.lider).trim() : '')
-            : (t.lider !== undefined && t.lider !== null
-                ? String(t.lider).trim()
-                : (existingLocal?.lider ? String(existingLocal.lider).trim() : ''));
+          // Si el servidor o la nube envía expresamente el campo grupo (incluso vacío ""),
+          // respetamos el valor recibido para permitir desasignar trabajadores.
+          // Solo si t.grupo es undefined o null, usamos el valor local previo.
+          const grupoFinal = t.grupo !== undefined && t.grupo !== null
+            ? String(t.grupo).trim()
+            : (existingLocal?.grupo ? String(existingLocal.grupo).trim() : '');
+          const liderFinal = t.lider !== undefined && t.lider !== null
+            ? String(t.lider).trim()
+            : (existingLocal?.lider ? String(existingLocal.lider).trim() : '');
           const supFinal = t.supervisor !== undefined && t.supervisor !== null
             ? String(t.supervisor).trim()
             : (existingLocal?.supervisor ? String(existingLocal.supervisor).trim() : '');
@@ -297,11 +291,11 @@ export default function App() {
               dni: cleanDni || rawDni || String(t.dni || '').trim(),
               nombres: t.nombres ? String(t.nombres).trim() : '',
               supervisor: supFinal,
-              fundo: t.fundo ? String(t.fundo).trim() : (existingLocal?.fundo || 'Arena Azul'),
-              modulo: t.modulo ? String(t.modulo).trim() : (existingLocal?.modulo || 'M01'),
+              fundo: t.fundo ? String(t.fundo).trim() : (existingLocal?.fundo || ''),
+              modulo: t.modulo ? String(t.modulo).trim() : (existingLocal?.modulo || ''),
               grupo: grupoFinal,
               lider: liderFinal,
-              fecha: t.fecha || (existingLocal?.fecha || `${hoy} 00:00:00`)
+              fecha: t.fecha || (existingLocal?.fecha || '')
             });
           }
         });
@@ -422,7 +416,13 @@ export default function App() {
             const gJson = await gRes.json();
             if (gJson && gJson.status === 'ok' && gJson.data) {
               const gData = gJson.data;
-              gData.isFromSheet = true;
+              // Si Google Sheets no trae nómina, usar la local de respaldo; de lo contrario respetar la hoja Trabajadores
+              if (!Array.isArray(gData.trabajadores) || gData.trabajadores.length === 0) {
+                const currentLocal = getTrabajadores();
+                if (currentLocal.length > 0) {
+                  gData.trabajadores = currentLocal;
+                }
+              }
               applyServerData(gData, silent);
             }
           }
@@ -606,7 +606,13 @@ export default function App() {
         const json = await res.json();
         if (json && json.status === 'ok' && json.data) {
           const d = json.data;
-          d.isFromSheet = true;
+          // Si Google Sheets no trae nómina, usar la local de respaldo; de lo contrario respetar la hoja Trabajadores
+          if (!Array.isArray(d.trabajadores) || d.trabajadores.length === 0) {
+            const currentLocal = getTrabajadores();
+            if (currentLocal.length > 0) {
+              d.trabajadores = currentLocal;
+            }
+          }
           applyServerData(d, true);
           addLog('☁️ Datos sincronizados automáticamente con Google Sheets', 'ok');
           syncToServer({ ...d, trabajadores: getTrabajadores() });
@@ -1365,71 +1371,94 @@ export default function App() {
   const handleManualSyncPull = async () => {
     const url = getGsheetUrl();
     if (!url) {
-      addToast('⚠️ Configura una URL de Web App primero en la pestaña NUBE');
+      addToast('⚠️ Configura una URL de Web App primero');
       return;
     }
 
     addLog('📥 Descargando datos consolidados desde Google Sheets...', 'info');
     try {
-      let json: any = null;
-
-      // 1. Intento directo hacia el Web App de Google Sheets
-      try {
-        const res = await fetch(`${url}?accion=export`);
-        if (res.ok) {
-          json = await res.json();
-        }
-      } catch (directErr) {
-        console.warn('Direct fetch fallo (posible CORS), intentando proxy backend...', directErr);
-      }
-
-      // 2. Fallback mediante proxy backend
-      if (!json || json.status !== 'ok') {
-        const proxyRes = await fetch('/api/sheet/proxy-export', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url })
-        }).catch(() => null);
-        if (proxyRes && proxyRes.ok) {
-          json = await proxyRes.json().catch(() => null);
-        }
-      }
+      const res = await fetch(`${url}?accion=export`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
 
       if (json && json.status === 'ok' && json.data) {
         const d = json.data;
-        d.isFromSheet = true;
-        d.forceWorkersUpdate = true;
-
-        if (Array.isArray(d.trabajadores)) {
-          addLog(`👥 Recibidos ${d.trabajadores.length} trabajadores de la pestaña Trabajadores del Sheet`, 'ok');
+        // Si Google Sheets no trae nómina, usar la local de respaldo; de lo contrario respetar la hoja Trabajadores
+        if (!Array.isArray(d.trabajadores) || d.trabajadores.length === 0) {
+          const currentLocal = getTrabajadores();
+          if (currentLocal.length > 0) {
+            d.trabajadores = currentLocal;
+          }
         }
-
-        applyServerData(d, false, true);
-        syncToServer(d);
-
-        // Actualizar centralmente en el servidor
-        if (Array.isArray(d.trabajadores) && d.trabajadores.length > 0) {
-          fetch('/api/trabajadores', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              trabajadores: d.trabajadores,
-              append: false,
-              userRole: session?.rol || 'Administrador',
-              userName: session?.nombre || 'Administrador'
-            })
-          }).catch(() => {});
-        }
-
-        addToast(`✅ Sincronización completa: ${d.trabajadores?.length || 0} trabajadores del Sheet`);
+        applyServerData(d, false);
+        syncToServer({ ...d, trabajadores: getTrabajadores() });
+        addToast('✅ Descarga desde Google Sheets completada');
       } else {
-        const errorMsg = json?.message || 'Respuesta no válida del Web App de Google Sheets';
-        throw new Error(errorMsg);
+        throw new Error('Respuesta no válida');
       }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Error de red';
       addLog(`❌ Error en descarga: ${errorMsg}`, 'err');
-      addToast(`❌ No se pudo descargar desde Google Sheets: ${errorMsg}`);
+      addToast('❌ No se pudo descargar desde Google Sheets');
+    }
+  };
+
+  // Función dedicada para conectar directamente con la hoja 'Trabajadores' del Google Sheet
+  const handleCargarNominaDesdeSheet = async (customUrl?: string) => {
+    const url = customUrl || getGsheetUrl();
+    addToast('📥 Conectando con Google Sheets para cargar la nómina de trabajadores...');
+    addLog('📥 Cargando nómina desde la hoja "Trabajadores" de Google Sheets...', 'info');
+
+    try {
+      // 1. Intentar cargar vía endpoint backend central
+      const res = await fetch('/api/cargar-nomina-sheet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, userRole: session?.rol })
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === 'ok' && Array.isArray(json.trabajadores)) {
+          applyServerData({
+            trabajadores: json.trabajadores,
+            forceNominaUpdate: true,
+            action: 'cargar_nomina'
+          }, false);
+          addToast(`✅ Nómina cargada: ${json.count} trabajadores (${json.pendientes} pendientes, ${json.asignados} asignados)`);
+          addLog(`✅ Nómina actualizada desde hoja 'Trabajadores': ${json.count} trabajadores (${json.pendientes} pendientes, ${json.asignados} asignados)`, 'ok');
+          return { success: true, count: json.count, pendientes: json.pendientes, asignados: json.asignados };
+        }
+      }
+
+      // 2. Si el backend proxy falla o es offline, intentar fetch directo a Google Sheets
+      const gRes = await fetch(`${url}?accion=export`);
+      if (gRes.ok) {
+        const gJson = await gRes.json();
+        if (gJson && gJson.status === 'ok' && gJson.data && Array.isArray(gJson.data.trabajadores)) {
+          const workers = gJson.data.trabajadores.map((t: any) => ({
+            ...t,
+            grupo: t.grupo && String(t.grupo).trim().toLowerCase() !== 'sin grupo' ? String(t.grupo).trim() : '',
+            lider: t.lider && !String(t.lider).trim().toLowerCase().includes('sin') ? String(t.lider).trim() : '',
+          }));
+          const countPend = workers.filter((w: any) => !w.grupo && !w.lider).length;
+          const countAsig = workers.length - countPend;
+          applyServerData({
+            trabajadores: workers,
+            forceNominaUpdate: true,
+            action: 'cargar_nomina'
+          }, false);
+          syncToServer({ trabajadores: workers });
+          addToast(`✅ Nómina cargada desde Google Sheets: ${workers.length} trabajadores (${countPend} pendientes)`);
+          return { success: true, count: workers.length, pendientes: countPend, asignados: countAsig };
+        }
+      }
+      throw new Error('No se pudo obtener la hoja Trabajadores de Google Sheets. Verifica la URL configurada.');
+    } catch (err: any) {
+      const errMsg = err?.message || 'Error de conexión';
+      addToast(`❌ Error al cargar nómina: ${errMsg}`);
+      addLog(`❌ Error cargando nómina desde Google Sheets: ${errMsg}`, 'err');
+      return { success: false, error: errMsg };
     }
   };
 
@@ -1456,7 +1485,7 @@ export default function App() {
         lastSync={lastSync}
         firebaseConnected={true}
         autoSyncActive={isAutoSyncEnabled()}
-        onRefresh={() => fetchCentralizedData(false)}
+        onRefresh={session.rol === 'Administrador' ? () => fetchCentralizedData(false) : undefined}
         onOpenShareModal={() => setIsShareModalOpen(true)}
         deviceMode={deviceMode}
         onChangeDeviceMode={handleDeviceModeChange}
@@ -1540,7 +1569,7 @@ export default function App() {
             onRestoreOfflineCache={handleRestoreOfflineCache}
             isOnline={isOnline}
             onDepurarTrabajadoresAyer={handleDepurarTrabajadoresAyer}
-            onPullFromSheet={handleManualSyncPull}
+            onCargarNominaDesdeSheet={handleCargarNominaDesdeSheet}
           />
         )}
 

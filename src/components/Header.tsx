@@ -34,6 +34,7 @@ export const Header: React.FC<HeaderProps> = ({
   trabajadoresCount
 }) => {
   const [refreshing, setRefreshing] = useState(false);
+  const isAdmin = session?.rol === 'Administrador';
 
   const handleRefreshClick = async () => {
     if (!onRefresh || refreshing) return;
@@ -161,7 +162,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {onRefresh && (
+          {isAdmin && onRefresh && (
             <button
               onClick={handleRefreshClick}
               disabled={refreshing}

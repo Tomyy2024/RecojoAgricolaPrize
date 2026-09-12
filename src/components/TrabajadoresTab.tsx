@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Trabajador, Lider, UserSession, DetalleJaba, Usuario, ReservaCuadrilla } from '../types';
 import { ScannerModal } from './ScannerModal';
-import { getLocalToday, getLocalISO, getReservas, saveReservas, mergeReservasArrays, normalizeDateString } from '../utils/storage';
+import { getLocalToday, getLocalISO, getReservas, saveReservas, mergeReservasArrays, normalizeDateString, getGsheetUrl, saveGsheetUrl } from '../utils/storage';
 import { 
   Users, 
   Crown, 
@@ -14,7 +14,6 @@ import {
   Sparkles, 
   Package, 
   CheckSquare,
-  DownloadCloud,
   Building2,
   MapPin,
   Layers,
@@ -45,7 +44,12 @@ import {
   WifiOff,
   Database,
   Lock,
-  Unlock
+  Unlock,
+  FileSpreadsheet,
+  UploadCloud,
+  Download,
+  RefreshCw,
+  FileText
 } from 'lucide-react';
 
 interface TrabajadoresTabProps {
@@ -74,7 +78,7 @@ interface TrabajadoresTabProps {
   onRestoreOfflineCache?: () => void;
   isOnline?: boolean;
   onDepurarTrabajadoresAyer?: () => void;
-  onPullFromSheet?: () => void;
+  onCargarNominaDesdeSheet?: (customUrl?: string) => Promise<{ success: boolean; count?: number; pendientes?: number; asignados?: number; error?: string }>;
 }
 
 export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
@@ -103,7 +107,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   onRestoreOfflineCache,
   isOnline = true,
   onDepurarTrabajadoresAyer,
-  onPullFromSheet
+  onCargarNominaDesdeSheet
 }) => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
@@ -188,6 +192,14 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   // Scanner modal state
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannerMode, setScannerMode] = useState<'worker' | 'leader'>('worker');
+
+  // Modal y acciones de Carga de Nómina desde Google Sheets
+  const [showModalCargarNomina, setShowModalCargarNomina] = useState(false);
+  const [sheetUrlInput, setSheetUrlInput] = useState(getGsheetUrl());
+  const [isCargandoSheet, setIsCargandoSheet] = useState(false);
+  const [modoCargaNomina, setModoCargaNomina] = useState<'sheet' | 'pegar'>('sheet');
+  const [pegarNominaTexto, setPegarNominaTexto] = useState('');
+  const [cargaSheetResumen, setCargaSheetResumen] = useState<{ count: number; pendientes: number; asignados: number } | null>(null);
 
   // Derive unique lists for dropdowns
   const supervisoresList = useMemo(() => {
@@ -445,10 +457,46 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     }).length;
   }, [trabajadores, hoyStr]);
 
-  // Nómina oficial de trabajadores cargada desde el Sheet / Administrador
+  // Complementar nómina con trabajadores registrados en Registro de Avance (detalleJabas)
+  // para que siempre coincida al 100% con los avances reales del campo y no falte ningún cosechador
   const fullTrabajadores = useMemo(() => {
-    return trabajadores;
-  }, [trabajadores]);
+    const existingDnis = new Set<string>();
+    trabajadores.forEach((t) => {
+      const norm = normalizeDni(t.dni);
+      const raw = String(t.dni || '').trim();
+      if (norm) existingDnis.add(norm);
+      if (raw) existingDnis.add(raw);
+    });
+
+    const extras: Trabajador[] = [];
+    if (Array.isArray(detalleJabas)) {
+      detalleJabas.forEach((d) => {
+        const norm = normalizeDni(d.dni);
+        const raw = String(d.dni || '').trim();
+        const key = norm || raw;
+        if (key && !existingDnis.has(key)) {
+          existingDnis.add(key);
+          if (norm) existingDnis.add(norm);
+          if (raw) existingDnis.add(raw);
+          extras.push({
+            id: d.id || `extra_${key}`,
+            dni: raw || norm,
+            nombres: d.trabajador || `Trabajador ${key}`,
+            supervisor: d.supervisor || '',
+            fundo: d.fundo || 'Santa Teresa',
+            modulo: d.modulo || 'M01',
+            grupo: d.grupo || 'Grupo 01',
+            lider: d.lider || '',
+            jabas: Number(d.jabas) || 0,
+            fecha: d.fecha || ''
+          });
+        }
+      });
+    }
+
+    if (extras.length === 0) return trabajadores;
+    return [...trabajadores, ...extras];
+  }, [trabajadores, detalleJabas, normalizeDni]);
 
   // Pre-indexed workers for sub-millisecond search and strict binding
   const indexedTrabajadores = useMemo(() => {
@@ -461,14 +509,15 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       _normModulo: string;
     })[] = [];
 
-    // Si los trabajadores tienen fecha específica, no mostrar de fechas anteriores a la fecha activa consultada
-    const fechaFiltroNorm = normalizeDateString(fechaPersonal) || hoyStr;
-    const effectiveTrabajadores = fullTrabajadores.filter((t) => {
-      if (!t.fecha) return true;
-      const fn = normalizeDateString(t.fecha);
-      if (!fn) return true;
-      return fn === fechaFiltroNorm || fn >= hoyStr;
-    });
+    // Si el usuario tiene rol 'Trabajador', NUNCA deben aparecerle trabajadores del día anterior
+    const isTrabajadorUser = session?.rol === 'Trabajador';
+    const effectiveTrabajadores = isTrabajadorUser
+      ? fullTrabajadores.filter((t) => {
+          if (!t.fecha) return true;
+          const fn = normalizeDateString(t.fecha);
+          return !fn || fn >= hoyStr;
+        })
+      : fullTrabajadores;
 
     for (let i = 0; i < effectiveTrabajadores.length; i++) {
       const t = effectiveTrabajadores[i];
@@ -488,7 +537,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       }
     }
     return list;
-  }, [fullTrabajadores, normalizeDni, normalizeModulo, normalizeStr, fechaPersonal, hoyStr]);
+  }, [trabajadores, normalizeDni, normalizeModulo, normalizeStr, session?.rol, hoyStr]);
 
   // Helper para verificar si un trabajador ya cuenta con Grupo, Líder, Reserva de hoy o Grupo en sesión
   const isWorkerAsignado = useCallback(
@@ -1367,88 +1416,192 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     onToast(`ℹ️ ${t.nombres} ahora está en "Sin Grupo ni Líder" (Pendiente)`, 'info');
   };
 
-  // Desasignar todos los trabajadores asignados: Permite reiniciar la nómina a "Sin Grupo ni Líder"
-  const handleDesasignarTodos = () => {
+  // Desasignar todos los trabajadores asignados: Permite reiniciar la nómina a "Sin Grupo ni Líder" (Pendientes)
+  const handleDesasignarTodos = async () => {
     if (countAsignados === 0) {
       onToast('No hay trabajadores asignados para desasignar', 'info');
       return;
     }
 
-    const confirmMsg = `¿Estás seguro de desasignar a los ${countAsignados} trabajadores asignados en ${cuadrillaFundo || 'el Fundo'} - Módulo ${cuadrillaModulo || 'actual'}?\n\nSe removerán sus Grupos y Líderes para que queden todos como "Sin Grupo ni Líder" (Pendientes) listos para una nueva asignación.`;
-    if (!window.confirm(confirmMsg)) {
-      return;
-    }
+    const prevCount = countAsignados;
 
-    const scopedKeys = new Set<string>();
-    scopedTrabajadores.forEach((st) => {
-      const norm = normalizeDni(st.dni);
-      const raw = String(st.dni || '').trim();
-      const nName = normalizeStr(st.nombres);
-      if (norm) scopedKeys.add(norm);
-      if (raw) scopedKeys.add(raw);
-      if (st.id) scopedKeys.add(st.id);
-      if (nName) scopedKeys.add(`NAME_${nName}`);
+    // Desasignar en memoria todos los trabajadores asignados
+    const updated = trabajadores.map((w) => {
+      const g = String(w.grupo || '').trim();
+      const l = String(w.lider || '').trim();
+      const hasG = g && g.toLowerCase() !== 'sin grupo' && g.toLowerCase() !== 'sin asignar';
+      const hasL = l && !l.toLowerCase().includes('sin');
+
+      if (hasG || hasL || isWorkerAsignado(w)) {
+        return {
+          ...w,
+          grupo: '',
+          lider: ''
+        };
+      }
+      return w;
     });
 
     if (onUpdateTrabajadores) {
-      const updated = trabajadores.map((w) => {
-        const norm = normalizeDni(w.dni);
-        const raw = String(w.dni || '').trim();
-        const nName = normalizeStr(w.nombres);
-        const isScoped =
-          (norm && scopedKeys.has(norm)) ||
-          (raw && scopedKeys.has(raw)) ||
-          (w.id && scopedKeys.has(w.id)) ||
-          (nName && scopedKeys.has(`NAME_${nName}`));
-
-        if (isScoped && isWorkerAsignado(w)) {
-          return {
-            ...w,
-            grupo: '',
-            lider: ''
-          };
-        }
-        return w;
-      });
       onUpdateTrabajadores(updated);
     }
 
-    // Limpiar de reservas de hoy para los trabajadores scoped
-    const updatedReservas = reservasState
-      .map((r) => {
-        if (r.fecha !== hoyStr) return r;
-        const remaining = (r.trabajadores || []).filter((w) => {
-          const norm = normalizeDni(w.dni);
-          const raw = String(w.dni || '').trim();
-          const nName = normalizeStr(w.nombres);
-          return !(
-            (norm && scopedKeys.has(norm)) ||
-            (raw && scopedKeys.has(raw)) ||
-            (w.id && scopedKeys.has(w.id)) ||
-            (nName && scopedKeys.has(`NAME_${nName}`))
-          );
-        });
-        return {
-          ...r,
-          totalTrabajadores: remaining.length,
-          trabajadores: remaining
-        };
-      })
-      .filter((r) => r.fecha !== hoyStr || (r.trabajadores && r.trabajadores.length > 0));
-
+    // Limpiar reservas de hoy
+    const updatedReservas = reservasState.filter((r) => r.fecha !== hoyStr);
     setReservasState(updatedReservas);
     saveReservas(updatedReservas);
 
-    // Sincronizar reservas limpias con el servidor central para que todos los dispositivos vean el cambio
-    fetch('/api/reservas', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reservas: updatedReservas, replaceAll: true })
-    }).catch(() => {});
+    // Sincronizar con el servidor central para que todos los dispositivos vean el cambio
+    try {
+      fetch('/api/desasignar-todos-trabajadores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userRole: session?.rol,
+          filtroSupervisor: cuadrillaSupervisor || undefined,
+          filtroFundo: cuadrillaFundo || undefined,
+          filtroModulo: cuadrillaModulo || undefined
+        })
+      }).catch(() => {});
+
+      fetch('/api/trabajadores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trabajadores: updated, append: false, userRole: session?.rol })
+      }).catch(() => {});
+
+      fetch('/api/reservas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reservas: updatedReservas, replaceAll: true })
+      }).catch(() => {});
+    } catch {
+      // Offline fallback
+    }
 
     setWorkerAssignedGrupos({});
     setVistaAsignacion('pendientes');
-    onToast(`✅ Se desasignaron ${countAsignados} trabajadores. Quedan como "Sin Grupo ni Líder".`, 'success');
+    onToast(`✅ Se desasignaron ${prevCount} trabajadores. Quedan como "Sin Grupo ni Líder" (Solo Pendientes).`, 'success');
+  };
+
+  // Ejecuta la conexión y descarga directa desde la hoja 'Trabajadores' del Google Sheet
+  const handleEjecutarCargaNominaSheet = async () => {
+    setIsCargandoSheet(true);
+    setCargaSheetResumen(null);
+    try {
+      const cleanUrl = sheetUrlInput.trim();
+      if (cleanUrl) {
+        saveGsheetUrl(cleanUrl);
+      }
+
+      let res: { success: boolean; count?: number; pendientes?: number; asignados?: number; error?: string } | undefined;
+      if (onCargarNominaDesdeSheet) {
+        res = await onCargarNominaDesdeSheet(cleanUrl || undefined);
+      } else {
+        const resp = await fetch('/api/cargar-nomina-sheet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: cleanUrl, userRole: session?.rol })
+        });
+        const json = await resp.json();
+        if (json.status === 'ok' && Array.isArray(json.trabajadores)) {
+          if (onUpdateTrabajadores) onUpdateTrabajadores(json.trabajadores);
+          res = { success: true, count: json.count, pendientes: json.pendientes, asignados: json.asignados };
+        } else {
+          throw new Error(json.message || 'Error al conectar con Google Sheets');
+        }
+      }
+
+      if (res && res.success) {
+        setCargaSheetResumen({
+          count: res.count || 0,
+          pendientes: res.pendientes || 0,
+          asignados: res.asignados || 0
+        });
+        setWorkerAssignedGrupos({});
+        setVistaAsignacion('pendientes');
+        onToast(`✅ Nómina sincronizada: ${res.count} trabajadores cargados desde hoja 'Trabajadores'`, 'success');
+      }
+    } catch (err: any) {
+      onToast(`❌ Error al cargar nómina: ${err?.message || 'Error de conexión'}`, 'error');
+    } finally {
+      setIsCargandoSheet(false);
+    }
+  };
+
+  // Procesar pegado de filas directamente desde el Google Sheet (A: DNI, B: Nombres, C: Fundo, D: Módulo, E: Grupo, F: Supervisor, G: Líder, H: Tipo)
+  const handleProcesarPegadoNomina = () => {
+    if (!pegarNominaTexto.trim()) {
+      onToast('⚠️ Pega el contenido copiado desde tu Google Sheet', 'warning');
+      return;
+    }
+
+    const lines = pegarNominaTexto.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) {
+      onToast('⚠️ No se encontraron líneas de datos', 'warning');
+      return;
+    }
+
+    const isHeader = lines[0].toLowerCase().includes('dni') || lines[0].toLowerCase().includes('nombre');
+    const dataLines = isHeader ? lines.slice(1) : lines;
+
+    const parsed: Trabajador[] = [];
+    let pCount = 0;
+    let aCount = 0;
+
+    dataLines.forEach((line, idx) => {
+      const sep = line.includes('\t') ? '\t' : line.includes(';') ? ';' : ',';
+      const cols = line.split(sep).map((c) => c.trim().replace(/^["']|["']$/g, ''));
+      if (cols.length >= 2) {
+        const dni = cols[0].replace(/\D/g, '');
+        const nombres = cols[1];
+        const fundo = cols[2] || 'Santa Teresa';
+        const modulo = cols[3] || 'M01';
+        const grupo = cols[4] && cols[4].toLowerCase() !== 'sin grupo' ? cols[4] : '';
+        const supervisor = cols[5] || '';
+        const lider = cols[6] && !cols[6].toLowerCase().includes('sin') ? cols[6] : '';
+        const tipo = cols[7] || 'Cosechador';
+
+        if (dni || nombres) {
+          if (grupo || lider) aCount++;
+          else pCount++;
+
+          parsed.push({
+            id: `w_${dni || idx}`,
+            fecha: hoyStr,
+            dni: dni,
+            nombres: nombres || `TRABAJADOR ${dni}`,
+            fundo,
+            modulo,
+            grupo,
+            supervisor,
+            lider,
+            tipo,
+            jabas: 0
+          });
+        }
+      }
+    });
+
+    if (parsed.length === 0) {
+      onToast('❌ No se encontraron datos válidos. Verifica las columnas.', 'error');
+      return;
+    }
+
+    if (onUpdateTrabajadores) {
+      onUpdateTrabajadores(parsed);
+    }
+    fetch('/api/trabajadores', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trabajadores: parsed, append: false, userRole: session?.rol })
+    }).catch(() => {});
+
+    setCargaSheetResumen({ count: parsed.length, pendientes: pCount, asignados: aCount });
+    setPegarNominaTexto('');
+    setWorkerAssignedGrupos({});
+    setVistaAsignacion('pendientes');
+    onToast(`✅ Se importaron ${parsed.length} trabajadores (${pCount} pendientes, ${aCount} asignados)`, 'success');
   };
 
   // Restablecimiento automático y manual de filtros y cuadrilla
@@ -3032,17 +3185,18 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 />
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                {onPullFromSheet && (
-                  <button
-                    type="button"
-                    onClick={onPullFromSheet}
-                    className="bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold py-2 px-3 rounded-lg shadow-sm flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap transition-all active:scale-95"
-                    title="Jalar y actualizar la nómina directamente desde la pestaña Trabajadores del Google Sheet"
-                  >
-                    <DownloadCloud className="w-3.5 h-3.5 text-emerald-200" />
-                    <span>Jalar de Sheet</span>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowModalCargarNomina(true);
+                    setCargaSheetResumen(null);
+                  }}
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold py-2 px-3 rounded-lg shadow-sm flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap transition-all active:scale-95"
+                  title="Cargar la nómina directamente desde la hoja 'Trabajadores' del Google Sheet"
+                >
+                  <Database className="w-3.5 h-3.5 text-emerald-200" />
+                  <span>📥 Cargar Nómina Sheet</span>
+                </button>
                 <button
                   type="button"
                   onClick={handleOpenNewWorkerModal}
@@ -3190,8 +3344,21 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
               <button
                 type="button"
+                onClick={() => {
+                  setShowModalCargarNomina(true);
+                  setCargaSheetResumen(null);
+                }}
+                className="px-2.5 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 cursor-pointer ml-auto transition-all active:scale-95 whitespace-nowrap"
+                title="Cargar la nómina directamente desde la hoja 'Trabajadores' del Sheet"
+              >
+                <Database className="w-3 h-3 text-emerald-700" />
+                <span>Cargar Nómina Sheet</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => handleRestablecerFiltros(false)}
-                className="px-2.5 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 bg-white text-gray-700 border border-gray-300 hover:bg-gray-100 cursor-pointer ml-auto transition-all active:scale-95 whitespace-nowrap"
+                className="px-2.5 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 bg-white text-gray-700 border border-gray-300 hover:bg-gray-100 cursor-pointer transition-all active:scale-95 whitespace-nowrap"
                 title="Restablecer todos los filtros de cuadrilla, personal y búsqueda"
               >
                 <RotateCcw className="w-3 h-3 text-gray-500" />
@@ -4745,6 +4912,217 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 type="button"
                 onClick={() => setShowGestionSupervisoresModal(false)}
                 className="px-5 py-2 text-xs font-bold text-gray-700 hover:bg-gray-100 rounded-xl cursor-pointer transition-colors"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Cargar Nómina desde Sheet */}
+      {showModalCargarNomina && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl border border-emerald-100 flex flex-col max-h-[90vh] overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                  <FileSpreadsheet className="w-5 h-5 text-emerald-700" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 leading-tight">
+                    Cargar Nómina desde Google Sheets
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Conecta directamente con la pestaña <b className="text-emerald-700 font-semibold">"Trabajadores"</b> del Sheet para actualizar listas de pendientes y asignados.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowModalCargarNomina(false)}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Metrics overview */}
+            <div className="grid grid-cols-3 gap-2 py-3 shrink-0">
+              <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl p-2.5 text-center">
+                <span className="text-[10px] text-emerald-700 uppercase font-bold tracking-wider block">Pendientes</span>
+                <span className="text-lg font-black text-emerald-900">{countPendientes}</span>
+                <span className="text-[10px] text-emerald-600 block">Sin Grupo / Líder</span>
+              </div>
+              <div className="bg-purple-50/80 border border-purple-200 rounded-xl p-2.5 text-center">
+                <span className="text-[10px] text-purple-700 uppercase font-bold tracking-wider block">Asignados</span>
+                <span className="text-lg font-black text-purple-900">{countAsignados}</span>
+                <span className="text-[10px] text-purple-600 block">Con Grupo o Líder</span>
+              </div>
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-center">
+                <span className="text-[10px] text-gray-600 uppercase font-bold tracking-wider block">Total Nómina</span>
+                <span className="text-lg font-black text-gray-900">{countTodos}</span>
+                <span className="text-[10px] text-gray-500 block">En Sistema</span>
+              </div>
+            </div>
+
+            {/* Tabs selector */}
+            <div className="flex border-b border-gray-200 mb-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setModoCargaNomina('sheet')}
+                className={`flex-1 py-2 text-xs font-bold border-b-2 flex items-center justify-center gap-1.5 cursor-pointer ${
+                  modoCargaNomina === 'sheet'
+                    ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Wifi className="w-3.5 h-3.5" />
+                <span>Conexión Directa Sheet (Recomendado)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setModoCargaNomina('pegar')}
+                className={`flex-1 py-2 text-xs font-bold border-b-2 flex items-center justify-center gap-1.5 cursor-pointer ${
+                  modoCargaNomina === 'pegar'
+                    ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Copiar y Pegar Celdas</span>
+              </button>
+            </div>
+
+            {/* Content Area */}
+            <div className="overflow-y-auto space-y-3 flex-1 pr-1 text-xs">
+              {modoCargaNomina === 'sheet' ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block font-bold text-gray-700 text-xs mb-1">
+                      URL del Web App de Google Sheets (Apps Script /exec):
+                    </label>
+                    <input
+                      type="text"
+                      value={sheetUrlInput}
+                      onChange={(e) => setSheetUrlInput(e.target.value)}
+                      placeholder="https://script.google.com/macros/s/.../exec"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:border-emerald-600 focus:outline-none bg-white"
+                    />
+                  </div>
+
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-emerald-950 space-y-1.5 leading-relaxed">
+                    <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                      <Info className="w-4 h-4 text-emerald-700 shrink-0" />
+                      <span>Estructura leída de la pestaña "Trabajadores" del Sheet:</span>
+                    </div>
+                    <ul className="list-disc pl-5 space-y-0.5 text-[11px] text-emerald-900">
+                      <li><b>Columna A:</b> DNI</li>
+                      <li><b>Columna B:</b> Nombres y Apellidos</li>
+                      <li><b>Columna C:</b> Fundo (Ej: Santa Teresa)</li>
+                      <li><b>Columna D:</b> Módulo (Ej: M01)</li>
+                      <li><b>Columna E:</b> Grupo → <span className="underline">Si está vacío o dice "Sin Grupo", queda como <b>Solo Pendiente</b></span>.</li>
+                      <li><b>Columna F:</b> Supervisor</li>
+                      <li><b>Columna G:</b> Líder → <span className="underline">Si está vacío o dice "Sin Líder", queda como <b>Solo Pendiente</b></span>.</li>
+                      <li><b>Columna H:</b> Tipo (Cosechador, Apoyo, etc.)</li>
+                    </ul>
+                  </div>
+
+                  {cargaSheetResumen && (
+                    <div className="bg-emerald-100/80 border border-emerald-300 rounded-xl p-3 text-emerald-950 flex items-start gap-2 animate-in fade-in">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-bold text-emerald-900">
+                          ¡Nómina cargada exitosamente!
+                        </div>
+                        <div className="text-[11px] text-emerald-800">
+                          Se procesaron <b>{cargaSheetResumen.count}</b> trabajadores: <b>{cargaSheetResumen.pendientes}</b> pendientes (sin grupo ni líder) y <b>{cargaSheetResumen.asignados}</b> asignados.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={isCargandoSheet}
+                    onClick={handleEjecutarCargaNominaSheet}
+                    className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:bg-emerald-400 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+                  >
+                    {isCargandoSheet ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Conectando con Google Sheets y actualizando nómina...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-4 h-4" />
+                        <span>📥 Conectar y Cargar Nómina desde Sheet</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-blue-950 text-[11px]">
+                    <div className="font-bold mb-1 flex items-center gap-1.5 text-blue-900">
+                      <Info className="w-4 h-4 text-blue-700 shrink-0" />
+                      <span>Instrucciones para pegar:</span>
+                    </div>
+                    <p>
+                      Selecciona las filas en tu Google Sheet (Columnas A hasta H: DNI, Nombres, Fundo, Módulo, Grupo, Supervisor, Líder, Tipo), presiona <b>Ctrl+C</b> y pégalas en el cuadro siguiente.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 text-xs mb-1">
+                      Pega aquí las filas copiadas del Sheet o Excel:
+                    </label>
+                    <textarea
+                      rows={6}
+                      value={pegarNominaTexto}
+                      onChange={(e) => setPegarNominaTexto(e.target.value)}
+                      placeholder="DNI&#9;NOMBRES&#9;FUNDO&#9;MODULO&#9;GRUPO&#9;SUPERVISOR&#9;LIDER&#9;TIPO&#10;72345678&#9;PEREZ JUAN&#9;Santa Teresa&#9;M01&#9;&#9;CARLOS LOPEZ&#9;&#9;Cosechador"
+                      className="w-full p-2.5 border border-gray-300 rounded-xl text-xs font-mono focus:border-emerald-600 focus:outline-none bg-white resize-none"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleProcesarPegadoNomina}
+                    className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+                  >
+                    <UploadCloud className="w-4 h-4" />
+                    <span>📋 Procesar e Importar Nómina Pegada</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Footer with Desasignar Todos action */}
+            <div className="pt-3 border-t border-gray-100 flex items-center justify-between gap-2 shrink-0">
+              {countAsignados > 0 ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await handleDesasignarTodos();
+                    setCargaSheetResumen(null);
+                  }}
+                  className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                  title="Quitar grupo y líder a todos los asignados para que queden como 'Sin Grupo ni Líder'"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-red-600" />
+                  <span>Desasignar Todos ({countAsignados})</span>
+                </button>
+              ) : (
+                <span className="text-[11px] text-emerald-700 font-medium">
+                  ✅ Todos los trabajadores están en "Solo Pendientes"
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowModalCargarNomina(false)}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-xs cursor-pointer transition-colors"
               >
                 Cerrar
               </button>
