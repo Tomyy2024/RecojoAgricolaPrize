@@ -557,14 +557,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return list;
   }, [fullTrabajadores, normalizeDni, normalizeModulo, normalizeStr, session?.rol, hoyStr]);
 
-  // Helper para verificar si un trabajador ya cuenta con Grupo, Líder, Reserva de hoy o Grupo en sesión
+  // Helper para verificar si un trabajador cuenta con Grupo Y Líder desde la hoja Sheet de trabajadores (o sesión de cuadrilla)
   const isWorkerAsignado = useCallback(
     (t: { grupo?: string; lider?: string; dni?: string | number; id?: string; nombres?: string } | null | undefined) => {
       if (!t) return false;
-      const g = String(t.grupo || '').trim().toLowerCase();
-      const l = String(t.lider || '').trim().toLowerCase();
-      const hasGrupo = g !== '' && g !== 'sin grupo' && g !== 'sin asignar' && g !== 'ninguno' && g !== 'general';
-      const hasLider = l !== '' && l !== 'sin asignar' && l !== 'sin lider' && l !== 'sin líder' && l !== 'ninguno';
 
       const norm = normalizeDni(t.dni);
       const raw = String(t.dni ?? '').trim();
@@ -576,47 +572,38 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         (norm && workerAssignedGrupos[norm]) ||
         (raw && workerAssignedGrupos[raw]) ||
         (id && workerAssignedGrupos[id]) ||
-        (nameKey && workerAssignedGrupos[nameKey]);
-      if (sessionGrp) {
-        const sLower = sessionGrp.trim().toLowerCase();
-        if (sLower !== 'sin grupo' && sLower !== 'sin asignar' && sLower !== '') {
-          return true;
-        }
-        return false;
-      }
+        (nameKey && workerAssignedGrupos[nameKey]) ||
+        '';
 
-      // Si el trabajador tiene asignado grupo o líder en su nómina, está asignado
-      if (hasGrupo || hasLider) return true;
+      const effectiveGrupo = (sessionGrp || t.grupo || '').trim();
+      const effectiveLider = (t.lider || '').trim();
 
-      // Si en su ficha dice expresamente "Sin Grupo" o grupo vacío y no tiene líder, es PENDIENTE
-      const isSinGrupo = !g || g === 'sin grupo' || g === 'sin asignar' || g === 'ninguno' || g === 'general';
-      if (isSinGrupo && !hasLider) {
-        return false;
-      }
+      const gLower = effectiveGrupo.toLowerCase();
+      const lLower = effectiveLider.toLowerCase();
 
-      // Verificar si está registrado en alguna reserva de hoy
-      if (
-        (norm && workersInReservasHoyMap.has(norm)) ||
-        (raw && workersInReservasHoyMap.has(raw)) ||
-        (id && workersInReservasHoyMap.has(id)) ||
-        (nameKey && workersInReservasHoyMap.has(nameKey))
-      ) {
-        const resInfo =
-          (norm && workersInReservasHoyMap.get(norm)) ||
-          (raw && workersInReservasHoyMap.get(raw)) ||
-          (id && workersInReservasHoyMap.get(id)) ||
-          (nameKey && workersInReservasHoyMap.get(nameKey));
-        if (resInfo && resInfo.grupo && resInfo.grupo.trim().toLowerCase() !== 'sin grupo') {
-          return true;
-        }
-      }
+      const hasGrupo =
+        gLower !== '' &&
+        gLower !== 'sin grupo' &&
+        gLower !== 'sin asignar' &&
+        gLower !== 'ninguno' &&
+        gLower !== 'general' &&
+        gLower !== '0';
 
-      return false;
+      const hasLider =
+        lLower !== '' &&
+        lLower !== 'sin asignar' &&
+        lLower !== 'sin lider' &&
+        lLower !== 'sin líder' &&
+        lLower !== 'ninguno' &&
+        lLower !== '0';
+
+      // Estrictamente: Asignado si y solo si cuenta con Grupo Y Líder desde la hoja Sheet de trabajadores
+      return hasGrupo && hasLider;
     },
-    [normalizeDni, normalizeStr, workersInReservasHoyMap, workerAssignedGrupos]
+    [normalizeDni, normalizeStr, workerAssignedGrupos]
   );
 
-  // Mapa de jabas registradas para cada trabajador en la fecha seleccionada (basado en detalleJabas)
+  // Mapa de jabas registradas para cada trabajador en la fecha seleccionada (basado estrictamente en la hoja Registro_Avance / detalleJabas)
   const workerJabasTodayMap = useMemo(() => {
     const map: Record<string, number> = {};
     const targetFecha = fechaPersonal || getLocalToday();
@@ -642,28 +629,11 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       });
     }
 
-    // Complementar con el registro del trabajador si tiene jabas en esa fecha específica
-    trabajadores.forEach((t) => {
-      const j = Number(t.jabas) || 0;
-      const tFecha = t.fecha ? normalizeDateString(t.fecha) : '';
-      if (j > 0 && tFecha === targetFecha) {
-        const norm = normalizeDni(t.dni);
-        const raw = String(t.dni || '').trim();
-        if (norm && !map[norm]) map[norm] = j;
-        if (raw && !map[raw]) map[raw] = j;
-        if (t.id && !map[t.id]) map[t.id] = j;
-        if (t.nombres) {
-          const normName = normalizeStr(t.nombres);
-          if (!map[`NAME_${normName}`]) map[`NAME_${normName}`] = j;
-        }
-      }
-    });
-
     return map;
-  }, [detalleJabas, trabajadores, fechaPersonal, normalizeDni, normalizeStr]);
+  }, [detalleJabas, fechaPersonal, normalizeDni, normalizeStr]);
 
-  // Consulta directa y estricta al Registro de Avance (detalleJabas) para la fecha consultada
-  // Calcula con precisión matemática el total real de jabas del día y las personas participantes
+  // Consulta directa y estricta a la hoja Registro de Avance (detalleJabas) considerando los filtros de días
+  // Cuenta a todos los trabajadores con jabas asignadas (> 0) y el total acumulado de jabas
   const avanceDiaStats = useMemo(() => {
     const targetFecha = fechaPersonal || getLocalToday();
     let totalJabasDia = 0;
@@ -675,13 +645,15 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         const dFecha = d.fecha ? normalizeDateString(d.fecha) : (d.timestamp ? normalizeDateString(d.timestamp) : '');
         if (dFecha === targetFecha) {
           const j = Number(d.jabas) || 0;
-          totalJabasDia += j;
-          totalRegistros++;
-          const norm = normalizeDni(d.dni);
-          const raw = String(d.dni || '').trim();
-          const personKey = norm || raw || (d.trabajador ? `NAME_${normalizeStr(d.trabajador)}` : (d.id ? `ID_${d.id}` : ''));
-          if (personKey) {
-            uniquePersons.add(personKey);
+          if (j > 0) {
+            totalJabasDia += j;
+            totalRegistros++;
+            const norm = normalizeDni(d.dni);
+            const raw = String(d.dni || '').trim();
+            const personKey = norm || raw || (d.trabajador ? `NAME_${normalizeStr(d.trabajador)}` : (d.id ? `ID_${d.id}` : ''));
+            if (personKey) {
+              uniquePersons.add(personKey);
+            }
           }
         }
       });
@@ -831,10 +803,20 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     [scopedTrabajadores, hasWorkerJabas]
   );
 
+  const scopedJabasTotal = useMemo(() => {
+    return scopedTrabajadores.reduce((acc, t) => acc + getWorkerJabasCount(t), 0);
+  }, [scopedTrabajadores, getWorkerJabasCount]);
+
   const countConJabasTotal = useMemo(() => {
     if (hasCuadrillaFilter) return countConJabas;
     return Math.max(avanceDiaStats.totalPersonasConJabas, countConJabas);
   }, [hasCuadrillaFilter, countConJabas, avanceDiaStats.totalPersonasConJabas]);
+
+  const jabasTotalDisplay = useMemo(() => {
+    if (hasCuadrillaFilter) return scopedJabasTotal;
+    return avanceDiaStats.totalJabasDia;
+  }, [hasCuadrillaFilter, scopedJabasTotal, avanceDiaStats.totalJabasDia]);
+
   const countPendientes = useMemo(
     () => scopedTrabajadores.filter((t) => !isWorkerCompletadoOAsignado(t)).length,
     [scopedTrabajadores, isWorkerCompletadoOAsignado]
@@ -1587,7 +1569,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         const tipo = cols[7] || 'Cosechador';
 
         if (dni || nombres) {
-          if (grupo || lider) aCount++;
+          const hasG = Boolean(grupo && grupo.trim().toLowerCase() !== 'sin grupo' && grupo.trim().toLowerCase() !== 'sin asignar');
+          const hasL = Boolean(lider && !lider.trim().toLowerCase().includes('sin'));
+          if (hasG && hasL) aCount++;
           else pCount++;
 
           parsed.push({
@@ -3555,7 +3539,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     vistaAsignacion === 'con_jabas' ? 'bg-amber-800 text-white' : 'bg-amber-200 text-amber-900'
                   }`}
                 >
-                  {countConJabasTotal} pers. · {avanceDiaStats.totalJabasDia} jabas
+                  {countConJabasTotal} pers. · {jabasTotalDisplay} jabas
                 </span>
               </button>
 
@@ -3647,11 +3631,11 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     )}
                     <span>
                       {vistaAsignacion === 'pendientes' || (vistaAsignacion as string) === 'sin_jabas'
-                        ? `Mostrando únicamente trabajadores pendientes por asignar (${filteredTrabajadores.length} disponibles). Los asignados se ocultan automáticamente.`
+                        ? `Mostrando trabajadores pendientes sin Grupo ni Líder en la hoja Trabajadores (${filteredTrabajadores.length} disponibles).`
                         : vistaAsignacion === 'asignados'
-                        ? `Mostrando trabajadores que ya tienen Grupo o Líder asignado (${filteredTrabajadores.length} asignados).`
+                        ? `Mostrando trabajadores con Grupo y Líder asignados en la hoja Trabajadores (${filteredTrabajadores.length} asignados).`
                         : vistaAsignacion === 'con_jabas'
-                        ? `Mostrando ${filteredTrabajadores.length} trabajadores con avance en ${fechaPersonal === hoyStr ? 'el día de hoy' : `la fecha ${fechaPersonal}`} · Total acumulado: ${avanceDiaStats.totalJabasDia} jabas reales de avance.`
+                        ? `Mostrando ${filteredTrabajadores.length} trabajadores con avance registrado en Registro_Avance (${fechaPersonal === hoyStr ? 'hoy' : fechaPersonal}) · Total acumulado: ${jabasTotalDisplay} jabas.`
                         : `Nómina completa (${filteredTrabajadores.length} trabajadores). Activa filtros seleccionando Supervisor, Fundo o Módulo arriba.`}
                     </span>
                   </span>
@@ -3779,18 +3763,13 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   {filteredTrabajadores.slice(0, visibleLimit).map((t, idx) => {
                     const normDni = normalizeDni(t.dni);
                     const isChecked = isDniSelected(t);
-                    const reservaHoyInfo =
-                      (normDni && workersInReservasHoyMap.get(normDni)) ||
-                      (t.dni && workersInReservasHoyMap.get(String(t.dni).trim())) ||
-                      (t.id && workersInReservasHoyMap.get(t.id));
-                    const currentWorkerGrupo =
-                      t.grupo ||
-                      reservaHoyInfo?.grupo ||
-                      workerAssignedGrupos[normDni] ||
+                    const sessionGrupo =
+                      (normDni && workerAssignedGrupos[normDni]) ||
                       workerAssignedGrupos[String(t.dni).trim()] ||
                       (t.id && workerAssignedGrupos[t.id]) ||
                       '';
-                    const currentWorkerLider = t.lider || reservaHoyInfo?.lider || '';
+                    const currentWorkerGrupo = sessionGrupo || t.grupo || '';
+                    const currentWorkerLider = t.lider || '';
                     const isAsignado = isWorkerAsignado(t);
                     const jabasCount = getWorkerJabasCount(t);
                     const tieneJabas = jabasCount > 0;
@@ -3821,7 +3800,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                                 DNI: {t.dni}
                               </span>
 
-                              {/* Identificación visual: Jabas hoy, Grupo/Líder asignado, o Sin Grupo */}
+                              {/* Identificación visual: Jabas hoy, Grupo/Líder asignado, o Pendiente */}
                               {tieneJabas && (
                                 <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
                                   <Package className="w-3 h-3 text-emerald-600" />
@@ -3839,7 +3818,13 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                               ) : !tieneJabas && (
                                 <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
                                   <Clock className="w-3 h-3 text-amber-600" />
-                                  <span>Sin Grupo</span>
+                                  <span>
+                                    {!currentWorkerGrupo && !currentWorkerLider
+                                      ? 'Sin Grupo ni Líder'
+                                      : !currentWorkerGrupo
+                                      ? 'Sin Grupo'
+                                      : 'Sin Líder'}
+                                  </span>
                                 </span>
                               )}
                             </div>

@@ -1441,8 +1441,15 @@ export default function App() {
             grupo: t.grupo && String(t.grupo).trim().toLowerCase() !== 'sin grupo' ? String(t.grupo).trim() : '',
             lider: t.lider && !String(t.lider).trim().toLowerCase().includes('sin') ? String(t.lider).trim() : '',
           }));
-          const countPend = workers.filter((w: any) => !w.grupo && !w.lider).length;
-          const countAsig = workers.length - countPend;
+          const isAssigned = (w: any) => {
+            const g = String(w.grupo || '').trim().toLowerCase();
+            const l = String(w.lider || '').trim().toLowerCase();
+            const hasG = g && g !== 'sin grupo' && g !== 'sin asignar' && g !== 'ninguno';
+            const hasL = l && !l.includes('sin') && l !== 'ninguno' && l !== 'sin asignar';
+            return Boolean(hasG && hasL);
+          };
+          const countAsig = workers.filter(isAssigned).length;
+          const countPend = workers.length - countAsig;
           applyServerData({
             trabajadores: workers,
             forceNominaUpdate: true,

@@ -751,7 +751,10 @@ async function startServer() {
           const grupo = t.grupo && String(t.grupo).trim().toLowerCase() !== 'sin grupo' ? String(t.grupo).trim() : '';
           const lider = t.lider && !String(t.lider).trim().toLowerCase().includes('sin') ? String(t.lider).trim() : '';
 
-          if (grupo || lider) {
+          const hasGrupo = Boolean(grupo && grupo.toLowerCase() !== 'sin grupo' && grupo.toLowerCase() !== 'sin asignar' && grupo.toLowerCase() !== 'ninguno');
+          const hasLider = Boolean(lider && !lider.toLowerCase().includes('sin') && lider.toLowerCase() !== 'ninguno' && lider.toLowerCase() !== 'sin asignar');
+
+          if (hasGrupo && hasLider) {
             countAsignados++;
           } else {
             countPendientes++;
