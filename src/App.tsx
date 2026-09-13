@@ -217,6 +217,9 @@ export default function App() {
     }
   }, [addToast, addLog]);
 
+  // Referencia a syncToServer para que applyServerData pueda sincronizar trabajadores al servidor central sin dependencias circulares
+  const syncToServerRef = useRef<(payloadOverride?: any) => Promise<void>>(async () => {});
+
   // Universal Data Applier from Server/Broadcast
   const applyServerData = useCallback((d: any, silent = true) => {
     if (!d || typeof d !== 'object') return;
@@ -237,6 +240,10 @@ export default function App() {
       // Si el modo offline está explícitamente bloqueado, no sobrescribir salvo forzado
       if (isLocked && currentWorkers.length > 0 && !isExplicitPurge) {
         // Nómina blindada por interruptor de usuario
+      } else if (d.trabajadores.length === 0 && currentWorkers.length > 0 && !isExplicitPurge) {
+        // Preservar nómina local si la respuesta es vacía no intencionada (evita parpadeo)
+        // y asegurar que el servidor central reciba los trabajadores cargados
+        syncToServerRef.current({ trabajadores: currentWorkers });
       } else {
         const userRol = getSession()?.rol;
         const hoy = getLocalToday();
@@ -292,8 +299,17 @@ export default function App() {
           }
         });
 
-        setTrabajadoresState(uniqueWorkers);
-        saveTrabajadores(uniqueWorkers);
+        // Solo actualizar el estado si realmente hay cambios, evitando re-renders o parpadeos
+        const isDifferent = uniqueWorkers.length !== currentWorkers.length ||
+          uniqueWorkers.some((uw, idx) => {
+            const cw = currentWorkers[idx];
+            return !cw || cw.id !== uw.id || cw.grupo !== uw.grupo || cw.lider !== uw.lider || cw.dni !== uw.dni;
+          });
+
+        if (isDifferent) {
+          setTrabajadoresState(uniqueWorkers);
+          saveTrabajadores(uniqueWorkers);
+        }
       }
     }
     if (Array.isArray(d.detalleJabas)) {
@@ -372,9 +388,7 @@ export default function App() {
         const json = await res.json();
         if (json && json.status === 'ok' && json.data) {
           applyServerData(json.data, silent);
-          if (Array.isArray(json.data.trabajadores) && json.data.trabajadores.length > 0) {
-            fetchedFromServer = true;
-          }
+          fetchedFromServer = true;
         }
       }
     } catch {
@@ -387,16 +401,14 @@ export default function App() {
         const cloudData = await fetchAllDataFromFirestore();
         if (cloudData) {
           applyServerData(cloudData, silent);
-          if (Array.isArray(cloudData.trabajadores) && cloudData.trabajadores.length > 0) {
-            fetchedFromServer = true;
-          }
+          fetchedFromServer = true;
         }
       } catch (err) {
         console.warn('Firestore fetch error in fetchCentralizedData:', err);
       }
     }
 
-    // 3. Fallback: Google Sheets Cloud Backend
+    // 3. Fallback: Google Sheets Cloud Backend (solo si el servidor central y Firestore no responden)
     if (!fetchedFromServer) {
       const url = getGsheetUrl();
       if (url) {
@@ -407,6 +419,7 @@ export default function App() {
             if (gJson && gJson.status === 'ok' && gJson.data) {
               const gData = gJson.data;
               applyServerData(gData, silent);
+              syncToServerRef.current(gData);
             }
           }
         } catch {
@@ -498,6 +511,11 @@ export default function App() {
     }
   }, [applyServerData, session]);
 
+  // Mantener la referencia a syncToServer sincronizada
+  useEffect(() => {
+    syncToServerRef.current = syncToServer;
+  }, [syncToServer]);
+
   // Live Real-Time Polling + SSE + BroadcastChannel + Window Focus
   useEffect(() => {
     // 1. Initial immediate pull
@@ -532,11 +550,11 @@ export default function App() {
       };
     } catch {}
 
-    // 4. Fast polling fallback (every 2.5s) to guarantee zero desync
+    // 4. Polling fallback (15s) que calza con el indicador 'Auto Sync 15s' garantizando cero desincronización y cero parpadeo
     const interval = setInterval(() => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) return;
       fetchCentralizedData(true);
-    }, 2500);
+    }, 15000);
 
     const onFocusOrVisible = () => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) return;
@@ -568,8 +586,13 @@ export default function App() {
     };
   }, [fetchCentralizedData, applyServerData]);
 
-  // Background Auto-fetch from Google Sheets if configured and server not authoritative
+  const autoPullDoneRef = useRef(false);
+
+  // Background Auto-fetch from Google Sheets if configured and server not authoritative (ejecutado 1 sola vez al inicio)
   useEffect(() => {
+    if (autoPullDoneRef.current) return;
+    autoPullDoneRef.current = true;
+
     const autoPullOnStart = async () => {
       const url = getGsheetUrl();
       if (!url) return;

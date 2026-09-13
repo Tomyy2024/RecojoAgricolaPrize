@@ -213,10 +213,16 @@ async function startServer() {
         const data = snap.data();
         let changed = false;
 
-        // 1. Trabajadores (sincronizar nómina exacta desde la nube)
+        // 1. Trabajadores (sincronizar nómina exacta desde la nube sin borrar accidentalmente)
         if (Array.isArray(data.trabajadores)) {
-          db.trabajadores = data.trabajadores;
-          changed = true;
+          const isExplicitPurge = data.depurado === true || data.forceNominaUpdate === true;
+          if (data.trabajadores.length > 0 || isExplicitPurge || !(db.trabajadores && db.trabajadores.length > 0)) {
+            db.trabajadores = data.trabajadores;
+            changed = true;
+          } else if ((db.trabajadores || []).length > 0 && data.trabajadores.length === 0) {
+            // El servidor local ya tiene trabajadores pero Firestore está vacío: sincronizar a la nube
+            syncToCloudFirestore({ trabajadores: db.trabajadores });
+          }
         }
 
         // 2. Usuarios
@@ -1041,7 +1047,11 @@ async function startServer() {
 
         // Solo se ignora db.trabajadores si expresamente el rol es 'Trabajador'
         if (!isWorkerRole && Array.isArray(incoming.trabajadores)) {
-          db.trabajadores = incoming.trabajadores;
+          const isExplicitPurge = incoming.depurado === true || incoming.forceNominaUpdate === true || incoming.action === 'reset';
+          // Solo sobrescribir con arreglo vacío si es una depuración explícita
+          if (incoming.trabajadores.length > 0 || isExplicitPurge || !(db.trabajadores && db.trabajadores.length > 0)) {
+            db.trabajadores = incoming.trabajadores;
+          }
         }
         if (Array.isArray(incoming.detalleJabas)) db.detalleJabas = incoming.detalleJabas;
         if (Array.isArray(incoming.validaciones)) {
