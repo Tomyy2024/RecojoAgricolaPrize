@@ -470,51 +470,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     }).length;
   }, [trabajadores, hoyStr]);
 
-  // Complementar nómina con trabajadores registrados en Registro de Avance (detalleJabas)
-  // para que siempre coincida al 100% con los avances reales del campo y no falte ningún cosechador
+  // La nómina se rige estrictamente por la hoja/tabla 'Trabajadores' en tiempo real
   const fullTrabajadores = useMemo(() => {
-    const existingDnis = new Set<string>();
-    const existingNames = new Set<string>();
-    trabajadores.forEach((t) => {
-      const norm = normalizeDni(t.dni);
-      const raw = String(t.dni || '').trim();
-      if (norm) existingDnis.add(norm);
-      if (raw) existingDnis.add(raw);
-      if (t.nombres) existingNames.add(normalizeStr(t.nombres));
-    });
-
-    const extras: Trabajador[] = [];
-    if (Array.isArray(detalleJabas)) {
-      detalleJabas.forEach((d) => {
-        const norm = normalizeDni(d.dni);
-        const raw = String(d.dni || '').trim();
-        const normName = d.trabajador ? normalizeStr(d.trabajador) : '';
-        const key = norm || raw || (normName ? `name_${normName}` : '');
-
-        if (key && !existingDnis.has(key) && (!normName || !existingNames.has(normName))) {
-          existingDnis.add(key);
-          if (norm) existingDnis.add(norm);
-          if (raw) existingDnis.add(raw);
-          if (normName) existingNames.add(normName);
-          extras.push({
-            id: d.id || `extra_${key}`,
-            dni: raw || norm || '',
-            nombres: d.trabajador || `Trabajador ${key}`,
-            supervisor: d.supervisor || '',
-            fundo: d.fundo || 'Santa Teresa',
-            modulo: d.modulo || 'M01',
-            grupo: d.grupo || '',
-            lider: d.lider || '',
-            jabas: Number(d.jabas) || 0,
-            fecha: d.fecha || ''
-          });
-        }
-      });
-    }
-
-    if (extras.length === 0) return trabajadores;
-    return [...trabajadores, ...extras];
-  }, [trabajadores, detalleJabas, normalizeDni, normalizeStr]);
+    return Array.isArray(trabajadores) ? trabajadores : [];
+  }, [trabajadores]);
 
   // Pre-indexed workers for sub-millisecond search and strict binding
   const indexedTrabajadores = useMemo(() => {

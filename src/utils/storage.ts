@@ -168,7 +168,7 @@ export function formatDateDDMMAAAA(d?: string): string {
 export function initializeStorage() {
   try {
     const WIPE_VERSION_KEY = 'recojoFrutosDataVersion';
-    const TARGET_VERSION = 'v106_wipe_historical_backups_clean_sheet_mode';
+    const TARGET_VERSION = 'v107_reset_realtime_trabajadores_table';
     
     // Check if this browser needs a clean wipe of all backup and cached data
     if (typeof localStorage !== 'undefined' && localStorage.getItem(WIPE_VERSION_KEY) !== TARGET_VERSION) {
@@ -428,18 +428,6 @@ export function isOfflineNominaLocked(): boolean {
     if (val !== null) {
       return val === 'true';
     }
-    // Si no se ha configurado expresamente, pero ya existen trabajadores cargados en local,
-    // activamos la protección automáticamente para que una desconexión o reconexión de red no los borre.
-    const raw = localStorage.getItem(KEYS.TRABAJADORES);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          localStorage.setItem(KEYS.OFFLINE_NOMINA_LOCKED, 'true');
-          return true;
-        }
-      } catch {}
-    }
     return false;
   } catch {
     return false;
@@ -498,9 +486,9 @@ export function getTrabajadores(): Trabajador[] {
 
     if (raw === null) {
       // Primera vez absoluto sin inicializar
-      list = INITIAL_TRABAJADORES;
+      list = [];
       try {
-        localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(INITIAL_TRABAJADORES));
+        localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify([]));
       } catch {}
     } else {
       try {
@@ -510,24 +498,8 @@ export function getTrabajadores(): Trabajador[] {
       }
     }
 
-    // Si la lista local quedó vacía, SOLO restaurar de caché si NO se ha depurado hoy
-    // y si los trabajadores de la caché pertenecen a hoy en adelante (no restaurar ayer)
-    if (!Array.isArray(list) || list.length === 0) {
-      const depuradoHoy = getFechaUltimaDepuracion() === getLocalToday();
-      if (!depuradoHoy) {
-        const offlineBackup = getTrabajadoresOfflineCache();
-        const hoy = getLocalToday();
-        const validBackup = offlineBackup.filter((t) => {
-          if (!t.fecha) return true;
-          return normalizeDateString(t.fecha) >= hoy;
-        });
-        if (validBackup.length > 0) {
-          list = validBackup;
-          try {
-            localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(validBackup));
-          } catch {}
-        }
-      }
+    if (!Array.isArray(list)) {
+      list = [];
     }
 
     const seen = new Set<string>();

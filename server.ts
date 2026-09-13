@@ -148,35 +148,12 @@ function loadDatabase() {
 
       const cleanedValidaciones = sanitizeValidaciones(parsed.validaciones);
 
-      // Auto-incorporar trabajadores desde detalleJabas si faltan en trabajadores
-      const existingWorkerDnis = new Set((parsed.trabajadores || []).map((t: any) => String(t.dni || '').trim()));
-      const extraWorkers: any[] = [];
-      if (Array.isArray(parsed.detalleJabas)) {
-        parsed.detalleJabas.forEach((d: any) => {
-          const dni = String(d.dni || '').trim();
-          if (dni && !existingWorkerDnis.has(dni)) {
-            existingWorkerDnis.add(dni);
-            extraWorkers.push({
-              id: d.id || `w_${dni}`,
-              dni: dni,
-              nombres: d.trabajador || `Trabajador ${dni}`,
-              supervisor: d.supervisor || '',
-              fundo: d.fundo || 'Santa Teresa',
-              modulo: d.modulo || 'M01',
-              grupo: '',
-              lider: '',
-              jabas: Number(d.jabas) || 0,
-              fecha: d.fecha || ''
-            });
-          }
-        });
-      }
-      const combinedTrabajadores = extraWorkers.length > 0 ? [...(parsed.trabajadores || []), ...extraWorkers] : (parsed.trabajadores || []);
+      const pureTrabajadores = Array.isArray(parsed.trabajadores) ? parsed.trabajadores : [];
 
       return {
         ...getInitialData(),
         ...parsed,
-        trabajadores: combinedTrabajadores,
+        trabajadores: pureTrabajadores,
         usuarios: Array.from(userMap.values()),
         validaciones: cleanedValidaciones
       };
@@ -236,12 +213,10 @@ async function startServer() {
         const data = snap.data();
         let changed = false;
 
-        // 1. Trabajadores
-        if (Array.isArray(data.trabajadores) && data.trabajadores.length > 0) {
-          if (!db.trabajadores || db.trabajadores.length === 0 || data.trabajadores.length >= (db.trabajadores.length || 0)) {
-            db.trabajadores = data.trabajadores;
-            changed = true;
-          }
+        // 1. Trabajadores (sincronizar nómina exacta desde la nube)
+        if (Array.isArray(data.trabajadores)) {
+          db.trabajadores = data.trabajadores;
+          changed = true;
         }
 
         // 2. Usuarios
@@ -727,10 +702,28 @@ async function startServer() {
       }
 
       const incomingTrabajadores = json.data.trabajadores;
-      if (!Array.isArray(incomingTrabajadores) || incomingTrabajadores.length === 0) {
+      if (!Array.isArray(incomingTrabajadores)) {
         return res.status(400).json({
           status: 'error',
-          message: 'La hoja "Trabajadores" en Google Sheets está vacía o no fue encontrada.'
+          message: 'La hoja "Trabajadores" no fue encontrada en la respuesta de Google Sheets.'
+        });
+      }
+
+      if (incomingTrabajadores.length === 0) {
+        db.trabajadores = [];
+        db.version = (db.version || 1) + 1;
+        db.lastUpdated = new Date().toISOString();
+        saveDatabase(db);
+        syncToCloudFirestore({ trabajadores: [] });
+        notifyClients({ type: 'sync', version: db.version, data: db });
+
+        return res.json({
+          status: 'ok',
+          message: 'Hoja "Trabajadores" sincronizada: 0 trabajadores registrados (tabla vacía)',
+          count: 0,
+          pendientes: 0,
+          asignados: 0,
+          trabajadores: []
         });
       }
 
@@ -1047,7 +1040,7 @@ async function startServer() {
         if (Array.isArray(incoming.programaGeneral)) db.programaGeneral = incoming.programaGeneral;
 
         // Solo se ignora db.trabajadores si expresamente el rol es 'Trabajador'
-        if (!isWorkerRole && Array.isArray(incoming.trabajadores) && incoming.trabajadores.length > 0) {
+        if (!isWorkerRole && Array.isArray(incoming.trabajadores)) {
           db.trabajadores = incoming.trabajadores;
         }
         if (Array.isArray(incoming.detalleJabas)) db.detalleJabas = incoming.detalleJabas;

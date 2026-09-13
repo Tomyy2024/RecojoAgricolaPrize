@@ -232,20 +232,16 @@ export default function App() {
     if (Array.isArray(d.trabajadores)) {
       const isLocked = isOfflineNominaLocked();
       const currentWorkers = getTrabajadores();
-      const isExplicitPurge = d.depurado === true;
+      const isExplicitPurge = d.depurado === true || d.forceNominaUpdate === true;
 
-      // PASO 1 & PASO 2: Protección total de la nómina cargada
-      // 1. Si el Modo Offline está activo y ya hay trabajadores en local, NUNCA sobreescribir salvo que sea una depuración explícita del Administrador.
-      // 2. Si el servidor o la red devuelve un arreglo vacío (0 trabajadores), NUNCA borrar los trabajadores existentes salvo depuración explícita.
+      // Si el modo offline está explícitamente bloqueado, no sobrescribir salvo forzado
       if (isLocked && currentWorkers.length > 0 && !isExplicitPurge) {
-        // Nómina blindada: no se altera por respuestas del servidor ni de Google Sheets
-      } else if (d.trabajadores.length === 0 && currentWorkers.length > 0 && !isExplicitPurge) {
-        // Preservar nómina local ante respuestas vacías por fluctuaciones de señal
+        // Nómina blindada por interruptor de usuario
       } else {
         const userRol = getSession()?.rol;
         const hoy = getLocalToday();
 
-        // Mapa de trabajadores locales existentes para preservar siempre el grupo y líder asignado
+        // Mapa de trabajadores locales existentes para preservar grupo y líder si vienen sin definir
         const localWorkersMap = new Map<string, Trabajador>();
         currentWorkers.forEach((lw) => {
           const cDni = String(lw.dni || '').replace(/\s+/g, '').trim();
@@ -269,11 +265,7 @@ export default function App() {
           const rawDni = String(t.dni || '').trim();
           const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
 
-          // Buscar si el trabajador ya existía en local para no pisar su grupo o líder si la hoja de Drive viene vacía
           const existingLocal = (cleanDni ? localWorkersMap.get(cleanDni) : null) || (t.id ? localWorkersMap.get(t.id) : null);
-          // Si el servidor o la nube envía expresamente el campo grupo (incluso vacío ""),
-          // respetamos el valor recibido para permitir desasignar trabajadores.
-          // Solo si t.grupo es undefined o null, usamos el valor local previo.
           const grupoFinal = t.grupo !== undefined && t.grupo !== null
             ? String(t.grupo).trim()
             : (existingLocal?.grupo ? String(existingLocal.grupo).trim() : '');
@@ -300,10 +292,8 @@ export default function App() {
           }
         });
 
-        if (uniqueWorkers.length > 0 || isExplicitPurge) {
-          setTrabajadoresState(uniqueWorkers);
-          saveTrabajadores(uniqueWorkers);
-        }
+        setTrabajadoresState(uniqueWorkers);
+        saveTrabajadores(uniqueWorkers);
       }
     }
     if (Array.isArray(d.detalleJabas)) {
@@ -416,13 +406,6 @@ export default function App() {
             const gJson = await gRes.json();
             if (gJson && gJson.status === 'ok' && gJson.data) {
               const gData = gJson.data;
-              // Si Google Sheets no trae nómina, usar la local de respaldo; de lo contrario respetar la hoja Trabajadores
-              if (!Array.isArray(gData.trabajadores) || gData.trabajadores.length === 0) {
-                const currentLocal = getTrabajadores();
-                if (currentLocal.length > 0) {
-                  gData.trabajadores = currentLocal;
-                }
-              }
               applyServerData(gData, silent);
             }
           }
@@ -606,16 +589,9 @@ export default function App() {
         const json = await res.json();
         if (json && json.status === 'ok' && json.data) {
           const d = json.data;
-          // Si Google Sheets no trae nómina, usar la local de respaldo; de lo contrario respetar la hoja Trabajadores
-          if (!Array.isArray(d.trabajadores) || d.trabajadores.length === 0) {
-            const currentLocal = getTrabajadores();
-            if (currentLocal.length > 0) {
-              d.trabajadores = currentLocal;
-            }
-          }
           applyServerData(d, true);
           addLog('☁️ Datos sincronizados automáticamente con Google Sheets', 'ok');
-          syncToServer({ ...d, trabajadores: getTrabajadores() });
+          syncToServer(d);
         }
       } catch {
         // Silently use offline cache
