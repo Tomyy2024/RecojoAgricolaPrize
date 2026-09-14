@@ -1,12 +1,16 @@
 import React, { useState, useMemo } from 'react';
 import { Trabajador, UserSession } from '../types';
-import { FileUp, FileText, Check, X, UploadCloud, AlertTriangle, Eye, ShieldCheck, Lock, Trash2, ShieldAlert, ArrowRight, UserCheck } from 'lucide-react';
-import { getLocalToday, normalizeDateString } from '../utils/storage';
+import { FileUp, FileText, Check, X, UploadCloud, AlertTriangle, Eye, ShieldCheck, Lock, Trash2, ShieldAlert, ArrowRight, UserCheck, Calendar, Info, Layers, ClipboardPaste, FileSpreadsheet, RefreshCw } from 'lucide-react';
+import { getLocalToday, normalizeDateString, getFechasDisponiblesTrabajadores, getGsheetUrl, replicarTrabajadoresAlSheet, parsePastedWorkers } from '../utils/storage';
 
 interface ImportarTabProps {
   session?: UserSession | null;
   trabajadores: Trabajador[];
-  onImportTrabajadores: (nuevos: Trabajador[], replaceExisting?: boolean) => void;
+  onImportTrabajadores: (
+    nuevos: Trabajador[],
+    replaceExisting?: boolean | 'reemplazar_fecha' | 'append' | 'reemplazar_todo',
+    fechaTarget?: string
+  ) => void;
   onToast: (msg: string) => void;
   offlineNomina?: boolean;
   onToggleOfflineNomina?: (val?: boolean) => void;
@@ -27,6 +31,15 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
   const isAdmin = session?.rol === 'Administrador';
   const hoyStr = getLocalToday();
 
+  // Fecha seleccionada para asociar la nómina que se cargará
+  const [fechaImportacion, setFechaImportacion] = useState<string>(() => getLocalToday());
+  const [modoImportacion, setModoImportacion] = useState<'reemplazar_fecha' | 'append' | 'reemplazar_todo'>('reemplazar_fecha');
+
+  // Historial de fechas registradas en la nómina
+  const fechasRegistradas = useMemo(() => {
+    return getFechasDisponiblesTrabajadores(trabajadores);
+  }, [trabajadores]);
+
   // Conteo de trabajadores del día anterior
   const countTrabajadoresAyer = useMemo(() => {
     return trabajadores.filter((t) => {
@@ -37,9 +50,10 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
   }, [trabajadores, hoyStr]);
 
   const [mode, setMode] = useState<'file' | 'paste'>('file');
-  const [replaceMode, setReplaceMode] = useState<boolean>(true);
   const [pasteText, setPasteText] = useState('');
   const [parsedData, setParsedData] = useState<Omit<Trabajador, 'id' | 'fecha'>[] | null>(null);
+  const [replicarAlSheet, setReplicarAlSheet] = useState(true);
+  const [isReplicating, setIsReplicating] = useState(false);
 
   const parseCsvText = (text: string) => {
     const lines = text
@@ -128,47 +142,27 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
     const seenDnis = new Set<string>();
     const newWorkers: Trabajador[] = [];
     let duplicates = 0;
+    const targetFechaStr = normalizeDateString(fechaImportacion) || hoyStr;
 
     parsedData.forEach((p, idx) => {
       const cleanDni = p.dni.trim();
-      if (replaceMode) {
-        if (!seenDnis.has(cleanDni)) {
-          seenDnis.add(cleanDni);
-          newWorkers.push({
-            id: `IMP_${Date.now()}_${idx}`,
-            fecha: nowIso,
-            dni: cleanDni,
-            nombres: p.nombres,
-            fundo: p.fundo,
-            modulo: p.modulo,
-            supervisor: p.supervisor,
-            grupo: p.grupo,
-            lider: (p as any).lider || '',
-            tipo: p.tipo,
-            jabas: 0
-          });
-        } else {
-          duplicates += 1;
-        }
+      if (!seenDnis.has(cleanDni)) {
+        seenDnis.add(cleanDni);
+        newWorkers.push({
+          id: `IMP_${Date.now()}_${idx}_${cleanDni}`,
+          fecha: targetFechaStr,
+          dni: cleanDni,
+          nombres: p.nombres,
+          fundo: p.fundo,
+          modulo: p.modulo,
+          supervisor: p.supervisor,
+          grupo: p.grupo,
+          lider: (p as any).lider || '',
+          tipo: p.tipo,
+          jabas: 0
+        });
       } else {
-        if (!existingDnis.has(cleanDni) && !seenDnis.has(cleanDni)) {
-          seenDnis.add(cleanDni);
-          newWorkers.push({
-            id: `IMP_${Date.now()}_${idx}`,
-            fecha: nowIso,
-            dni: cleanDni,
-            nombres: p.nombres,
-            fundo: p.fundo,
-            modulo: p.modulo,
-            supervisor: p.supervisor,
-            grupo: p.grupo,
-            lider: (p as any).lider || '',
-            tipo: p.tipo,
-            jabas: 0
-          });
-        } else {
-          duplicates += 1;
-        }
+        duplicates += 1;
       }
     });
 
@@ -177,12 +171,35 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
       return;
     }
 
-    onImportTrabajadores(newWorkers, replaceMode);
-    onToast(
-      replaceMode
-        ? `✅ Nómina diaria reemplazada: ${newWorkers.length} trabajadores activos` + (duplicates > 0 ? ` (${duplicates} duplicados omitidos)` : '')
-        : `✅ Importación exitosa: ${newWorkers.length} trabajadores agregados` + (duplicates > 0 ? ` (${duplicates} duplicados omitidos)` : '')
-    );
+    onImportTrabajadores(newWorkers, modoImportacion, targetFechaStr);
+
+    if (replicarAlSheet) {
+      setIsReplicating(true);
+      replicarTrabajadoresAlSheet(
+        newWorkers,
+        getGsheetUrl(),
+        modoImportacion,
+        targetFechaStr,
+        session?.rol
+      ).then((res) => {
+        if (res.sheetOk) {
+          onToast(`🌐 Nómina replicada automáticamente al Google Sheet (${res.count} registros).`);
+        } else if (res.error) {
+          onToast(`⚠️ Nómina guardada localmente. Aviso Google Sheet: ${res.error}`);
+        }
+      }).catch(() => {}).finally(() => {
+        setIsReplicating(false);
+      });
+    }
+
+    const desc =
+      modoImportacion === 'reemplazar_fecha'
+        ? `Nómina de fecha ${targetFechaStr} actualizada: ${newWorkers.length} trabajadores`
+        : modoImportacion === 'append'
+        ? `Trabajadores añadidos a fecha ${targetFechaStr}: ${newWorkers.length}`
+        : `Nómina global reemplazada: ${newWorkers.length} trabajadores`;
+
+    onToast(`✅ ${desc}` + (duplicates > 0 ? ` (${duplicates} duplicados omitidos)` : ''));
 
     // Reset
     setParsedData(null);
@@ -290,6 +307,72 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
         {/* Tab Toggle & Formularios de Carga: Exclusivo para Administrador */}
         {isAdmin ? (
           <>
+            {/* Panel de Selección de Fecha de la Nómina e Historial */}
+            <div className="bg-[#f8faf8] border border-[#d0ded0] rounded-xl p-3.5 mb-4 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-[#e0e0e0] mb-2.5">
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-[#2e7d32]" />
+                  <span className="text-xs font-bold text-[#1b5e20]">
+                    Fecha de la Nómina a Cargar:
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={fechaImportacion}
+                    onChange={(e) => {
+                      if (e.target.value) setFechaImportacion(e.target.value);
+                    }}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-[#a5d6a7] bg-white text-gray-900 shadow-xs focus:outline-none focus:ring-1 focus:ring-[#2e7d32]"
+                  />
+                  {fechaImportacion !== hoyStr && (
+                    <button
+                      type="button"
+                      onClick={() => setFechaImportacion(hoyStr)}
+                      className="text-[11px] bg-[#2e7d32] text-white px-2 py-1 rounded-lg font-bold hover:bg-[#1b5e20] cursor-pointer"
+                    >
+                      Hoy
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Historial de Fechas con Trabajadores en el Sistema */}
+              <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                <span className="text-gray-500 font-semibold flex items-center gap-1">
+                  <Layers className="w-3 h-3 text-[#2e7d32]" />
+                  <span>Fechas con trabajadores registrados:</span>
+                </span>
+                {fechasRegistradas.length === 0 ? (
+                  <span className="text-gray-400 italic">Ninguna fecha registrada aún</span>
+                ) : (
+                  fechasRegistradas.map((fd) => {
+                    const isSelected = fd.fecha === fechaImportacion;
+                    return (
+                      <button
+                        key={fd.fecha}
+                        type="button"
+                        onClick={() => setFechaImportacion(fd.fecha)}
+                        className={`px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                          isSelected
+                            ? 'bg-[#2e7d32] text-white shadow-xs'
+                            : 'bg-white text-gray-700 border border-gray-200 hover:border-[#a5d6a7]'
+                        }`}
+                        title={`Haz clic para seleccionar la fecha ${fd.fecha}`}
+                      >
+                        <span>{fd.fecha}</span>
+                        <span className={`px-1 rounded-full text-[10px] ${
+                          isSelected ? 'bg-white text-[#1b5e20]' : 'bg-[#e8f5e9] text-[#1b5e20]'
+                        }`}>
+                          {fd.count}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
             <div className="flex gap-2 mb-4">
               <button
                 onClick={() => {
@@ -411,42 +494,78 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
               )}
             </div>
 
-            {/* Mode selection: Reemplazar nómina diaria vs Agregar */}
+            {/* Mode selection: Reemplazar fecha seleccionada vs Agregar vs Reemplazar Todo */}
             <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 mb-4">
-              <div className="text-xs font-bold text-amber-900 mb-2">Modo de Importación:</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="text-xs font-bold text-amber-900 mb-2">Modo de Integración para la Fecha ({fechaImportacion}):</div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <label className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-all ${
-                  replaceMode ? 'bg-white border-[#2e7d32] shadow-sm' : 'bg-transparent border-amber-200 opacity-80'
+                  modoImportacion === 'reemplazar_fecha' ? 'bg-white border-[#2e7d32] shadow-sm' : 'bg-transparent border-amber-200 opacity-80'
                 }`}>
                   <input
                     type="radio"
                     name="importMode"
-                    checked={replaceMode}
-                    onChange={() => setReplaceMode(true)}
+                    checked={modoImportacion === 'reemplazar_fecha'}
+                    onChange={() => setModoImportacion('reemplazar_fecha')}
                     className="mt-0.5 text-[#2e7d32] focus:ring-[#2e7d32]"
                   />
                   <div>
-                    <div className="text-xs font-bold text-[#1b5e20]">🔄 Reemplazar Nómina Diaria (Recomendado)</div>
-                    <div className="text-[11px] text-gray-600 mt-0.5">Sustituye toda la lista actual por estos trabajadores. Evita distorsión con días anteriores.</div>
+                    <div className="text-xs font-bold text-[#1b5e20]">🔄 Reemplazar Fecha (Recomendado)</div>
+                    <div className="text-[11px] text-gray-600 mt-0.5">Sustituye solo los trabajadores del {fechaImportacion}. Mantiene intactos los de ayer y otras fechas.</div>
                   </div>
                 </label>
 
                 <label className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-all ${
-                  !replaceMode ? 'bg-white border-[#2e7d32] shadow-sm' : 'bg-transparent border-amber-200 opacity-80'
+                  modoImportacion === 'append' ? 'bg-white border-[#2e7d32] shadow-sm' : 'bg-transparent border-amber-200 opacity-80'
                 }`}>
                   <input
                     type="radio"
                     name="importMode"
-                    checked={!replaceMode}
-                    onChange={() => setReplaceMode(false)}
+                    checked={modoImportacion === 'append'}
+                    onChange={() => setModoImportacion('append')}
                     className="mt-0.5 text-[#2e7d32] focus:ring-[#2e7d32]"
                   />
                   <div>
-                    <div className="text-xs font-bold text-gray-800">➕ Agregar a la Nómina Existente</div>
-                    <div className="text-[11px] text-gray-600 mt-0.5">Añade solo los DNIs nuevos sin eliminar los trabajadores actuales.</div>
+                    <div className="text-xs font-bold text-gray-800">➕ Agregar a esta Fecha</div>
+                    <div className="text-[11px] text-gray-600 mt-0.5">Añade solo DNIs nuevos a la fecha {fechaImportacion} sin borrar los ya existentes.</div>
+                  </div>
+                </label>
+
+                <label className={`flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-all ${
+                  modoImportacion === 'reemplazar_todo' ? 'bg-white border-red-500 shadow-sm' : 'bg-transparent border-amber-200 opacity-80'
+                }`}>
+                  <input
+                    type="radio"
+                    name="importMode"
+                    checked={modoImportacion === 'reemplazar_todo'}
+                    onChange={() => setModoImportacion('reemplazar_todo')}
+                    className="mt-0.5 text-red-600 focus:ring-red-600"
+                  />
+                  <div>
+                    <div className="text-xs font-bold text-red-700">⚠️ Reemplazar Todo</div>
+                    <div className="text-[11px] text-gray-600 mt-0.5">Limpia todo el historial de fechas y deja únicamente esta nómina.</div>
                   </div>
                 </label>
               </div>
+            </div>
+
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-3 space-y-2 text-xs text-emerald-900">
+              <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={replicarAlSheet}
+                  onChange={(e) => setReplicarAlSheet(e.target.checked)}
+                  className="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500 cursor-pointer"
+                />
+                <span className="font-bold text-emerald-950 flex items-center gap-1.5">
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                  <span>Replicar automáticamente a la hoja 'Trabajadores' de Google Sheets</span>
+                </span>
+              </label>
+              {replicarAlSheet && (
+                <p className="pl-6 text-[11px] text-emerald-800 leading-normal">
+                  Al confirmar la importación, los datos se enviarán inmediatamente a Google Sheets para que la hoja quede actualizada sin ningún paso adicional.
+                </p>
+              )}
             </div>
 
             <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-4 flex items-center gap-2.5 text-xs text-emerald-900">
@@ -465,11 +584,21 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
                 <span>Cancelar</span>
               </button>
               <button
+                disabled={isReplicating}
                 onClick={handleConfirmImport}
-                className="flex-2 bg-[#2e7d32] hover:bg-[#1b5e20] text-white py-2.5 rounded-xl font-bold text-xs shadow-md flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.99]"
+                className="flex-2 bg-[#2e7d32] hover:bg-[#1b5e20] disabled:bg-emerald-400 text-white py-2.5 rounded-xl font-bold text-xs shadow-md flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.99]"
               >
-                <Check className="w-4 h-4" />
-                <span>✅ Confirmar e Importar Nómina</span>
+                {isReplicating ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Guardando y replicando al Sheet...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>✅ Confirmar e Importar Nómina</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

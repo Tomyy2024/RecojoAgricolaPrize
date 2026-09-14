@@ -645,7 +645,7 @@ async function startServer() {
   // Fast bulk worker sync endpoint - Administrador y Supervisor pueden actualizar nómina
   app.post('/api/trabajadores', (req, res) => {
     try {
-      const { trabajadores, append, userRole } = req.body || {};
+      const { trabajadores, append, modo, fechaTarget, userRole } = req.body || {};
 
       // Restricción estricta: Rol Trabajador no puede modificar la nómina central
       if (userRole === 'Trabajador') {
@@ -656,42 +656,60 @@ async function startServer() {
       }
 
       if (Array.isArray(trabajadores)) {
-        if (append) {
-          const map = new Map<string, any>();
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const targetFechaNorm = normalizeDateServer(fechaTarget) || (trabajadores[0]?.fecha ? normalizeDateServer(trabajadores[0].fecha) : todayIso);
+        const effectiveModo = modo || (append ? 'append' : (fechaTarget ? 'reemplazar_fecha' : 'reemplazar_todo'));
+
+        const seen = new Set<string>();
+        const incomingClean: any[] = [];
+        trabajadores.forEach((t: any, i: number) => {
+          const dni = String(t.dni || '').replace(/\s+/g, '').trim();
+          const rawDni = String(t.dni || '').trim();
+          const effectiveDni = dni || rawDni;
+          const tFecha = t.fecha ? normalizeDateServer(t.fecha) : targetFechaNorm;
+          const key = effectiveDni ? `${effectiveDni}__${tFecha || 's_f'}` : (t.id ? `${t.id}__${tFecha}` : `idx_${i}__${tFecha}__${t.nombres}`);
+          if (!seen.has(key)) {
+            seen.add(key);
+            incomingClean.push({
+              ...t,
+              id: t.id || `w_${effectiveDni || i}_${tFecha || 'sf'}`,
+              dni: effectiveDni,
+              nombres: t.nombres ? String(t.nombres).trim() : '',
+              supervisor: t.supervisor ? String(t.supervisor).trim() : '',
+              fundo: t.fundo ? String(t.fundo).trim() : '',
+              modulo: t.modulo ? String(t.modulo).trim() : '',
+              grupo: t.grupo ? String(t.grupo).trim() : '',
+              lider: t.lider ? String(t.lider).trim() : '',
+              fecha: tFecha
+            });
+          }
+        });
+
+        if (effectiveModo === 'reemplazar_fecha' && targetFechaNorm) {
+          // Mantener trabajadores de otras fechas intactos
+          const otrasFechas = (db.trabajadores || []).filter((w: any) => {
+            const wf = normalizeDateServer(w.fecha);
+            return wf && wf !== targetFechaNorm;
+          });
+          db.trabajadores = [...otrasFechas, ...incomingClean];
+        } else if (effectiveModo === 'append' || effectiveModo === 'append_date') {
+          const existingMap = new Map<string, any>();
           (db.trabajadores || []).forEach((t: any, i: number) => {
             const dni = String(t.dni || '').replace(/\s+/g, '').trim();
-            const key = t.id || (dni ? `${dni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
-            map.set(key, { ...t, dni: dni || String(t.dni || '').trim() });
+            const tFecha = t.fecha ? normalizeDateServer(t.fecha) : '';
+            const key = dni ? `${dni}__${tFecha || 's_f'}` : (t.id ? `${t.id}__${tFecha}` : `idx_${i}__${tFecha}__${t.nombres}`);
+            existingMap.set(key, t);
           });
-          trabajadores.forEach((t: any, i: number) => {
+          incomingClean.forEach((t: any) => {
             const dni = String(t.dni || '').replace(/\s+/g, '').trim();
-            const key = t.id || (dni ? `${dni}__${t.nombres}` : `new_idx_${i}__${t.nombres}`);
-            map.set(key, { ...t, dni: dni || String(t.dni || '').trim() });
+            const tFecha = t.fecha ? normalizeDateServer(t.fecha) : '';
+            const key = dni ? `${dni}__${tFecha || 's_f'}` : `${t.id}__${tFecha}`;
+            existingMap.set(key, t);
           });
-          db.trabajadores = Array.from(map.values());
+          db.trabajadores = Array.from(existingMap.values());
         } else {
-          const seen = new Set<string>();
-          const unique: any[] = [];
-          trabajadores.forEach((t: any, i: number) => {
-            const dni = String(t.dni || '').replace(/\s+/g, '').trim();
-            const rawDni = String(t.dni || '').trim();
-            const key = t.id || (dni ? `${dni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
-            if (!seen.has(key)) {
-              seen.add(key);
-              unique.push({
-                ...t,
-                dni: dni || rawDni || String(t.dni || '').trim(),
-                nombres: t.nombres ? String(t.nombres).trim() : '',
-                supervisor: t.supervisor ? String(t.supervisor).trim() : '',
-                fundo: t.fundo ? String(t.fundo).trim() : '',
-                modulo: t.modulo ? String(t.modulo).trim() : '',
-                grupo: t.grupo ? String(t.grupo).trim() : '',
-                lider: t.lider ? String(t.lider).trim() : '',
-                fecha: t.fecha || ''
-              });
-            }
-          });
-          db.trabajadores = unique;
+          // 'reemplazar_todo'
+          db.trabajadores = incomingClean;
         }
 
         db.version = (db.version || 1) + 1;
@@ -760,16 +778,154 @@ async function startServer() {
     }
   });
 
+  // Endpoint para pegar/cargar trabajadores en el aplicativo y replicarlos automáticamente a Google Sheets
+  app.post('/api/replicar-trabajadores-sheet', async (req, res) => {
+    try {
+      const { trabajadores, url, modo = 'reemplazar_fecha', fechaTarget, userRole, replicarSheet = true } = req.body || {};
+      if (userRole === 'Trabajador') {
+        return res.status(403).json({
+          status: 'error',
+          message: 'No tienes permisos para modificar la nómina de trabajadores.'
+        });
+      }
+
+      if (!Array.isArray(trabajadores) || trabajadores.length === 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'No se enviaron trabajadores para procesar.'
+        });
+      }
+
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const targetFechaNorm = normalizeDateServer(fechaTarget) || (trabajadores[0]?.fecha ? normalizeDateServer(trabajadores[0].fecha) : todayIso);
+
+      // Normalizar trabajadores entrantes
+      const normalizedTrabajadores = trabajadores.map((t: any, i: number) => {
+        const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
+        const rawDni = String(t.dni || '').trim();
+        const effectiveDni = cleanDni || rawDni;
+        const tFecha = t.fecha ? normalizeDateServer(t.fecha) : targetFechaNorm;
+        return {
+          id: t.id || `w_${effectiveDni || i}_${tFecha}`,
+          dni: effectiveDni,
+          nombres: String(t.nombres || '').trim().toUpperCase(),
+          fundo: String(t.fundo || 'Arena Azul').trim(),
+          modulo: String(t.modulo || 'M01').trim(),
+          grupo: String(t.grupo || '').trim(),
+          supervisor: String(t.supervisor || '').trim(),
+          lider: String(t.lider || '').trim(),
+          tipo: String(t.tipo || 'Cosechador').trim(),
+          jabas: Number(t.jabas) || 0,
+          fecha: tFecha
+        };
+      });
+
+      // 1. Integrar en la base de datos central de la app
+      if (modo === 'reemplazar_fecha' && targetFechaNorm) {
+        const otrasFechas = (db.trabajadores || []).filter((w: any) => {
+          const wf = normalizeDateServer(w.fecha);
+          return wf && wf !== targetFechaNorm;
+        });
+        db.trabajadores = [...otrasFechas, ...normalizedTrabajadores];
+      } else if (modo === 'append') {
+        const existingMap = new Map<string, any>();
+        (db.trabajadores || []).forEach((t: any) => {
+          const key = `${String(t.dni).trim()}__${normalizeDateServer(t.fecha)}`;
+          existingMap.set(key, t);
+        });
+        normalizedTrabajadores.forEach((t: any) => {
+          const key = `${String(t.dni).trim()}__${normalizeDateServer(t.fecha)}`;
+          existingMap.set(key, t);
+        });
+        db.trabajadores = Array.from(existingMap.values());
+      } else {
+        // reemplazar_todo
+        db.trabajadores = normalizedTrabajadores;
+      }
+
+      db.version = (db.version || 1) + 1;
+      db.lastUpdated = new Date().toISOString();
+      saveDatabase(db);
+      syncToCloudFirestore({ trabajadores: db.trabajadores });
+      notifyClients({ type: 'sync', version: db.version, data: db });
+
+      // 2. Replicar hacia la hoja 'Trabajadores' de Google Sheets
+      const targetUrl = url || 'https://script.google.com/macros/s/AKfycbwUwC4PwsVrEGdGItPkAwu8-k8lJePnEIwitNhakUGqHEKWLZLr_i49FMMDh-fog0y2/exec';
+      let sheetReplicated = false;
+      let sheetError = '';
+
+      if (replicarSheet && targetUrl) {
+        try {
+          const sheetPayload = {
+            accion: 'sync',
+            data: {
+              trabajadores: db.trabajadores.map((t: any) => ({
+                dni: t.dni || '',
+                nombres: t.nombres || '',
+                fundo: t.fundo || '',
+                modulo: t.modulo || '',
+                grupo: t.grupo || '',
+                supervisor: t.supervisor || '',
+                lider: t.lider || '',
+                tipo: t.tipo || 'Cosechador'
+              }))
+            }
+          };
+
+          const sheetResponse = await fetch(targetUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(sheetPayload)
+          });
+
+          const resText = await sheetResponse.text().catch(() => '');
+          let resJson: any = null;
+          try {
+            resJson = JSON.parse(resText);
+          } catch {}
+
+          if (sheetResponse.ok || (resJson && resJson.status === 'ok')) {
+            sheetReplicated = true;
+          } else {
+            sheetError = resJson?.message || resText.slice(0, 120) || `HTTP ${sheetResponse.status}`;
+          }
+        } catch (sErr: any) {
+          console.warn('Advertencia al replicar a Google Sheets en background:', sErr);
+          sheetError = sErr?.message || 'Error de conexión con Google Sheets';
+        }
+      }
+
+      return res.json({
+        status: 'ok',
+        message: sheetReplicated
+          ? `Se cargaron ${normalizedTrabajadores.length} trabajadores en el aplicativo y se replicaron a la hoja 'Trabajadores' de Google Sheets con éxito.`
+          : `Se cargaron ${normalizedTrabajadores.length} trabajadores en el aplicativo.${sheetError ? ` Aviso Google Sheet: ${sheetError}` : ''}`,
+        count: normalizedTrabajadores.length,
+        totalEnSistema: db.trabajadores.length,
+        fechaTarget: targetFechaNorm,
+        sheetReplicated,
+        sheetError: sheetError || undefined,
+        trabajadores: db.trabajadores
+      });
+    } catch (err: any) {
+      console.error('Error en /api/replicar-trabajadores-sheet:', err);
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
   // Endpoint para cargar directamente la nómina de trabajadores desde la hoja 'Trabajadores' de Google Sheets
   app.post('/api/cargar-nomina-sheet', async (req, res) => {
     try {
-      const { url, userRole } = req.body || {};
+      const { url, userRole, fechaTarget, fecha, modo = 'reemplazar_fecha' } = req.body || {};
       if (userRole === 'Trabajador') {
         return res.status(403).json({
           status: 'error',
           message: 'No tienes permisos para cargar la nómina de personal.'
         });
       }
+
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const targetFechaNorm = normalizeDateServer(fechaTarget || fecha) || todayIso;
 
       const targetUrl = url || 'https://script.google.com/macros/s/AKfycbwUwC4PwsVrEGdGItPkAwu8-k8lJePnEIwitNhakUGqHEKWLZLr_i49FMMDh-fog0y2/exec';
       const fetchUrl = targetUrl.includes('?') ? `${targetUrl}&accion=export` : `${targetUrl}?accion=export`;
@@ -799,20 +955,29 @@ async function startServer() {
       }
 
       if (incomingTrabajadores.length === 0) {
-        db.trabajadores = [];
+        if (modo === 'reemplazar_todo') {
+          db.trabajadores = [];
+        } else if (modo === 'reemplazar_fecha') {
+          // Limpiar solo los de la fecha seleccionada
+          db.trabajadores = (db.trabajadores || []).filter((w: any) => {
+            const wf = normalizeDateServer(w.fecha);
+            return wf && wf !== targetFechaNorm;
+          });
+        }
         db.version = (db.version || 1) + 1;
         db.lastUpdated = new Date().toISOString();
         saveDatabase(db);
-        syncToCloudFirestore({ trabajadores: [] });
+        syncToCloudFirestore({ trabajadores: db.trabajadores });
         notifyClients({ type: 'sync', version: db.version, data: db });
 
         return res.json({
           status: 'ok',
-          message: 'Hoja "Trabajadores" sincronizada: 0 trabajadores registrados (tabla vacía)',
+          message: `Hoja "Trabajadores" sincronizada: 0 trabajadores registrados para la fecha ${targetFechaNorm}`,
           count: 0,
           pendientes: 0,
           asignados: 0,
-          trabajadores: []
+          fechaTarget: targetFechaNorm,
+          trabajadores: db.trabajadores
         });
       }
 
@@ -826,7 +991,8 @@ async function startServer() {
         const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
         const rawDni = String(t.dni || '').trim();
         const dni = cleanDni || rawDni;
-        const key = dni ? dni : `idx_${i}_${t.nombres}`;
+        const workerFecha = t.fecha ? (normalizeDateServer(t.fecha) || targetFechaNorm) : targetFechaNorm;
+        const key = dni ? `${dni}__${workerFecha}` : `idx_${i}_${t.nombres}_${workerFecha}`;
 
         if (!seen.has(key)) {
           seen.add(key);
@@ -843,7 +1009,7 @@ async function startServer() {
           }
 
           normalizedWorkers.push({
-            id: t.id || `w_${dni || i}`,
+            id: t.id || `w_${dni || i}_${workerFecha}`,
             dni: dni,
             nombres: String(t.nombres || '').trim(),
             fundo: String(t.fundo || 'Arena Azul').trim(),
@@ -853,12 +1019,31 @@ async function startServer() {
             lider: lider,
             tipo: String(t.tipo || 'Cosechador').trim(),
             jabas: 0,
-            fecha: t.fecha || ''
+            fecha: workerFecha
           });
         }
       });
 
-      db.trabajadores = normalizedWorkers;
+      if (modo === 'reemplazar_fecha') {
+        // Preservar los trabajadores de las demás fechas intactos
+        const otrasFechas = (db.trabajadores || []).filter((w: any) => {
+          const wf = normalizeDateServer(w.fecha);
+          return wf && wf !== targetFechaNorm;
+        });
+        db.trabajadores = [...otrasFechas, ...normalizedWorkers];
+      } else if (modo === 'append') {
+        const existingForDate = new Set(
+          (db.trabajadores || [])
+            .filter((w: any) => normalizeDateServer(w.fecha) === targetFechaNorm)
+            .map((w: any) => String(w.dni || '').trim())
+        );
+        const toAdd = normalizedWorkers.filter((w) => !existingForDate.has(String(w.dni).trim()));
+        db.trabajadores = [...(db.trabajadores || []), ...toAdd];
+      } else {
+        // 'reemplazar_todo'
+        db.trabajadores = normalizedWorkers;
+      }
+
       db.version = (db.version || 1) + 1;
       db.lastUpdated = new Date().toISOString();
       saveDatabase(db);
@@ -867,11 +1052,13 @@ async function startServer() {
 
       res.json({
         status: 'ok',
-        message: `Nómina cargada exitosamente desde hoja 'Trabajadores': ${normalizedWorkers.length} trabajadores`,
+        message: `Nómina cargada exitosamente para la fecha ${targetFechaNorm}: ${normalizedWorkers.length} trabajadores (Total acumulado: ${db.trabajadores.length})`,
         count: normalizedWorkers.length,
+        totalEnSistema: db.trabajadores.length,
+        fechaTarget: targetFechaNorm,
         pendientes: countPendientes,
         asignados: countAsignados,
-        trabajadores: normalizedWorkers
+        trabajadores: db.trabajadores
       });
     } catch (err: any) {
       console.error('Error en cargar-nomina-sheet:', err);

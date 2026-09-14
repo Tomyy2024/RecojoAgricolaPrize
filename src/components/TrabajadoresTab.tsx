@@ -1,8 +1,21 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Trabajador, Lider, UserSession, DetalleJaba, Usuario, ReservaCuadrilla } from '../types';
 import { ScannerModal } from './ScannerModal';
-import { RegistroAvanceModal } from './RegistroAvanceModal';
-import { getLocalToday, getLocalISO, getReservas, saveReservas, mergeReservasArrays, normalizeDateString, getGsheetUrl, saveGsheetUrl } from '../utils/storage';
+import { 
+  getLocalToday, 
+  getLocalISO, 
+  getReservas, 
+  saveReservas, 
+  mergeReservasArrays, 
+  normalizeDateString, 
+  getGsheetUrl, 
+  saveGsheetUrl, 
+  getFechasDisponiblesTrabajadores, 
+  getTrabajadoresPorFecha,
+  parsePastedWorkers,
+  ParsedWorkerResult,
+  replicarTrabajadoresAlSheet
+} from '../utils/storage';
 import { 
   Users, 
   Crown, 
@@ -50,7 +63,11 @@ import {
   UploadCloud,
   Download,
   RefreshCw,
-  FileText
+  FileText,
+  ClipboardPaste,
+  ClipboardCopy,
+  ExternalLink,
+  Send
 } from 'lucide-react';
 
 interface TrabajadoresTabProps {
@@ -65,6 +82,17 @@ interface TrabajadoresTabProps {
   onDeleteReserva?: (reservaId: string) => void;
   onSaveModulo?: (fundo: string, modulo: string) => void;
   onUpdateTrabajadores?: (updated: Trabajador[]) => void;
+  onImportTrabajadores?: (
+    nuevos: Trabajador[],
+    modo?: 'reemplazar_fecha' | 'append' | 'reemplazar_todo' | boolean,
+    targetDate?: string
+  ) => void;
+  onReplicarTrabajadoresSheet?: (
+    nuevos: Trabajador[],
+    modo?: 'reemplazar_fecha' | 'append' | 'reemplazar_todo',
+    targetDate?: string,
+    customUrl?: string
+  ) => Promise<{ success: boolean; message: string; sheetOk: boolean; count: number; totalEnSistema?: number; error?: string }>;
   onSaveTrabajador?: (worker: Trabajador) => void;
   onSaveLider: (lider: Lider) => void;
   onDeleteLider?: (liderNameOrDni: string) => void;
@@ -79,7 +107,11 @@ interface TrabajadoresTabProps {
   onRestoreOfflineCache?: () => void;
   isOnline?: boolean;
   onDepurarTrabajadoresAyer?: () => void;
-  onCargarNominaDesdeSheet?: (customUrl?: string) => Promise<{ success: boolean; count?: number; pendientes?: number; asignados?: number; error?: string }>;
+  onCargarNominaDesdeSheet?: (
+    customUrl?: string,
+    targetDate?: string,
+    modo?: 'reemplazar_fecha' | 'append' | 'reemplazar_todo'
+  ) => Promise<{ success: boolean; count?: number; pendientes?: number; asignados?: number; error?: string }>;
   onCargarAvanceDesdeSheet?: (customUrl?: string, avanceRows?: any[]) => Promise<{ success: boolean; totalRegistros?: number; personasConJabasEnFecha?: number; jabasEnFecha?: number; fechaConsultada?: string; error?: string }>;
   onUpdateDetalleJabas?: (updated: DetalleJaba[]) => void;
 }
@@ -96,6 +128,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   onDeleteReserva,
   onSaveModulo,
   onUpdateTrabajadores,
+  onImportTrabajadores,
+  onReplicarTrabajadoresSheet,
   onSaveTrabajador,
   onSaveLider,
   onDeleteLider,
@@ -132,7 +166,6 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const [reservaModalDateFilter, setReservaModalDateFilter] = useState<'hoy' | 'todas'>('hoy');
   const [reservaModalSearch, setReservaModalSearch] = useState<string>('');
   const [vistaAsignacion, setVistaAsignacion] = useState<'pendientes' | 'asignados' | 'con_jabas' | 'todos' | 'sin_jabas'>('pendientes');
-  const [showRegistroAvanceModal, setShowRegistroAvanceModal] = useState(false);
 
   // Role and supervisor checking
   const isAdmin = session?.rol === 'Administrador';
@@ -214,6 +247,29 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     personasConJabas: number;
     jabasEnFecha: number;
     fechaConsultada: string;
+  } | null>(null);
+
+  // Filtro por fecha de trabajadores y configuración de importación por fecha
+  const [filtrarTrabajadoresPorFecha, setFiltrarTrabajadoresPorFecha] = useState<boolean>(true);
+  const [fechaCargaNomina, setFechaCargaNomina] = useState<string>(() => getLocalToday());
+  const [modoIntegracionNomina, setModoIntegracionNomina] = useState<'reemplazar_fecha' | 'append' | 'reemplazar_todo'>('reemplazar_fecha');
+
+  // Modal Pegar Trabajadores y Replicar al Google Sheet
+  const [showModalPegarTrabajadores, setShowModalPegarTrabajadores] = useState(false);
+  const [pegarTextoInput, setPegarTextoInput] = useState('');
+  const [pegarParseResult, setPegarParseResult] = useState<ParsedWorkerResult | null>(null);
+  const [pegarFechaTarget, setPegarFechaTarget] = useState<string>(() => getLocalToday());
+  const [pegarModo, setPegarModo] = useState<'reemplazar_fecha' | 'append' | 'reemplazar_todo'>('reemplazar_fecha');
+  const [pegarReplicarSheet, setPegarReplicarSheet] = useState<boolean>(true);
+  const [pegarSheetUrl, setPegarSheetUrl] = useState<string>(() => getGsheetUrl());
+  const [pegarLoading, setPegarLoading] = useState<boolean>(false);
+  const [pegarResultado, setPegarResultado] = useState<{
+    status: 'ok' | 'error';
+    message: string;
+    count?: number;
+    totalEnSistema?: number;
+    sheetReplicated?: boolean;
+    sheetError?: string;
   } | null>(null);
 
   // Derive unique lists for dropdowns
@@ -477,6 +533,20 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return Array.isArray(trabajadores) ? trabajadores : [];
   }, [trabajadores]);
 
+  // Lista de fechas registradas en la nómina de trabajadores con sus totales
+  const fechasDisponiblesTrabajadores = useMemo(() => {
+    return getFechasDisponiblesTrabajadores(fullTrabajadores);
+  }, [fullTrabajadores]);
+
+  // Total de trabajadores en la fecha activa seleccionada (fechaPersonal)
+  const countEnFechaActiva = useMemo(() => {
+    const target = normalizeDateString(fechaPersonal) || hoyStr;
+    return fullTrabajadores.filter((t) => {
+      const fn = t.fecha ? normalizeDateString(t.fecha) : '';
+      return fn === target || (!fn && target === hoyStr);
+    }).length;
+  }, [fullTrabajadores, fechaPersonal, hoyStr]);
+
   // Pre-indexed workers for sub-millisecond search and strict binding
   const indexedTrabajadores = useMemo(() => {
     const seenKey = new Set<string>();
@@ -488,20 +558,34 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       _normModulo: string;
     })[] = [];
 
-    // Si el usuario tiene rol 'Trabajador', NUNCA deben aparecerle trabajadores del día anterior
     const isTrabajadorUser = session?.rol === 'Trabajador';
-    const effectiveTrabajadores = isTrabajadorUser
-      ? fullTrabajadores.filter((t) => {
-          if (!t.fecha) return true;
-          const fn = normalizeDateString(t.fecha);
-          return !fn || fn >= hoyStr;
-        })
-      : fullTrabajadores;
+    const targetFechaNorm = normalizeDateString(fechaPersonal) || hoyStr;
+
+    // Filtrar estrictamente por fecha seleccionada si el filtro está activo
+    let effectiveTrabajadores: Trabajador[] = fullTrabajadores;
+    if (filtrarTrabajadoresPorFecha) {
+      effectiveTrabajadores = fullTrabajadores.filter((t) => {
+        const fn = t.fecha ? normalizeDateString(t.fecha) : '';
+        if (!fn) {
+          // Si el registro no tiene fecha explícita, pertenece a la fecha de hoy
+          return targetFechaNorm === hoyStr;
+        }
+        return fn === targetFechaNorm;
+      });
+    } else if (isTrabajadorUser) {
+      effectiveTrabajadores = fullTrabajadores.filter((t) => {
+        if (!t.fecha) return true;
+        const fn = normalizeDateString(t.fecha);
+        return !fn || fn >= hoyStr;
+      });
+    }
 
     for (let i = 0; i < effectiveTrabajadores.length; i++) {
       const t = effectiveTrabajadores[i];
       const cleanDni = normalizeDni(t.dni);
-      const uniqueKey = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+      const tFecha = t.fecha ? normalizeDateString(t.fecha) : '';
+      // Clave única compuesta para evitar colisión de DNIs si se visualizan múltiples fechas
+      const uniqueKey = cleanDni ? `${cleanDni}__${tFecha || 'sf'}` : (t.id || `idx_${i}__${t.nombres}`);
       if (!seenKey.has(uniqueKey)) {
         seenKey.add(uniqueKey);
         list.push({
@@ -516,7 +600,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       }
     }
     return list;
-  }, [fullTrabajadores, normalizeDni, normalizeModulo, normalizeStr, session?.rol, hoyStr]);
+  }, [fullTrabajadores, normalizeDni, normalizeModulo, normalizeStr, session?.rol, hoyStr, fechaPersonal, filtrarTrabajadoresPorFecha]);
 
   // Helper para verificar si un trabajador cuenta con Grupo Y Líder desde la hoja Sheet de trabajadores (o sesión de cuadrilla)
   const isWorkerAsignado = useCallback(
@@ -1460,15 +1544,21 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       if (cleanUrl) {
         saveGsheetUrl(cleanUrl);
       }
+      const targetDate = normalizeDateString(fechaCargaNomina || fechaPersonal || hoyStr);
 
       let res: { success: boolean; count?: number; pendientes?: number; asignados?: number; error?: string } | undefined;
       if (onCargarNominaDesdeSheet) {
-        res = await onCargarNominaDesdeSheet(cleanUrl || undefined);
+        res = await onCargarNominaDesdeSheet(cleanUrl || undefined, targetDate, modoIntegracionNomina);
       } else {
         const resp = await fetch('/api/cargar-nomina-sheet', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: cleanUrl, userRole: session?.rol })
+          body: JSON.stringify({ 
+            url: cleanUrl, 
+            userRole: session?.rol,
+            fechaTarget: targetDate,
+            modo: modoIntegracionNomina
+          })
         });
         const json = await resp.json();
         if (json.status === 'ok' && Array.isArray(json.trabajadores)) {
@@ -1487,7 +1577,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         });
         setWorkerAssignedGrupos({});
         setVistaAsignacion('pendientes');
-        onToast(`✅ Nómina sincronizada: ${res.count} trabajadores cargados desde hoja 'Trabajadores'`, 'success');
+        if (targetDate) {
+          setFechaPersonal(targetDate);
+        }
+        onToast(`✅ Nómina sincronizada (${targetDate}): ${res.count} trabajadores cargados desde hoja 'Trabajadores'`, 'success');
       }
     } catch (err: any) {
       onToast(`❌ Error al cargar nómina: ${err?.message || 'Error de conexión'}`, 'error');
@@ -1512,6 +1605,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     const isHeader = lines[0].toLowerCase().includes('dni') || lines[0].toLowerCase().includes('nombre');
     const dataLines = isHeader ? lines.slice(1) : lines;
 
+    const targetDate = normalizeDateString(fechaCargaNomina || fechaPersonal || hoyStr);
     const parsed: Trabajador[] = [];
     let pCount = 0;
     let aCount = 0;
@@ -1536,8 +1630,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
           else pCount++;
 
           parsed.push({
-            id: `w_${dni || idx}`,
-            fecha: hoyStr,
+            id: `w_${dni || idx}_${targetDate}`,
+            fecha: targetDate,
             dni: dni,
             nombres: nombres || `TRABAJADOR ${dni}`,
             fundo,
@@ -1558,19 +1652,52 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     }
 
     if (onUpdateTrabajadores) {
-      onUpdateTrabajadores(parsed);
+      if (modoIntegracionNomina === 'reemplazar_fecha') {
+        const otros = fullTrabajadores.filter((t) => {
+          const fn = t.fecha ? normalizeDateString(t.fecha) : '';
+          return fn !== targetDate && (fn || targetDate !== hoyStr);
+        });
+        onUpdateTrabajadores([...otros, ...parsed]);
+      } else if (modoIntegracionNomina === 'append') {
+        onUpdateTrabajadores([...fullTrabajadores, ...parsed]);
+      } else {
+        onUpdateTrabajadores(parsed);
+      }
     }
     fetch('/api/trabajadores', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ trabajadores: parsed, append: false, userRole: session?.rol })
+      body: JSON.stringify({ 
+        trabajadores: parsed, 
+        modo: modoIntegracionNomina,
+        fechaTarget: targetDate,
+        userRole: session?.rol 
+      })
     }).catch(() => {});
 
     setCargaSheetResumen({ count: parsed.length, pendientes: pCount, asignados: aCount });
     setPegarNominaTexto('');
     setWorkerAssignedGrupos({});
     setVistaAsignacion('pendientes');
-    onToast(`✅ Se importaron ${parsed.length} trabajadores (${pCount} pendientes, ${aCount} asignados)`, 'success');
+    if (targetDate) {
+      setFechaPersonal(targetDate);
+    }
+    onToast(`✅ Se importaron ${parsed.length} trabajadores para la fecha ${targetDate} (${pCount} pendientes, ${aCount} asignados)`, 'success');
+
+    // Replicar automáticamente a Google Sheets
+    replicarTrabajadoresAlSheet(
+      parsed,
+      sheetUrlInput || getGsheetUrl(),
+      modoIntegracionNomina,
+      targetDate,
+      session?.rol
+    ).then((res) => {
+      if (res.sheetOk) {
+        onToast(`🌐 Nómina pegada replicada exitosamente a Google Sheets (${res.count} registros)`, 'info');
+      } else if (res.error) {
+        onToast(`⚠️ Nómina guardada localmente. Aviso Google Sheet: ${res.error}`, 'warning');
+      }
+    }).catch(() => {});
   };
 
   // Ejecuta la conexión y descarga directa desde la hoja 'Registro_Avance' del Google Sheet
@@ -3285,89 +3412,136 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               </div>
             </div>
 
-            {/* Selector de Fecha de Consulta / Registro de Avance y Métricas Reales */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3 mb-3 bg-[#f8faf8] border border-[#d0ded0] rounded-xl shadow-xs">
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-[#1b5e20]">
-                  <Calendar className="w-4 h-4 text-[#2e7d32]" />
-                  <span>Fecha de Consulta y Registro:</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="date"
-                    value={fechaPersonal}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val) setFechaPersonal(val);
-                    }}
-                    className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-[#a5d6a7] bg-white text-gray-800 shadow-xs focus:outline-none focus:ring-1 focus:ring-[#2e7d32]"
-                  />
-                  {fechaPersonal !== hoyStr ? (
-                    <button
-                      type="button"
-                      onClick={() => setFechaPersonal(hoyStr)}
-                      className="px-2.5 py-1 text-xs font-bold bg-[#2e7d32] text-white hover:bg-[#1b5e20] rounded-lg shadow-xs cursor-pointer transition-all active:scale-95 flex items-center gap-1"
-                      title="Regresar a la fecha de hoy"
-                    >
-                      <span>Ir a Hoy</span>
-                    </button>
-                  ) : (
-                    <span className="text-[11px] bg-[#e8f5e9] text-[#1b5e20] font-bold px-2 py-0.5 rounded-full border border-[#a5d6a7]">
-                      Hoy
-                    </span>
-                  )}
-                </div>
-              </div>
+            {/* Selector de Fecha de Consulta / Registro de Avance, Filtro de Nómina y Métricas Reales */}
+            <div className="flex flex-col gap-2.5 p-3 mb-3 bg-[#f8faf8] border border-[#d0ded0] rounded-xl shadow-xs">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-[#1b5e20]">
+                    <Calendar className="w-4 h-4 text-[#2e7d32]" />
+                    <span>Fecha de Trabajo:</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="date"
+                      value={fechaPersonal}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val) setFechaPersonal(val);
+                      }}
+                      className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-[#a5d6a7] bg-white text-gray-800 shadow-xs focus:outline-none focus:ring-1 focus:ring-[#2e7d32]"
+                    />
+                    {fechaPersonal !== hoyStr ? (
+                      <button
+                        type="button"
+                        onClick={() => setFechaPersonal(hoyStr)}
+                        className="px-2.5 py-1 text-xs font-bold bg-[#2e7d32] text-white hover:bg-[#1b5e20] rounded-lg shadow-xs cursor-pointer transition-all active:scale-95 flex items-center gap-1"
+                        title="Regresar a la fecha de hoy"
+                      >
+                        <span>Ir a Hoy</span>
+                      </button>
+                    ) : (
+                      <span className="text-[11px] bg-[#e8f5e9] text-[#1b5e20] font-bold px-2 py-0.5 rounded-full border border-[#a5d6a7]">
+                        Hoy
+                      </span>
+                    )}
+                  </div>
 
-              {/* Métricas Reales consultadas directamente de Registro de Avance */}
-              <div className="flex items-center gap-2 flex-wrap text-xs">
-                <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-[#ffe082] shadow-xs">
-                  <Package className="w-4 h-4 text-[#ff8f00]" />
-                  <span className="text-gray-600 font-medium">Jabas Reales del Día:</span>
-                  <span className="font-extrabold text-[#e65100] text-sm font-mono">{avanceDiaStats.totalJabasDia}</span>
-                </div>
-                <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-[#c8e6c9] shadow-xs">
-                  <Users className="w-4 h-4 text-[#2e7d32]" />
-                  <span className="text-gray-600 font-medium">Con Avance Registrado:</span>
-                  <span className="font-extrabold text-[#1b5e20] text-sm font-mono">
-                    {avanceDiaStats.totalPersonasConJabas} pers.
-                    {hasCuadrillaFilter && countConJabas !== avanceDiaStats.totalPersonasConJabas ? (
-                      <span className="text-[11px] font-normal text-gray-500 ml-1">({countConJabas} en filtro)</span>
-                    ) : null}
-                  </span>
-                </div>
-                {isAdmin && (
+                  {/* Toggle para filtrar nómina de trabajadores por fecha */}
                   <button
                     type="button"
-                    onClick={() => {
-                      setTipoHojaCarga('registro_avance');
-                      setShowModalCargarNomina(true);
-                      setCargaAvanceResumen(null);
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2e7d32] hover:bg-[#1b5e20] text-white font-bold text-xs shadow-xs cursor-pointer transition-all active:scale-95"
-                    title="Cargar / Sincronizar Registro de Avance (Jabas) desde Google Sheets"
+                    onClick={() => setFiltrarTrabajadoresPorFecha((prev) => !prev)}
+                    className={`px-2.5 py-1 text-xs font-bold rounded-lg border flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-2xs ${
+                      filtrarTrabajadoresPorFecha
+                        ? 'bg-emerald-700 text-white border-emerald-800'
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                    }`}
+                    title={filtrarTrabajadoresPorFecha ? 'Click para mostrar trabajadores de todas las fechas' : 'Click para mostrar solo trabajadores de la fecha seleccionada'}
                   >
-                    <UploadCloud className="w-3.5 h-3.5" />
-                    <span>Cargar Registro de Avance</span>
+                    {filtrarTrabajadoresPorFecha ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-200" />
+                        <span>Filtrar por fecha ({countEnFechaActiva} pers.)</span>
+                      </>
+                    ) : (
+                      <>
+                        <Layers className="w-3.5 h-3.5 text-gray-500" />
+                        <span>Ver todas las fechas ({fullTrabajadores.length} pers.)</span>
+                      </>
+                    )}
                   </button>
-                )}
+                </div>
 
-                {/* Botón Ver y Gestionar Registro de Avance */}
-                <button
-                  type="button"
-                  onClick={() => setShowRegistroAvanceModal(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs shadow-xs cursor-pointer transition-all active:scale-95"
-                  title="Ver, depurar y eliminar registros de la hoja Registro_Avance"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-                  <span>Ver Registro de Avance</span>
-                  {detalleJabas && detalleJabas.length > 0 && (
-                    <span className="ml-0.5 bg-emerald-700 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
-                      {detalleJabas.length}
+                {/* Métricas Reales consultadas directamente de Registro de Avance */}
+                <div className="flex items-center gap-2 flex-wrap text-xs">
+                  <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-[#ffe082] shadow-xs">
+                    <Package className="w-4 h-4 text-[#ff8f00]" />
+                    <span className="text-gray-600 font-medium">Jabas del Día:</span>
+                    <span className="font-extrabold text-[#e65100] text-sm font-mono">{avanceDiaStats.totalJabasDia}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-[#c8e6c9] shadow-xs">
+                    <Users className="w-4 h-4 text-[#2e7d32]" />
+                    <span className="text-gray-600 font-medium">Con Jabas:</span>
+                    <span className="font-extrabold text-[#1b5e20] text-sm font-mono">
+                      {avanceDiaStats.totalPersonasConJabas} pers.
+                      {hasCuadrillaFilter && countConJabas !== avanceDiaStats.totalPersonasConJabas ? (
+                        <span className="text-[11px] font-normal text-gray-500 ml-1">({countConJabas} en filtro)</span>
+                      ) : null}
+                    </span>
+                  </div>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTipoHojaCarga('registro_avance');
+                        setShowModalCargarNomina(true);
+                        setCargaAvanceResumen(null);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2e7d32] hover:bg-[#1b5e20] text-white font-bold text-xs shadow-xs cursor-pointer transition-all active:scale-95"
+                      title="Cargar / Sincronizar Registro de Avance (Jabas) desde Google Sheets"
+                    >
+                      <UploadCloud className="w-3.5 h-3.5" />
+                      <span>Cargar Avance</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Chips de fechas disponibles en la nómina para selección rápida */}
+              {fechasDisponiblesTrabajadores.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-[#e0ebd0] text-xs">
+                  <span className="text-[11px] font-bold text-gray-500">Fechas con personal cargado:</span>
+                  {fechasDisponiblesTrabajadores.map((item) => {
+                    const isSelected = (normalizeDateString(fechaPersonal) || hoyStr) === item.fecha;
+                    return (
+                      <button
+                        key={item.fecha}
+                        type="button"
+                        onClick={() => {
+                          setFechaPersonal(item.fecha);
+                          setFiltrarTrabajadoresPorFecha(true);
+                        }}
+                        className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                          isSelected
+                            ? 'bg-emerald-700 text-white font-bold shadow-xs'
+                            : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-100'
+                        }`}
+                      >
+                        <span>{item.fecha}</span>
+                        <span className={`px-1 py-0.2 rounded-full text-[10px] font-mono ${
+                          isSelected ? 'bg-emerald-900 text-emerald-100' : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {item.count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {!filtrarTrabajadoresPorFecha && (
+                    <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                      Mostrando todo el historial combinado ({fullTrabajadores.length})
                     </span>
                   )}
-                </button>
-              </div>
+                </div>
+              )}
             </div>
 
             {/* Barra de Búsqueda y Botones de Acción Rápida */}
@@ -3383,6 +3557,25 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 />
               </div>
               <div className="flex items-center gap-2 flex-wrap">
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowModalPegarTrabajadores(true);
+                      setPegarResultado(null);
+                      const targetF = normalizeDateString(fechaPersonal) || hoyStr;
+                      setPegarFechaTarget(targetF);
+                      if (pegarTextoInput) {
+                        setPegarParseResult(parsePastedWorkers(pegarTextoInput, targetF));
+                      }
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 px-3 rounded-lg shadow-sm flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap transition-all active:scale-95 ring-1 ring-emerald-400/40"
+                    title="Pegar nómina copiada de Excel o portapapeles y replicar automáticamente a Google Sheets"
+                  >
+                    <ClipboardPaste className="w-3.5 h-3.5 text-emerald-100" />
+                    <span>📋 Pegar y Replicar al Sheet</span>
+                  </button>
+                )}
                 {isAdmin && (
                   <button
                     type="button"
@@ -3627,17 +3820,6 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       <span>Desasignar Todos ({countAsignados})</span>
                     </button>
                   )}
-                  {vistaAsignacion === 'con_jabas' && (
-                    <button
-                      type="button"
-                      onClick={() => setShowRegistroAvanceModal(true)}
-                      className="text-[11px] bg-amber-700 hover:bg-amber-800 text-white font-bold px-2.5 py-1 rounded-md shadow-2xs flex items-center gap-1.5 cursor-pointer shrink-0 transition-all active:scale-95 self-end sm:self-auto"
-                      title="Ver y gestionar registros de avance"
-                    >
-                      <FileSpreadsheet className="w-3.5 h-3.5" />
-                      <span>{isAdmin ? '⚙️ Gestionar y Eliminar Registros' : '🔍 Ver Registros de Avance'}</span>
-                    </button>
-                  )}
                 </div>
               )}
 
@@ -3876,20 +4058,6 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                             >
                               <X className="w-2.5 h-2.5" />
                               <span>Desasignar</span>
-                            </button>
-                          )}
-                          {isAdmin && tieneJabas && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setShowRegistroAvanceModal(true);
-                              }}
-                              className="text-[10px] text-amber-800 hover:text-amber-950 bg-amber-50 hover:bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 cursor-pointer transition-colors"
-                              title={`Ver y gestionar avance de ${t.nombres}`}
-                            >
-                              <FileSpreadsheet className="w-2.5 h-2.5" />
-                              <span>Avance ({jabasCount})</span>
                             </button>
                           )}
                         </div>
@@ -5150,6 +5318,414 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         </div>
       )}
 
+      {/* Modal: Pegar Trabajadores y Replicar a Google Sheets */}
+      {isAdmin && showModalPegarTrabajadores && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-3xl w-full p-4 sm:p-6 shadow-2xl border border-emerald-200 flex flex-col max-h-[92vh] overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 shadow-xs">
+                  <ClipboardPaste className="w-5 h-5 text-emerald-700" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 leading-tight flex items-center gap-2">
+                    <span>Pegar Trabajadores y Replicar al Sheet</span>
+                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                      Auto-Réplica
+                    </span>
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Pega los datos copiados desde Excel o WhatsApp. El aplicativo guardará la nómina y la replicará de inmediato a tu Google Sheet.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowModalPegarTrabajadores(false);
+                  setPegarResultado(null);
+                }}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content Scrollable */}
+            <div className="overflow-y-auto py-3 space-y-3 flex-1 text-xs">
+              {/* Opciones de Configuración: Fecha y Modo */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-emerald-50/50 p-3 rounded-xl border border-emerald-100">
+                <div>
+                  <label className="block text-[11px] font-bold text-emerald-950 mb-1 flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Fecha a la que pertenecerá la nómina:</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={pegarFechaTarget}
+                    onChange={(e) => {
+                      const nf = e.target.value;
+                      setPegarFechaTarget(nf);
+                      if (pegarTextoInput) {
+                        setPegarParseResult(parsePastedWorkers(pegarTextoInput, nf));
+                      }
+                    }}
+                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-emerald-300 rounded-lg font-bold text-gray-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-emerald-950 mb-1 flex items-center gap-1">
+                    <Layers className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Modo de integración:</span>
+                  </label>
+                  <select
+                    value={pegarModo}
+                    onChange={(e) => setPegarModo(e.target.value as any)}
+                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-emerald-300 rounded-lg font-bold text-gray-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+                  >
+                    <option value="reemplazar_fecha">Reemplazar fecha seleccionada (Recomendado)</option>
+                    <option value="append">Agregar a existentes (Append)</option>
+                    <option value="reemplazar_todo">Sobrescribir todo el historial</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Botones de acción rápida sobre el portapapeles */}
+              <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
+                <span className="font-bold text-gray-700 text-xs">
+                  Pega el texto aquí o haz clic en "Pegar del Portapapeles":
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const clipText = await navigator.clipboard.readText();
+                        if (clipText && clipText.trim()) {
+                          setPegarTextoInput(clipText);
+                          const parsed = parsePastedWorkers(clipText, pegarFechaTarget);
+                          setPegarParseResult(parsed);
+                          setPegarResultado(null);
+                          onToast(`📋 Se pegaron ${parsed.validCount} trabajadores desde el portapapeles`, 'info');
+                        } else {
+                          onToast('⚠️ El portapapeles está vacío o no contiene texto', 'warning');
+                        }
+                      } catch {
+                        onToast('⚠️ Presiona Ctrl+V dentro del recuadro para pegar tus datos', 'info');
+                      }
+                    }}
+                    className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg font-bold text-xs flex items-center gap-1 cursor-pointer transition-all active:scale-95 shadow-xs"
+                  >
+                    <ClipboardPaste className="w-3.5 h-3.5" />
+                    <span>Pegar del Portapapeles</span>
+                  </button>
+                  {pegarTextoInput && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPegarTextoInput('');
+                        setPegarParseResult(null);
+                        setPegarResultado(null);
+                      }}
+                      className="px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Limpiar</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const demo = `DNI\tNOMBRES\tFUNDO\tMODULO\tGRUPO\tSUPERVISOR\tLIDER\tTIPO\n72345671\tLOPEZ CARLOS\tArena Azul\tM01\tGrupo 01\tJUAN SOTO\tPEDRO\tCosechador\n72345672\tPEREZ MARIA\tArena Azul\tM01\tGrupo 01\tJUAN SOTO\tPEDRO\tCosechador\n72345673\tGARCIA LUIS\tArena Azul\tM01\t\tJUAN SOTO\t\tCosechador`;
+                      setPegarTextoInput(demo);
+                      const parsed = parsePastedWorkers(demo, pegarFechaTarget);
+                      setPegarParseResult(parsed);
+                      setPegarResultado(null);
+                    }}
+                    className="px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-bold text-[11px] cursor-pointer"
+                    title="Cargar texto de prueba con 3 trabajadores"
+                  >
+                    Ejemplo
+                  </button>
+                </div>
+              </div>
+
+              {/* Textarea */}
+              <div className="relative">
+                <textarea
+                  rows={6}
+                  value={pegarTextoInput}
+                  onChange={(e) => {
+                    const txt = e.target.value;
+                    setPegarTextoInput(txt);
+                    setPegarResultado(null);
+                    const parsed = parsePastedWorkers(txt, pegarFechaTarget);
+                    setPegarParseResult(parsed);
+                  }}
+                  placeholder={`Pega aquí los datos copiados desde Excel (Ctrl+V)...\nEjemplo:\nDNI\tNombres\tFundo\tModulo\tGrupo\tSupervisor\tLider\tTipo\n45678912\tJUAN PEREZ SOTO\tArena Azul\tM01\tGrupo 01\tCARLOS LOPEZ\tPEDRO\tCosechero\n\nO formato rápido (DNI y Nombres):\n45678912\tJUAN PEREZ SOTO\n45678913\tMARIA GOMEZ`}
+                  className="w-full p-3 border border-gray-300 rounded-xl font-mono text-xs focus:border-emerald-600 focus:ring-1 focus:ring-emerald-500 focus:outline-none bg-gray-50/50 resize-y"
+                />
+              </div>
+
+              {/* Vista Previa en Vivo (Live Preview) */}
+              {pegarParseResult && pegarParseResult.validCount > 0 ? (
+                <div className="bg-white border border-emerald-200 rounded-xl p-3 shadow-xs space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span className="font-bold text-emerald-950 text-xs">
+                        {pegarParseResult.validCount} trabajadores válidos detectados
+                      </span>
+                      {pegarParseResult.hasHeader && (
+                        <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-medium">
+                          Encabezado detectado
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] text-gray-500">
+                      Mostrando primeros 5 de muestra
+                    </span>
+                  </div>
+
+                  {/* Tabla muestra compacta */}
+                  <div className="overflow-x-auto border border-gray-100 rounded-lg">
+                    <table className="w-full text-left text-[11px]">
+                      <thead className="bg-gray-50 text-gray-600 border-b border-gray-100">
+                        <tr>
+                          <th className="p-1.5 font-bold">DNI</th>
+                          <th className="p-1.5 font-bold">Nombres</th>
+                          <th className="p-1.5 font-bold">Fundo</th>
+                          <th className="p-1.5 font-bold">Módulo</th>
+                          <th className="p-1.5 font-bold">Grupo</th>
+                          <th className="p-1.5 font-bold">Supervisor</th>
+                          <th className="p-1.5 font-bold">Líder</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {pegarParseResult.samplePreview.map((w, idx) => (
+                          <tr key={idx} className="hover:bg-emerald-50/30">
+                            <td className="p-1.5 font-mono font-bold text-gray-900">{w.dni}</td>
+                            <td className="p-1.5 font-medium text-gray-800">{w.nombres}</td>
+                            <td className="p-1.5 text-gray-600">{w.fundo}</td>
+                            <td className="p-1.5 text-gray-600 font-mono">{w.modulo}</td>
+                            <td className="p-1.5">
+                              {w.grupo ? (
+                                <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded font-bold text-[10px]">
+                                  {w.grupo}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 text-[10px] italic">Pendiente</span>
+                              )}
+                            </td>
+                            <td className="p-1.5 text-gray-600">{w.supervisor || '-'}</td>
+                            <td className="p-1.5">
+                              {w.lider ? (
+                                <span className="px-1.5 py-0.2 bg-purple-100 text-purple-800 rounded font-bold text-[10px]">
+                                  {w.lider}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 text-[10px] italic">-</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {pegarParseResult.validCount > 5 && (
+                    <p className="text-[11px] text-gray-500 italic text-right">
+                      ... y {pegarParseResult.validCount - 5} trabajadores más en la lista.
+                    </p>
+                  )}
+                </div>
+              ) : pegarTextoInput ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-900 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>No se pudieron identificar trabajadores válidos en el texto pegado. Asegúrate de incluir al menos el DNI y el Nombre.</span>
+                </div>
+              ) : null}
+
+              {/* Checkbox de Réplica automática a Google Sheets */}
+              <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl p-3 space-y-2">
+                <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={pegarReplicarSheet}
+                    onChange={(e) => setPegarReplicarSheet(e.target.checked)}
+                    className="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500 cursor-pointer"
+                  />
+                  <span className="font-bold text-gray-900 text-xs flex items-center gap-1.5">
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                    <span>Replicar automáticamente a la hoja 'Trabajadores' de Google Sheets</span>
+                  </span>
+                </label>
+                {pegarReplicarSheet && (
+                  <div className="pl-6 space-y-1">
+                    <p className="text-[11px] text-emerald-800">
+                      Al confirmar, la aplicación guardará la nómina en el sistema y enviará inmediatamente los datos a tu Google Sheet para mantenerlo 100% sincronizado.
+                    </p>
+                    <div className="flex items-center gap-1 text-[11px] font-mono text-gray-500 truncate">
+                      <span className="text-gray-400 shrink-0">Destino:</span>
+                      <span className="truncate">{pegarSheetUrl || getGsheetUrl()}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Resultado de Ejecución */}
+              {pegarResultado && (
+                <div className={`p-3 rounded-xl border flex items-start gap-2.5 animate-in fade-in ${
+                  pegarResultado.status === 'ok'
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                    : 'bg-red-50 border-red-300 text-red-950'
+                }`}>
+                  {pegarResultado.status === 'ok' ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-5 h-5 text-red-700 shrink-0 mt-0.5" />
+                  )}
+                  <div className="space-y-1">
+                    <div className="font-bold text-xs">
+                      {pegarResultado.status === 'ok' ? '¡Nómina Guardada y Replicada!' : 'Aviso al procesar nómina'}
+                    </div>
+                    <p className="text-[11px] leading-relaxed">{pegarResultado.message}</p>
+                    {pegarResultado.sheetReplicated && (
+                      <div className="inline-flex items-center gap-1 text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                        <Check className="w-3 h-3 text-emerald-700" />
+                        <span>Replicado en Google Sheet (Hoja 'Trabajadores')</span>
+                      </div>
+                    )}
+                    {pegarResultado.sheetError && (
+                      <p className="text-[10px] text-amber-700">
+                        Aviso Google Sheet: {pegarResultado.sheetError}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="pt-3 border-t border-gray-100 flex items-center justify-between gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowModalPegarTrabajadores(false);
+                  setPegarResultado(null);
+                }}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-xs cursor-pointer transition-colors"
+              >
+                {pegarResultado?.status === 'ok' ? 'Cerrar y Ver Nómina' : 'Cancelar'}
+              </button>
+
+              <button
+                type="button"
+                disabled={pegarLoading || !pegarParseResult || pegarParseResult.validCount === 0}
+                onClick={async () => {
+                  if (!pegarParseResult || pegarParseResult.validCount === 0) return;
+                  setPegarLoading(true);
+                  setPegarResultado(null);
+
+                  try {
+                    const effectiveFecha = normalizeDateString(pegarFechaTarget) || hoyStr;
+                    const workersToLoad: Trabajador[] = pegarParseResult.list.map((item, idx) => ({
+                      ...item,
+                      id: `w_${item.dni || idx}_${effectiveFecha}`,
+                      fecha: effectiveFecha
+                    }));
+
+                    // 1. Guardar y replicar
+                    let result: any = null;
+                    if (onReplicarTrabajadoresSheet) {
+                      result = await onReplicarTrabajadoresSheet(
+                        workersToLoad,
+                        pegarModo,
+                        effectiveFecha,
+                        pegarReplicarSheet ? (pegarSheetUrl || getGsheetUrl()) : undefined
+                      );
+                    } else {
+                      // Fallback directo
+                      if (onImportTrabajadores) {
+                        onImportTrabajadores(workersToLoad, pegarModo, effectiveFecha);
+                      } else if (onUpdateTrabajadores) {
+                        if (pegarModo === 'reemplazar_fecha') {
+                          const otros = fullTrabajadores.filter((t) => {
+                            const fn = t.fecha ? normalizeDateString(t.fecha) : '';
+                            return fn !== effectiveFecha;
+                          });
+                          onUpdateTrabajadores([...otros, ...workersToLoad]);
+                        } else if (pegarModo === 'append') {
+                          onUpdateTrabajadores([...fullTrabajadores, ...workersToLoad]);
+                        } else {
+                          onUpdateTrabajadores(workersToLoad);
+                        }
+                      }
+                      if (pegarReplicarSheet) {
+                        result = await replicarTrabajadoresAlSheet(
+                          workersToLoad,
+                          pegarSheetUrl || getGsheetUrl(),
+                          pegarModo,
+                          effectiveFecha,
+                          session?.rol
+                        );
+                      } else {
+                        result = {
+                          success: true,
+                          count: workersToLoad.length,
+                          message: `Se cargaron ${workersToLoad.length} trabajadores en el aplicativo exitosamente.`,
+                          sheetOk: false
+                        };
+                      }
+                    }
+
+                    // Actualizar fecha activa en pantalla para ver los trabajadores cargados de inmediato
+                    setFechaPersonal(effectiveFecha);
+                    setFiltrarTrabajadoresPorFecha(true);
+                    setVistaAsignacion('pendientes');
+
+                    setPegarResultado({
+                      status: 'ok',
+                      message: result?.message || `Se cargaron ${workersToLoad.length} trabajadores en el aplicativo para el ${effectiveFecha} y se replicaron a Google Sheets.`,
+                      count: workersToLoad.length,
+                      totalEnSistema: result?.totalEnSistema,
+                      sheetReplicated: Boolean(result?.sheetOk),
+                      sheetError: result?.error
+                    });
+
+                    onToast(`✅ ${workersToLoad.length} trabajadores cargados y replicados al Sheet`, 'success');
+                  } catch (err: any) {
+                    setPegarResultado({
+                      status: 'error',
+                      message: `Error al procesar la carga: ${err?.message || 'Error desconocido'}`
+                    });
+                    onToast(`❌ Error al cargar trabajadores: ${err?.message}`, 'error');
+                  } finally {
+                    setPegarLoading(false);
+                  }
+                }}
+                className="bg-emerald-700 hover:bg-emerald-800 disabled:bg-emerald-400 text-white font-bold py-2 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+              >
+                {pegarLoading ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Guardando y replicando al Sheet...</span>
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud className="w-4 h-4" />
+                    <span>
+                      🚀 Cargar y Replicar al Sheet ({pegarParseResult?.validCount || 0})
+                    </span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Cargar Nómina desde Sheet */}
       {isAdmin && showModalCargarNomina && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
@@ -5363,24 +5939,6 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                         </>
                       )}
                     </button>
-
-                    {/* Opción para inspeccionar y eliminar registros existentes */}
-                    <div className="pt-2 border-t border-amber-200/80 flex items-center justify-between text-xs">
-                      <span className="text-amber-900 text-[11px] font-medium">
-                        ¿Deseas depurar o eliminar registros existentes?
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowModalCargarNomina(false);
-                          setShowRegistroAvanceModal(true);
-                        }}
-                        className="text-amber-800 hover:text-amber-950 font-bold underline flex items-center gap-1 cursor-pointer text-xs"
-                      >
-                        <FileSpreadsheet className="w-3.5 h-3.5 text-amber-700" />
-                        <span>{isAdmin ? 'Ver y Eliminar Registros' : 'Ver Registros de Avance'}</span>
-                      </button>
-                    </div>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -5443,72 +6001,169 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 )
               ) : (
                 /* Flujo Nómina Trabajadores */
-                modoCargaNomina === 'sheet' ? (
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block font-bold text-gray-700 text-xs mb-1">
-                        URL del Web App de Google Sheets (Apps Script /exec):
+                <div className="space-y-3">
+                  {/* Selector de Fecha de Destino para la Nómina */}
+                  <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 text-xs space-y-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <label className="font-bold text-emerald-950 flex items-center gap-1.5">
+                        <Calendar className="w-4 h-4 text-emerald-700" />
+                        <span>Fecha de destino para esta nómina:</span>
                       </label>
-                      <input
-                        type="text"
-                        value={sheetUrlInput}
-                        onChange={(e) => setSheetUrlInput(e.target.value)}
-                        placeholder="https://script.google.com/macros/s/.../exec"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:border-emerald-600 focus:outline-none bg-white"
-                      />
-                    </div>
-
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-emerald-950 space-y-1.5 leading-relaxed">
-                      <div className="flex items-center gap-1.5 font-bold text-emerald-900">
-                        <Info className="w-4 h-4 text-emerald-700 shrink-0" />
-                        <span>Estructura leída de la pestaña "Trabajadores" del Sheet:</span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="date"
+                          value={fechaCargaNomina}
+                          onChange={(e) => setFechaCargaNomina(e.target.value)}
+                          className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-emerald-300 bg-white text-gray-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setFechaCargaNomina(fechaPersonal || hoyStr)}
+                          className="px-2 py-1 text-[11px] font-bold bg-white text-emerald-800 hover:bg-emerald-100 rounded-lg border border-emerald-300 cursor-pointer"
+                        >
+                          Usar {fechaPersonal || 'Hoy'}
+                        </button>
                       </div>
-                      <ul className="list-disc pl-5 space-y-0.5 text-[11px] text-emerald-900">
-                        <li><b>Columna A:</b> DNI</li>
-                        <li><b>Columna B:</b> Nombres y Apellidos</li>
-                        <li><b>Columna C:</b> Fundo (Ej: Santa Teresa)</li>
-                        <li><b>Columna D:</b> Módulo (Ej: M01)</li>
-                        <li><b>Columna E:</b> Grupo → <span className="underline">Si está vacío o dice "Sin Grupo", queda como <b>Solo Pendiente</b></span>.</li>
-                        <li><b>Columna F:</b> Supervisor</li>
-                        <li><b>Columna G:</b> Líder → <span className="underline">Si está vacío o dice "Sin Líder", queda como <b>Solo Pendiente</b></span>.</li>
-                        <li><b>Columna H:</b> Tipo (Cosechador, Apoyo, etc.)</li>
-                      </ul>
                     </div>
 
-                    {cargaSheetResumen && (
-                      <div className="bg-emerald-100/80 border border-emerald-300 rounded-xl p-3 text-emerald-950 flex items-start gap-2 animate-in fade-in">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="font-bold text-emerald-900">
-                            ¡Nómina cargada exitosamente!
+                    {/* Modo de Carga */}
+                    <div className="pt-1.5 border-t border-emerald-200/80">
+                      <span className="block font-bold text-[11px] text-emerald-900 mb-1">
+                        Modo de importación:
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-[11px]">
+                        <label className={`p-2 rounded-lg border flex items-start gap-1.5 cursor-pointer transition-all ${
+                          modoIntegracionNomina === 'reemplazar_fecha'
+                            ? 'bg-emerald-100 border-emerald-400 font-bold text-emerald-950'
+                            : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                        }`}>
+                          <input
+                            type="radio"
+                            name="modoNominaModal"
+                            value="reemplazar_fecha"
+                            checked={modoIntegracionNomina === 'reemplazar_fecha'}
+                            onChange={() => setModoIntegracionNomina('reemplazar_fecha')}
+                            className="mt-0.5 text-emerald-700"
+                          />
+                          <div>
+                            <span className="block leading-tight">Reemplazar fecha</span>
+                            <span className="text-[10px] text-gray-500 font-normal block leading-tight">
+                              Protege días anteriores
+                            </span>
                           </div>
-                          <div className="text-[11px] text-emerald-800">
-                            Se procesaron <b>{cargaSheetResumen.count}</b> trabajadores: <b>{cargaSheetResumen.pendientes}</b> pendientes (sin grupo ni líder) y <b>{cargaSheetResumen.asignados}</b> asignados.
+                        </label>
+
+                        <label className={`p-2 rounded-lg border flex items-start gap-1.5 cursor-pointer transition-all ${
+                          modoIntegracionNomina === 'append'
+                            ? 'bg-emerald-100 border-emerald-400 font-bold text-emerald-950'
+                            : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                        }`}>
+                          <input
+                            type="radio"
+                            name="modoNominaModal"
+                            value="append"
+                            checked={modoIntegracionNomina === 'append'}
+                            onChange={() => setModoIntegracionNomina('append')}
+                            className="mt-0.5 text-emerald-700"
+                          />
+                          <div>
+                            <span className="block leading-tight">Añadir / Combinar</span>
+                            <span className="text-[10px] text-gray-500 font-normal block leading-tight">
+                              Suma a los existentes
+                            </span>
+                          </div>
+                        </label>
+
+                        <label className={`p-2 rounded-lg border flex items-start gap-1.5 cursor-pointer transition-all ${
+                          modoIntegracionNomina === 'reemplazar_todo'
+                            ? 'bg-red-50 border-red-300 font-bold text-red-950'
+                            : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                        }`}>
+                          <input
+                            type="radio"
+                            name="modoNominaModal"
+                            value="reemplazar_todo"
+                            checked={modoIntegracionNomina === 'reemplazar_todo'}
+                            onChange={() => setModoIntegracionNomina('reemplazar_todo')}
+                            className="mt-0.5 text-red-700"
+                          />
+                          <div>
+                            <span className="block leading-tight">Sobrescribir todo</span>
+                            <span className="text-[10px] text-gray-500 font-normal block leading-tight">
+                              Borra todo el historial
+                            </span>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {modoCargaNomina === 'sheet' ? (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block font-bold text-gray-700 text-xs mb-1">
+                          URL del Web App de Google Sheets (Apps Script /exec):
+                        </label>
+                        <input
+                          type="text"
+                          value={sheetUrlInput}
+                          onChange={(e) => setSheetUrlInput(e.target.value)}
+                          placeholder="https://script.google.com/macros/s/.../exec"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:border-emerald-600 focus:outline-none bg-white"
+                        />
+                      </div>
+
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-emerald-950 space-y-1.5 leading-relaxed">
+                        <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                          <Info className="w-4 h-4 text-emerald-700 shrink-0" />
+                          <span>Estructura leída de la pestaña "Trabajadores" del Sheet:</span>
+                        </div>
+                        <ul className="list-disc pl-5 space-y-0.5 text-[11px] text-emerald-900">
+                          <li><b>Columna A:</b> DNI</li>
+                          <li><b>Columna B:</b> Nombres y Apellidos</li>
+                          <li><b>Columna C:</b> Fundo (Ej: Santa Teresa)</li>
+                          <li><b>Columna D:</b> Módulo (Ej: M01)</li>
+                          <li><b>Columna E:</b> Grupo → <span className="underline">Si está vacío o dice "Sin Grupo", queda como <b>Solo Pendiente</b></span>.</li>
+                          <li><b>Columna F:</b> Supervisor</li>
+                          <li><b>Columna G:</b> Líder → <span className="underline">Si está vacío o dice "Sin Líder", queda como <b>Solo Pendiente</b></span>.</li>
+                          <li><b>Columna H:</b> Tipo (Cosechador, Apoyo, etc.)</li>
+                        </ul>
+                      </div>
+
+                      {cargaSheetResumen && (
+                        <div className="bg-emerald-100/80 border border-emerald-300 rounded-xl p-3 text-emerald-950 flex items-start gap-2 animate-in fade-in">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="font-bold text-emerald-900">
+                              ¡Nómina cargada exitosamente!
+                            </div>
+                            <div className="text-[11px] text-emerald-800">
+                              Se procesaron <b>{cargaSheetResumen.count}</b> trabajadores para la fecha <b>{fechaCargaNomina}</b>: <b>{cargaSheetResumen.pendientes}</b> pendientes y <b>{cargaSheetResumen.asignados}</b> asignados.
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
-
-                    <button
-                      type="button"
-                      disabled={isCargandoSheet}
-                      onClick={handleEjecutarCargaNominaSheet}
-                      className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:bg-emerald-400 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
-                    >
-                      {isCargandoSheet ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                          <span>Conectando con Google Sheets y actualizando nómina...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-4 h-4" />
-                          <span>📥 Conectar y Cargar Nómina desde Sheet</span>
-                        </>
                       )}
-                    </button>
-                  </div>
-                ) : (
+
+                      <button
+                        type="button"
+                        disabled={isCargandoSheet}
+                        onClick={handleEjecutarCargaNominaSheet}
+                        className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:bg-emerald-400 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+                      >
+                        {isCargandoSheet ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>Conectando con Google Sheets y actualizando nómina...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4" />
+                            <span>📥 Conectar y Cargar Nómina para {fechaCargaNomina}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ) : (
                   <div className="space-y-3">
                     <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-blue-950 text-[11px]">
                       <div className="font-bold mb-1 flex items-center gap-1.5 text-blue-900">
@@ -5543,6 +6198,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     </button>
                   </div>
                 )
+                }
+                </div>
               )}
             </div>
 
@@ -5585,20 +6242,6 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         onScanDni={handleScanDniResult}
         trabajadores={trabajadores}
         mode={scannerMode}
-      />
-
-      {/* Modal de Detalle, Inspección y Eliminación de Registros de Avance */}
-      <RegistroAvanceModal
-        isOpen={showRegistroAvanceModal}
-        onClose={() => setShowRegistroAvanceModal(false)}
-        detalleJabas={detalleJabas || []}
-        userRole={session?.rol}
-        onRecordsUpdated={(updatedList) => {
-          if (onUpdateDetalleJabas) {
-            onUpdateDetalleJabas(updatedList);
-          }
-        }}
-        onNotify={(msg, type) => onToast(msg, type || 'info')}
       />
     </div>
   );

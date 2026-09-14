@@ -64,7 +64,8 @@ import {
   setOfflineNominaLocked,
   restoreTrabajadoresFromOfflineCache,
   depurarTrabajadoresDiaAnterior,
-  normalizeDateString
+  normalizeDateString,
+  replicarTrabajadoresAlSheet
 } from './utils/storage';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
@@ -1219,41 +1220,129 @@ export default function App() {
     addToast(`🗑️ Reserva eliminada del sistema`);
   };
 
-  const handleImportTrabajadores = (newWorkers: Trabajador[], replaceExisting: boolean = true) => {
-    const list = replaceExisting ? newWorkers : [...newWorkers, ...trabajadores];
-    const seenDni = new Set<string>();
-    const uniqueWorkers: Trabajador[] = [];
-    list.forEach((t) => {
-      const cleanDni = String(t.dni || '').trim();
-      const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${t.nombres}`);
-      if (!seenDni.has(key)) {
-        seenDni.add(key);
-        uniqueWorkers.push(t);
-      }
+  const handleImportTrabajadores = (
+    newWorkers: Trabajador[],
+    mode: 'reemplazar_fecha' | 'append' | 'reemplazar_todo' | boolean = 'reemplazar_fecha',
+    targetDate?: string
+  ) => {
+    const effectiveModo: 'reemplazar_fecha' | 'append' | 'reemplazar_todo' =
+      typeof mode === 'boolean'
+        ? (mode ? 'reemplazar_fecha' : 'append')
+        : mode;
+
+    const fechaFinal = normalizeDateString(targetDate) || (newWorkers[0]?.fecha ? normalizeDateString(newWorkers[0].fecha) : getLocalToday());
+
+    // Asegurar que los trabajadores tengan su fecha asignada
+    const workersWithFecha = newWorkers.map((w, idx) => {
+      const cleanDni = String(w.dni || '').trim();
+      const wFecha = w.fecha ? (normalizeDateString(w.fecha) || fechaFinal) : fechaFinal;
+      return {
+        ...w,
+        dni: cleanDni,
+        fecha: wFecha,
+        id: w.id || `w_${cleanDni || idx}_${wFecha}`
+      };
     });
-    setTrabajadoresState(uniqueWorkers);
-    saveTrabajadores(uniqueWorkers);
+
+    let mergedList: Trabajador[] = [];
+    if (effectiveModo === 'reemplazar_fecha') {
+      // Conservar trabajadores de otras fechas
+      const otrasFechas = trabajadores.filter((t) => {
+        const tf = normalizeDateString(t.fecha);
+        return tf && tf !== fechaFinal;
+      });
+      // Deduplicar dentro de la fecha seleccionada
+      const seenDni = new Set<string>();
+      const deduplicatedNew: Trabajador[] = [];
+      workersWithFecha.forEach((t) => {
+        const cleanDni = String(t.dni || '').trim();
+        const key = cleanDni || t.id;
+        if (!seenDni.has(key)) {
+          seenDni.add(key);
+          deduplicatedNew.push(t);
+        }
+      });
+      mergedList = [...otrasFechas, ...deduplicatedNew];
+    } else if (effectiveModo === 'append') {
+      const existingMap = new Map<string, Trabajador>();
+      trabajadores.forEach((t) => {
+        const cleanDni = String(t.dni || '').trim();
+        const tf = normalizeDateString(t.fecha) || 'sin_fecha';
+        const key = cleanDni ? `${cleanDni}__${tf}` : (t.id || `idx_${t.nombres}`);
+        existingMap.set(key, t);
+      });
+      workersWithFecha.forEach((t) => {
+        const cleanDni = String(t.dni || '').trim();
+        const tf = normalizeDateString(t.fecha) || 'sin_fecha';
+        const key = cleanDni ? `${cleanDni}__${tf}` : (t.id || `idx_${t.nombres}`);
+        existingMap.set(key, t);
+      });
+      mergedList = Array.from(existingMap.values());
+    } else {
+      // 'reemplazar_todo'
+      mergedList = workersWithFecha;
+    }
+
+    setTrabajadoresState(mergedList);
+    saveTrabajadores(mergedList);
 
     // PASO 2: Activar Modo Offline con los trabajadores cargados para que no se vuelva a sincronizar la nómina
     setOfflineNominaLocked(true);
     setOfflineNomina(true);
 
-    addLog(`📥 ${replaceExisting ? 'Nómina diaria reemplazada' : 'Trabajadores agregados'}: ${newWorkers.length} trabajadores. 🔒 Modo Offline activo: nómina asegurada en el dispositivo.`, 'ok');
-    addToast(`🔒 Nómina cargada (${newWorkers.length} trab.). Modo Offline activo: no se restablecerán por cortes de señal.`, 'success');
+    const descModo =
+      effectiveModo === 'reemplazar_fecha'
+        ? `Nómina de fecha ${fechaFinal} actualizada (${workersWithFecha.length} trabajadores)`
+        : effectiveModo === 'append'
+        ? `Trabajadores añadidos a fecha ${fechaFinal} (${workersWithFecha.length} trabajadores)`
+        : `Nómina global reemplazada (${workersWithFecha.length} trabajadores)`;
+
+    addLog(`📥 ${descModo}. Total histórico en sistema: ${mergedList.length}. 🔒 Modo Offline activo: nómina asegurada en el dispositivo.`, 'ok');
+    addToast(`🔒 ${descModo}. Total en sistema: ${mergedList.length}.`, 'success');
 
     // Fast-path direct push to dedicated trabajadores endpoint
     fetch('/api/trabajadores', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        trabajadores: uniqueWorkers,
-        append: false,
+        trabajadores: mergedList,
+        modo: effectiveModo,
+        fechaTarget: fechaFinal,
         userRole: session?.rol || 'Administrador',
         userName: session?.nombre || 'Administrador'
       })
     }).catch(() => {});
 
-    triggerAutoSync('Importar Trabajadores', { trabajadores: uniqueWorkers });
+    triggerAutoSync('Importar Trabajadores', { trabajadores: mergedList });
+  };
+
+  const handleReplicarTrabajadoresSheet = async (
+    newWorkers: Trabajador[],
+    modo: 'reemplazar_fecha' | 'append' | 'reemplazar_todo' = 'reemplazar_fecha',
+    targetDate?: string,
+    customUrl?: string
+  ) => {
+    const fechaFinal = normalizeDateString(targetDate) || (newWorkers[0]?.fecha ? normalizeDateString(newWorkers[0].fecha) : getLocalToday());
+
+    // 1. Guardar primero en el aplicativo y estado local
+    handleImportTrabajadores(newWorkers, modo, fechaFinal);
+
+    // 2. Replicar al Google Sheet vía backend y fallback
+    const res = await replicarTrabajadoresAlSheet(
+      newWorkers,
+      customUrl || getGsheetUrl(),
+      modo,
+      fechaFinal,
+      session?.rol || 'Administrador'
+    );
+
+    if (res.sheetOk) {
+      addLog(`🌐 Nómina cargada y replicada a Google Sheets (${newWorkers.length} registros para ${fechaFinal}).`, 'ok');
+    } else {
+      addLog(`⚠️ Nómina guardada en el aplicativo. Aviso Google Sheets: ${res.error || 'Verificar conexión'}`, 'warn');
+    }
+
+    return res;
   };
 
   const handleDepurarTrabajadoresAyer = async () => {
@@ -1403,17 +1492,27 @@ export default function App() {
   };
 
   // Función dedicada para conectar directamente con la hoja 'Trabajadores' del Google Sheet
-  const handleCargarNominaDesdeSheet = async (customUrl?: string) => {
+  const handleCargarNominaDesdeSheet = async (
+    customUrl?: string,
+    targetDate?: string,
+    modo: 'reemplazar_fecha' | 'append' | 'reemplazar_todo' = 'reemplazar_fecha'
+  ) => {
     const url = customUrl || getGsheetUrl();
-    addToast('📥 Conectando con Google Sheets para cargar la nómina de trabajadores...');
-    addLog('📥 Cargando nómina desde la hoja "Trabajadores" de Google Sheets...', 'info');
+    const effectiveFecha = normalizeDateString(targetDate) || getLocalToday();
+    addToast(`📥 Conectando con Google Sheets para cargar nómina de fecha ${effectiveFecha}...`);
+    addLog(`📥 Cargando nómina (${modo}) para fecha ${effectiveFecha} desde Google Sheets...`, 'info');
 
     try {
       // 1. Intentar cargar vía endpoint backend central
       const res = await fetch('/api/cargar-nomina-sheet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, userRole: session?.rol })
+        body: JSON.stringify({
+          url,
+          userRole: session?.rol,
+          fechaTarget: effectiveFecha,
+          modo
+        })
       });
 
       if (res.ok) {
@@ -1424,9 +1523,15 @@ export default function App() {
             forceNominaUpdate: true,
             action: 'cargar_nomina'
           }, false);
-          addToast(`✅ Nómina cargada: ${json.count} trabajadores (${json.pendientes} pendientes, ${json.asignados} asignados)`);
-          addLog(`✅ Nómina actualizada desde hoja 'Trabajadores': ${json.count} trabajadores (${json.pendientes} pendientes, ${json.asignados} asignados)`, 'ok');
-          return { success: true, count: json.count, pendientes: json.pendientes, asignados: json.asignados };
+          addToast(`✅ Nómina sincronizada: ${json.count} trabajadores para ${effectiveFecha} (Total en sistema: ${json.totalEnSistema || json.trabajadores.length})`);
+          addLog(`✅ Nómina actualizada desde hoja 'Trabajadores': ${json.count} trabajadores (${json.pendientes} pendientes, ${json.asignados} asignados). Total acumulado: ${json.trabajadores.length}`, 'ok');
+          return {
+            success: true,
+            count: json.count,
+            totalEnSistema: json.totalEnSistema || json.trabajadores.length,
+            pendientes: json.pendientes,
+            asignados: json.asignados
+          };
         }
       }
 
@@ -1435,11 +1540,22 @@ export default function App() {
       if (gRes.ok) {
         const gJson = await gRes.json();
         if (gJson && gJson.status === 'ok' && gJson.data && Array.isArray(gJson.data.trabajadores)) {
-          const workers = gJson.data.trabajadores.map((t: any) => ({
-            ...t,
-            grupo: t.grupo && String(t.grupo).trim().toLowerCase() !== 'sin grupo' ? String(t.grupo).trim() : '',
-            lider: t.lider && !String(t.lider).trim().toLowerCase().includes('sin') ? String(t.lider).trim() : '',
-          }));
+          const incoming = gJson.data.trabajadores.map((t: any, idx: number) => {
+            const cleanDni = String(t.dni || '').trim();
+            const wFecha = t.fecha ? (normalizeDateString(t.fecha) || effectiveFecha) : effectiveFecha;
+            return {
+              ...t,
+              id: t.id || `w_${cleanDni || idx}_${wFecha}`,
+              dni: cleanDni,
+              fecha: wFecha,
+              grupo: t.grupo && String(t.grupo).trim().toLowerCase() !== 'sin grupo' ? String(t.grupo).trim() : '',
+              lider: t.lider && !String(t.lider).trim().toLowerCase().includes('sin') ? String(t.lider).trim() : '',
+            };
+          });
+
+          // Integrar respetando el modo
+          handleImportTrabajadores(incoming, modo, effectiveFecha);
+
           const isAssigned = (w: any) => {
             const g = String(w.grupo || '').trim().toLowerCase();
             const l = String(w.lider || '').trim().toLowerCase();
@@ -1447,16 +1563,10 @@ export default function App() {
             const hasL = l && !l.includes('sin') && l !== 'ninguno' && l !== 'sin asignar';
             return Boolean(hasG && hasL);
           };
-          const countAsig = workers.filter(isAssigned).length;
-          const countPend = workers.length - countAsig;
-          applyServerData({
-            trabajadores: workers,
-            forceNominaUpdate: true,
-            action: 'cargar_nomina'
-          }, false);
-          syncToServer({ trabajadores: workers });
-          addToast(`✅ Nómina cargada desde Google Sheets: ${workers.length} trabajadores (${countPend} pendientes)`);
-          return { success: true, count: workers.length, pendientes: countPend, asignados: countAsig };
+          const countAsig = incoming.filter(isAssigned).length;
+          const countPend = incoming.length - countAsig;
+          addToast(`✅ Nómina cargada directamente: ${incoming.length} trabajadores procesados`);
+          return { success: true, count: incoming.length, pendientes: countPend, asignados: countAsig };
         }
       }
       throw new Error('No se pudo obtener la hoja Trabajadores de Google Sheets. Verifica la URL configurada.');
@@ -1604,6 +1714,8 @@ export default function App() {
             modulosPorFundo={modulosPorFundo}
             onSaveModulo={handleSaveModulo}
             onUpdateTrabajadores={handleUpdateTrabajadores}
+            onImportTrabajadores={handleImportTrabajadores}
+            onReplicarTrabajadoresSheet={handleReplicarTrabajadoresSheet}
             onSaveTrabajador={handleSaveTrabajador}
             onSaveLider={handleSaveLider}
             onDeleteLider={handleDeleteLider}

@@ -506,7 +506,8 @@ export function getTrabajadores(): Trabajador[] {
     const unique: Trabajador[] = [];
     (Array.isArray(list) ? list : []).forEach((t, i) => {
       const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
-      const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+      const tFecha = t.fecha ? normalizeDateString(t.fecha) : '';
+      const key = cleanDni ? `${cleanDni}__${tFecha || 's_f'}` : (t.id ? `${t.id}__${tFecha}` : `idx_${i}__${tFecha}__${t.nombres}`);
       if (!seen.has(key)) {
         seen.add(key);
         unique.push({
@@ -526,7 +527,8 @@ export function saveTrabajadores(trabajadores: Trabajador[]) {
   const unique: Trabajador[] = [];
   (Array.isArray(trabajadores) ? trabajadores : []).forEach((t, i) => {
     const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
-    const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+    const tFecha = t.fecha ? normalizeDateString(t.fecha) : '';
+    const key = cleanDni ? `${cleanDni}__${tFecha || 's_f'}` : (t.id ? `${t.id}__${tFecha}` : `idx_${i}__${tFecha}__${t.nombres}`);
     if (!seen.has(key)) {
       seen.add(key);
       unique.push({
@@ -547,6 +549,61 @@ export function saveTrabajadores(trabajadores: Trabajador[]) {
       localStorage.removeItem(KEYS.TRABAJADORES_OFFLINE_CACHE);
     } catch {}
   }
+}
+
+/**
+ * Agrupa los trabajadores por fecha y devuelve el desglose de conteos.
+ */
+export function getFechasDisponiblesTrabajadores(list?: Trabajador[]): { fecha: string; count: number; display: string }[] {
+  const workers = Array.isArray(list) ? list : getTrabajadores();
+  const mapFechas = new Map<string, number>();
+  workers.forEach((t) => {
+    const fNorm = t.fecha ? normalizeDateString(t.fecha) : '';
+    const key = fNorm || 'sin_fecha';
+    mapFechas.set(key, (mapFechas.get(key) || 0) + 1);
+  });
+
+  const res: { fecha: string; count: number; display: string }[] = [];
+  mapFechas.forEach((count, fechaKey) => {
+    let display = fechaKey;
+    if (fechaKey === 'sin_fecha') {
+      display = 'Sin Fecha Asignada';
+    } else {
+      const parts = fechaKey.split('-');
+      if (parts.length === 3) {
+        display = `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+    }
+    res.push({ fecha: fechaKey, count, display });
+  });
+
+  // Ordenar de más reciente a más antiguo
+  return res.sort((a, b) => {
+    if (a.fecha === 'sin_fecha') return 1;
+    if (b.fecha === 'sin_fecha') return -1;
+    return b.fecha.localeCompare(a.fecha);
+  });
+}
+
+/**
+ * Obtiene los trabajadores filtrados por fecha específica.
+ * Si fecha es vacía o 'todas', devuelve la lista completa.
+ */
+export function getTrabajadoresPorFecha(fecha?: string, list?: Trabajador[]): Trabajador[] {
+  const workers = Array.isArray(list) ? list : getTrabajadores();
+  if (!fecha || fecha === 'todas') return workers;
+  const targetNorm = normalizeDateString(fecha);
+  if (!targetNorm) return workers;
+
+  const hoy = getLocalToday();
+  return workers.filter((t) => {
+    const fn = t.fecha ? normalizeDateString(t.fecha) : '';
+    if (!fn) {
+      // Los trabajadores sin fecha se consideran de hoy para compatibilidad
+      return targetNorm === hoy;
+    }
+    return fn === targetNorm;
+  });
 }
 
 /**
@@ -1193,4 +1250,355 @@ export function generateBackupJson(): string {
     validaciones: getValidaciones()
   };
   return JSON.stringify(backup, null, 2);
+}
+
+export interface ParsedWorkerResult {
+  list: Omit<Trabajador, 'id'>[];
+  totalLines: number;
+  validCount: number;
+  ignoredLines: number;
+  hasHeader: boolean;
+  samplePreview: Omit<Trabajador, 'id'>[];
+}
+
+/**
+ * Parser inteligente de trabajadores copiados desde Excel, Google Sheets, TSV, CSV o texto libre.
+ * Detecta automáticamente encabezados, separadores y campos como DNI, Nombres, Fundo, Módulo, Grupo, etc.
+ */
+export function parsePastedWorkers(
+  text: string,
+  defaultFecha?: string
+): ParsedWorkerResult {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) {
+    return {
+      list: [],
+      totalLines: 0,
+      validCount: 0,
+      ignoredLines: 0,
+      hasHeader: false,
+      samplePreview: []
+    };
+  }
+
+  const todayIso = normalizeDateString(defaultFecha) || getLocalToday();
+
+  // Detectar si la primera fila es encabezado
+  const firstLineLower = lines[0].toLowerCase();
+  const hasHeader =
+    firstLineLower.includes('dni') ||
+    firstLineLower.includes('documento') ||
+    firstLineLower.includes('nombre') ||
+    firstLineLower.includes('trabajador') ||
+    firstLineLower.includes('supervisor') ||
+    firstLineLower.includes('cuadrilla');
+
+  let headerCols: string[] = [];
+  let dataLines = lines;
+
+  if (hasHeader) {
+    const sep = lines[0].includes('\t')
+      ? '\t'
+      : lines[0].includes(';')
+      ? ';'
+      : lines[0].includes(',')
+      ? ','
+      : /\s{2,}/;
+    headerCols = lines[0].split(sep).map((c) => c.trim().toLowerCase());
+    dataLines = lines.slice(1);
+  }
+
+  // Identificar columnas si hay encabezado
+  let colDni = -1;
+  let colNombre = -1;
+  let colFundo = -1;
+  let colModulo = -1;
+  let colGrupo = -1;
+  let colSupervisor = -1;
+  let colLider = -1;
+  let colTipo = -1;
+  let colFecha = -1;
+
+  if (hasHeader && headerCols.length > 0) {
+    headerCols.forEach((h, idx) => {
+      if (colDni === -1 && (h.includes('dni') || h.includes('doc') || h.includes('cedula') || h.includes('ident'))) {
+        colDni = idx;
+      } else if (colNombre === -1 && (h.includes('nom') || h.includes('apel') || h.includes('trabajador') || h.includes('persona'))) {
+        colNombre = idx;
+      } else if (colFundo === -1 && (h.includes('fundo') || h.includes('sede') || h.includes('campo'))) {
+        colFundo = idx;
+      } else if (colModulo === -1 && (h.includes('mod') || h.includes('lote') || h.includes('cuartel'))) {
+        colModulo = idx;
+      } else if (colGrupo === -1 && (h.includes('grup') || h.includes('cuadrilla'))) {
+        colGrupo = idx;
+      } else if (colSupervisor === -1 && (h.includes('superv') || h.includes('sup'))) {
+        colSupervisor = idx;
+      } else if (colLider === -1 && (h.includes('lider') || h.includes('líd') || h.includes('capataz'))) {
+        colLider = idx;
+      } else if (colTipo === -1 && (h.includes('tipo') || h.includes('cargo') || h.includes('rol') || h.includes('puesto'))) {
+        colTipo = idx;
+      } else if (colFecha === -1 && (h.includes('fec') || h.includes('date'))) {
+        colFecha = idx;
+      }
+    });
+  }
+
+  const list: Omit<Trabajador, 'id'>[] = [];
+  let ignoredCount = hasHeader ? 1 : 0;
+  const seenDni = new Set<string>();
+
+  dataLines.forEach((line) => {
+    if (!line.trim()) return;
+
+    let cols: string[] = [];
+    if (line.includes('\t')) {
+      cols = line.split('\t').map((c) => c.trim().replace(/^["']|["']$/g, ''));
+    } else if (line.includes(';')) {
+      cols = line.split(';').map((c) => c.trim().replace(/^["']|["']$/g, ''));
+    } else if (line.includes(',')) {
+      cols = line.split(',').map((c) => c.trim().replace(/^["']|["']$/g, ''));
+    } else {
+      const parts = line.split(/\s{2,}/).map((c) => c.trim().replace(/^["']|["']$/g, ''));
+      if (parts.length > 1) {
+        cols = parts;
+      } else {
+        const matchDni = line.match(/\b\d{7,9}\b/);
+        if (matchDni) {
+          const dniFound = matchDni[0];
+          const nameFound = line
+            .replace(dniFound, '')
+            .replace(/[-–—,:;|]/g, ' ')
+            .trim()
+            .replace(/\s+/g, ' ');
+          cols = [dniFound, nameFound];
+        } else {
+          cols = [line];
+        }
+      }
+    }
+
+    if (cols.length === 0) {
+      ignoredCount++;
+      return;
+    }
+
+    let dni = '';
+    let nombres = '';
+    let fundo = 'Arena Azul';
+    let modulo = 'M01';
+    let supervisor = '';
+    let grupo = '';
+    let lider = '';
+    let tipo = 'Cosechador';
+    let fecha = todayIso;
+
+    if (hasHeader && colDni !== -1) {
+      dni = cols[colDni] ? cols[colDni].replace(/\s+/g, '').replace(/\D/g, '') : '';
+      if (!dni && cols[colDni]) dni = cols[colDni].trim();
+      nombres = colNombre !== -1 && cols[colNombre] ? cols[colNombre].trim().toUpperCase() : '';
+      fundo = colFundo !== -1 && cols[colFundo] ? cols[colFundo].trim() : 'Arena Azul';
+      modulo = colModulo !== -1 && cols[colModulo] ? cols[colModulo].trim() : 'M01';
+      grupo = colGrupo !== -1 && cols[colGrupo] ? cols[colGrupo].trim() : '';
+      supervisor = colSupervisor !== -1 && cols[colSupervisor] ? cols[colSupervisor].trim() : '';
+      lider = colLider !== -1 && cols[colLider] ? cols[colLider].trim() : '';
+      tipo = colTipo !== -1 && cols[colTipo] ? cols[colTipo].trim() : 'Cosechador';
+      fecha = colFecha !== -1 && cols[colFecha] ? (normalizeDateString(cols[colFecha]) || todayIso) : todayIso;
+    } else {
+      if (cols.length >= 2) {
+        const isCol0Dni = /^\d{6,10}$/.test(cols[0].replace(/\s+/g, ''));
+        const isCol1Dni = /^\d{6,10}$/.test(cols[1].replace(/\s+/g, ''));
+
+        if (isCol0Dni) {
+          dni = cols[0].replace(/\s+/g, '');
+          nombres = cols[1].trim().toUpperCase();
+          fundo = cols[2] || 'Arena Azul';
+          modulo = cols[3] || 'M01';
+          grupo = cols[4] || '';
+          supervisor = cols[5] || '';
+          lider = cols[6] || '';
+          tipo = cols[7] || 'Cosechador';
+        } else if (isCol1Dni) {
+          dni = cols[1].replace(/\s+/g, '');
+          nombres = cols[0].trim().toUpperCase();
+          fundo = cols[2] || 'Arena Azul';
+          modulo = cols[3] || 'M01';
+          grupo = cols[4] || '';
+          supervisor = cols[5] || '';
+          lider = cols[6] || '';
+          tipo = cols[7] || 'Cosechador';
+        } else {
+          dni = cols[0].replace(/\s+/g, '').replace(/\D/g, '');
+          nombres = cols[1].trim().toUpperCase();
+        }
+      } else if (cols.length === 1) {
+        const match = cols[0].match(/\b\d{7,9}\b/);
+        if (match) {
+          dni = match[0];
+          nombres = cols[0].replace(dni, '').replace(/[-–—,:;|]/g, ' ').trim().replace(/\s+/g, ' ').toUpperCase();
+        } else {
+          dni = cols[0].replace(/\D/g, '');
+        }
+      }
+    }
+
+    if (!dni && !nombres) {
+      ignoredCount++;
+      return;
+    }
+
+    if (!dni && nombres) {
+      ignoredCount++;
+      return;
+    }
+
+    if (!nombres) {
+      nombres = `TRABAJADOR ${dni}`;
+    }
+
+    // Normalizar si dice 'sin grupo' o 'sin lider'
+    if (grupo.toLowerCase() === 'sin grupo' || grupo.toLowerCase() === 'sin asignar') grupo = '';
+    if (lider.toLowerCase().includes('sin') || lider.toLowerCase() === 'ninguno') lider = '';
+
+    const dedupeKey = `${dni}__${fecha}`;
+    if (!seenDni.has(dedupeKey)) {
+      seenDni.add(dedupeKey);
+      list.push({
+        dni,
+        nombres,
+        fundo: fundo || 'Arena Azul',
+        modulo: modulo || 'M01',
+        supervisor: supervisor || '',
+        grupo: grupo || '',
+        lider: lider || '',
+        tipo: tipo || 'Cosechador',
+        jabas: 0,
+        fecha: fecha || todayIso
+      });
+    }
+  });
+
+  return {
+    list,
+    totalLines: lines.length,
+    validCount: list.length,
+    ignoredLines: ignoredCount,
+    hasHeader,
+    samplePreview: list.slice(0, 5)
+  };
+}
+
+/**
+ * Replicar trabajadores guardados hacia la hoja 'Trabajadores' de Google Sheets.
+ * Envía la petición tanto al servidor local backend como directamente al Web App de Google Sheets como fallback.
+ */
+export async function replicarTrabajadoresAlSheet(
+  trabajadores: Trabajador[],
+  customUrl?: string,
+  modo: 'reemplazar_fecha' | 'append' | 'reemplazar_todo' = 'reemplazar_fecha',
+  fechaTarget?: string,
+  userRole?: string
+): Promise<{
+  success: boolean;
+  message: string;
+  sheetOk: boolean;
+  count: number;
+  totalEnSistema?: number;
+  error?: string;
+}> {
+  const effectiveUrl = customUrl || getGsheetUrl();
+  const effectiveFecha = normalizeDateString(fechaTarget) || (trabajadores[0]?.fecha ? normalizeDateString(trabajadores[0].fecha) : getLocalToday());
+
+  // 1. Intentar primero a través del endpoint backend del servidor central (resuelve CORS y sigue 302 redirects)
+  try {
+    const serverRes = await fetch('/api/replicar-trabajadores-sheet', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        trabajadores,
+        url: effectiveUrl,
+        modo,
+        fechaTarget: effectiveFecha,
+        userRole: userRole || 'Administrador',
+        replicarSheet: true
+      })
+    });
+
+    if (serverRes.ok) {
+      const sJson = await serverRes.json();
+      if (sJson && sJson.status === 'ok') {
+        return {
+          success: true,
+          message: sJson.message || `Trabajadores guardados y replicados al Google Sheet exitosamente (${sJson.count} trabajadores).`,
+          sheetOk: Boolean(sJson.sheetReplicated !== false),
+          count: sJson.count || trabajadores.length,
+          totalEnSistema: sJson.totalEnSistema,
+          error: sJson.sheetError
+        };
+      }
+    }
+  } catch (backendErr) {
+    console.warn('Backend proxy no disponible para réplica a Google Sheets, intentando conexión directa...', backendErr);
+  }
+
+  // 2. Fallback de réplica directa desde el navegador al Web App de Google Sheets
+  if (effectiveUrl) {
+    try {
+      const payload = {
+        accion: 'sync',
+        data: {
+          trabajadores: trabajadores.map((t) => ({
+            dni: t.dni || '',
+            nombres: t.nombres || '',
+            fundo: t.fundo || '',
+            modulo: t.modulo || '',
+            grupo: t.grupo || '',
+            supervisor: t.supervisor || '',
+            lider: t.lider || '',
+            tipo: t.tipo || 'Cosechador'
+          }))
+        }
+      };
+
+      const directRes = await fetch(effectiveUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+
+      const responseText = await directRes.text().catch(() => '');
+      let responseJson: any = null;
+      try {
+        responseJson = JSON.parse(responseText);
+      } catch {}
+
+      if (directRes.ok || (responseJson && responseJson.status === 'ok')) {
+        return {
+          success: true,
+          message: `Trabajadores replicados a la hoja 'Trabajadores' de Google Sheets exitosamente (${trabajadores.length} registros).`,
+          sheetOk: true,
+          count: trabajadores.length
+        };
+      }
+    } catch (directErr: any) {
+      console.error('Error en réplica directa a Google Sheets:', directErr);
+      return {
+        success: true,
+        message: `Trabajadores guardados en el aplicativo (${trabajadores.length}), pero la réplica al Google Sheet tuvo un aviso de red.`,
+        sheetOk: false,
+        count: trabajadores.length,
+        error: directErr?.message || 'Error de conexión con Google Sheets'
+      };
+    }
+  }
+
+  return {
+    success: true,
+    message: `Trabajadores guardados en el aplicativo (${trabajadores.length}). No hay URL de Google Sheets configurada.`,
+    sheetOk: false,
+    count: trabajadores.length
+  };
 }
