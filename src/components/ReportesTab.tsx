@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { Programa, ProgramaGeneral, DetalleJaba, Trabajador, ValidacionSupervisor } from '../types';
+import { Programa, ProgramaGeneral, DetalleJaba, Trabajador, ValidacionSupervisor, UserRole } from '../types';
 import { exportToExcelFile, exportToCsvFile, ExportTableData } from '../utils/exportUtils';
-import { getLocalToday, normalizeDateString, formatDateDDMMAAAA } from '../utils/storage';
+import { getLocalToday, normalizeDateString, formatDateDDMMAAAA, deleteDetalleJabaFromStorage, getGsheetUrl } from '../utils/storage';
+import { RegistroAvanceModal } from './RegistroAvanceModal';
 import { 
   FileSpreadsheet, 
   ChevronDown, 
@@ -21,7 +22,8 @@ import {
   Gift,
   Trophy,
   DollarSign,
-  Target
+  Target,
+  Trash2
 } from 'lucide-react';
 
 interface ReportesTabProps {
@@ -30,6 +32,8 @@ interface ReportesTabProps {
   detalleJabas: DetalleJaba[];
   trabajadores: Trabajador[];
   validaciones?: ValidacionSupervisor[];
+  userRole?: UserRole;
+  onUpdateDetalleJabas?: (updated: DetalleJaba[]) => void;
   onRefresh?: () => void;
   onToast: (msg: string) => void;
 }
@@ -40,9 +44,14 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
   detalleJabas = [],
   trabajadores = [],
   validaciones = [],
+  userRole,
+  onUpdateDetalleJabas,
   onRefresh,
   onToast
 }) => {
+  const isAdmin = userRole === 'Administrador';
+  const [showRegistroAvanceModal, setShowRegistroAvanceModal] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const today = getLocalToday();
 
   const [periodo, setPeriodo] = useState<'todo' | 'hoy' | 'semana' | 'mes'>('todo');
@@ -93,6 +102,49 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
     if (hasta && itemDate > normalizeDateString(hasta)) return false;
 
     return true;
+  };
+
+  const handleEliminarRegistroDirecto = async (record: DetalleJaba) => {
+    if (!isAdmin) {
+      onToast('Acceso restringido: Solo el Administrador puede eliminar registros de avance.');
+      return;
+    }
+    const confirmacion = window.confirm(`¿Estás seguro de eliminar el registro de avance de ${record.trabajador || record.dni} (${record.jabas} jabas)?`);
+    if (!confirmacion) return;
+
+    const recordId = record.id || `${record.fecha}_${record.dni}_${record.modulo}`;
+    setDeletingId(recordId);
+
+    try {
+      const gsheetUrl = getGsheetUrl();
+      const res = await fetch('/api/eliminar-registro-avance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: record.id,
+          fecha: record.fecha,
+          dni: record.dni,
+          modulo: record.modulo,
+          userRole: userRole,
+          gsheetUrl
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Error al eliminar');
+      }
+
+      // Update storage and local state
+      const updated = deleteDetalleJabaFromStorage(recordId);
+      if (onUpdateDetalleJabas) {
+        onUpdateDetalleJabas(updated);
+      }
+      onToast('Registro eliminado con éxito de Registro_Avance.');
+    } catch (err: any) {
+      onToast(`Error al eliminar: ${err.message || err}`);
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   // Filtered datasets
@@ -1226,6 +1278,21 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
 
         {openSections.sec6 && (
           <div className="p-4 border-t border-[#e0e0e0] animate-in fade-in">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-3">
+              <span className="text-xs text-gray-600 font-medium">
+                Mostrando <b>{sec6Data.list.length}</b> registros individuales de cosecha
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowRegistroAvanceModal(true)}
+                className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-bold py-1.5 px-3 rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                title="Abrir panel completo de depuración y eliminación de registros de avance"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>{isAdmin ? '⚙️ Gestionar y Eliminar Registros' : '🔍 Ver Registros Detallados'}</span>
+              </button>
+            </div>
+
             <div className="max-h-72 overflow-y-auto rounded-xl border border-[#e0e0e0] mb-3">
               <table className="w-full text-xs text-left">
                 <thead className="bg-[#2e7d32] text-white sticky top-0">
@@ -1239,18 +1306,19 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
                     <th className="p-2.5">Líder</th>
                     <th className="p-2.5 text-right">Jabas</th>
                     <th className="p-2.5">Supervisor</th>
+                    {isAdmin && <th className="p-2.5 text-center">Acción</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#e0e0e0]">
                   {sec6Data.list.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="p-6 text-center text-gray-400">
+                      <td colSpan={isAdmin ? 10 : 9} className="p-6 text-center text-gray-400">
                         No hay registros diarios en el rango seleccionado.
                       </td>
                     </tr>
                   ) : (
                     sec6Data.list.map((d) => (
-                      <tr key={d.id} className="hover:bg-gray-50">
+                      <tr key={d.id || `${d.fecha}_${d.dni}_${d.modulo}`} className="hover:bg-gray-50">
                         <td className="p-2.5 whitespace-nowrap text-gray-600 font-medium">{formatDateDDMMAAAA(d.fecha)}</td>
                         <td className="p-2.5 font-mono text-[#1b5e20]">{d.dni}</td>
                         <td className="p-2.5 font-bold text-[#212121]">{d.trabajador}</td>
@@ -1262,6 +1330,19 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
                           {d.jabas}
                         </td>
                         <td className="p-2.5 text-gray-600">{d.supervisor}</td>
+                        {isAdmin && (
+                          <td className="p-2.5 text-center">
+                            <button
+                              type="button"
+                              disabled={deletingId === (d.id || `${d.fecha}_${d.dni}_${d.modulo}`)}
+                              onClick={() => handleEliminarRegistroDirecto(d)}
+                              className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1 rounded cursor-pointer transition-colors disabled:opacity-40"
+                              title="Eliminar este registro individual (Solo Administrador)"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))
                   )}
@@ -1269,7 +1350,7 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
                     <tr className="bg-[#e8f5e9] font-bold text-[#1b5e20]">
                       <td colSpan={7} className="p-2.5">TOTAL JABAS DIARIAS</td>
                       <td className="p-2.5 text-right text-base text-[#e65100]">{sec6Data.total}</td>
-                      <td className="p-2.5"></td>
+                      <td colSpan={isAdmin ? 2 : 1} className="p-2.5"></td>
                     </tr>
                   )}
                 </tbody>
@@ -1390,6 +1471,20 @@ export const ReportesTab: React.FC<ReportesTabProps> = ({
           </div>
         )}
       </div>
+
+      {/* Modal de Detalle, Depuración y Eliminación de Registros de Avance */}
+      <RegistroAvanceModal
+        isOpen={showRegistroAvanceModal}
+        onClose={() => setShowRegistroAvanceModal(false)}
+        detalleJabas={detalleJabas || []}
+        userRole={userRole}
+        onRecordsUpdated={(updatedList) => {
+          if (onUpdateDetalleJabas) {
+            onUpdateDetalleJabas(updatedList);
+          }
+        }}
+        onNotify={(msg, type) => onToast(msg)}
+      />
     </div>
   );
 };

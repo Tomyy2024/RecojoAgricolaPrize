@@ -1662,6 +1662,8 @@ export default function App() {
             detalleJabas={detalleJabas}
             trabajadores={trabajadores}
             validaciones={validaciones}
+            userRole={session?.rol}
+            onUpdateDetalleJabas={handleUpdateDetalleJabas}
             onRefresh={() => fetchCentralizedData(false)}
             onToast={addToast}
           />

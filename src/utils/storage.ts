@@ -686,18 +686,99 @@ export function saveProgramaGeneral(list: ProgramaGeneral[]) {
   localStorage.setItem(KEYS.PROGRAMA_GENERAL, JSON.stringify(list));
 }
 
-// Detalle Jabas
+// Detalle Jabas - Sanitización, deduplicación y persistencia limpia
+export function sanitizeAndDeduplicateDetalleJabas(list: DetalleJaba[]): DetalleJaba[] {
+  if (!Array.isArray(list)) return [];
+  const map = new Map<string, DetalleJaba>();
+
+  list.forEach((item) => {
+    if (!item || typeof item !== 'object') return;
+    const rawDni = String(item.dni || '').trim();
+    const cleanDni = rawDni.replace(/\D/g, '') || rawDni;
+    const trabajador = String(item.trabajador || '').trim();
+    const jabas = Number(item.jabas) || 0;
+
+    // Rechazar estrictamente registros fantasmas (sin persona o con jabas <= 0)
+    if ((!cleanDni && !trabajador) || jabas <= 0 || isNaN(jabas)) {
+      return;
+    }
+
+    let normFecha = normalizeDateString(item.fecha || '');
+    if (!normFecha && item.timestamp) {
+      normFecha = normalizeDateString(item.timestamp);
+    }
+    if (!normFecha) {
+      normFecha = getLocalToday();
+    }
+
+    const normModulo = String(item.modulo || 'M01').trim().toUpperCase();
+    const cleanId = String(item.id || '').trim();
+    const primaryKey = cleanId || `${normFecha}_${cleanDni}_${normModulo}`;
+
+    const cleanRecord: DetalleJaba = {
+      id: cleanId || primaryKey,
+      fecha: normFecha,
+      timestamp: item.timestamp || new Date().toISOString(),
+      supervisor: String(item.supervisor || '').trim(),
+      fundo: String(item.fundo || 'Santa Teresa').trim(),
+      modulo: normModulo,
+      grupo: String(item.grupo || '').trim(),
+      lider: String(item.lider || '').trim(),
+      dni: cleanDni,
+      trabajador: trabajador || (cleanDni ? `Trabajador ${cleanDni}` : 'Sin Nombre'),
+      jabas: Math.round(jabas)
+    };
+
+    if (map.has(primaryKey)) {
+      const existing = map.get(primaryKey)!;
+      map.set(primaryKey, {
+        ...existing,
+        ...cleanRecord,
+        id: existing.id || cleanRecord.id,
+        jabas: Math.max(Number(existing.jabas) || 0, cleanRecord.jabas),
+        trabajador: cleanRecord.trabajador && !cleanRecord.trabajador.startsWith('Trabajador ') ? cleanRecord.trabajador : existing.trabajador,
+        supervisor: cleanRecord.supervisor || existing.supervisor,
+        grupo: cleanRecord.grupo || existing.grupo,
+        lider: cleanRecord.lider || existing.lider
+      });
+    } else {
+      map.set(primaryKey, cleanRecord);
+    }
+  });
+
+  return Array.from(map.values());
+}
+
 export function getDetalleJabas(): DetalleJaba[] {
   try {
     const raw = localStorage.getItem(KEYS.DETALLE_JABAS);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return sanitizeAndDeduplicateDetalleJabas(Array.isArray(parsed) ? parsed : []);
   } catch {
     return [];
   }
 }
 
 export function saveDetalleJabas(list: DetalleJaba[]) {
-  localStorage.setItem(KEYS.DETALLE_JABAS, JSON.stringify(list));
+  const sanitized = sanitizeAndDeduplicateDetalleJabas(list);
+  localStorage.setItem(KEYS.DETALLE_JABAS, JSON.stringify(sanitized));
+}
+
+export function deleteDetalleJabaFromStorage(id: string): DetalleJaba[] {
+  const current = getDetalleJabas();
+  const targetId = String(id || '').trim();
+  const updated = current.filter(d => String(d.id || '').trim() !== targetId);
+  saveDetalleJabas(updated);
+  return updated;
+}
+
+export function deleteDetalleJabasFromStorage(ids: string[]): DetalleJaba[] {
+  const current = getDetalleJabas();
+  const targetSet = new Set(ids.map(i => String(i || '').trim()));
+  const updated = current.filter(d => !targetSet.has(String(d.id || '').trim()));
+  saveDetalleJabas(updated);
+  return updated;
 }
 
 // Avance Actual
@@ -1082,9 +1163,7 @@ export function purgeAllEmptyRecords() {
   saveValidaciones(validaciones);
 
   const rawDetalle = getDetalleJabas();
-  const cleanDetalle = rawDetalle.filter(
-    d => d && (d.dni?.trim() || d.trabajador?.trim()) && (Number(d.jabas) > 0 || d.fecha?.trim())
-  );
+  const cleanDetalle = sanitizeAndDeduplicateDetalleJabas(rawDetalle);
   saveDetalleJabas(cleanDetalle);
 
   const rawTrabajadores = getTrabajadores();

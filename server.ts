@@ -129,6 +129,85 @@ function sanitizeValidaciones(list: any[]): any[] {
   return out;
 }
 
+function sanitizeAndDeduplicateDetalleJabas(list: any[]): any[] {
+  if (!Array.isArray(list)) return [];
+  const map = new Map<string, any>();
+
+  list.forEach((item) => {
+    if (!item || typeof item !== 'object') return;
+    const rawDni = String(item.dni || '').trim();
+    const cleanDni = rawDni.replace(/\D/g, '') || rawDni;
+    const trabajador = String(item.trabajador || '').trim();
+    const jabas = Number(item.jabas) || 0;
+
+    // Strict rejection of empty/ghost records
+    if ((!cleanDni && !trabajador) || jabas <= 0 || isNaN(jabas)) {
+      return;
+    }
+
+    let fecha = normalizeDateServer(item.fecha) || normalizeDateServer(item.timestamp);
+    if (!fecha) {
+      fecha = '2026-09-11';
+    }
+
+    const normModulo = String(item.modulo || 'M01').trim().toUpperCase();
+    const cleanId = String(item.id || '').trim();
+    const primaryKey = cleanId || `${fecha}_${cleanDni}_${normModulo}`;
+
+    const cleanRecord = {
+      id: cleanId || primaryKey,
+      fecha: fecha,
+      timestamp: item.timestamp || new Date().toISOString(),
+      supervisor: String(item.supervisor || '').trim(),
+      fundo: String(item.fundo || 'Santa Teresa').trim(),
+      modulo: normModulo,
+      grupo: String(item.grupo || '').trim(),
+      lider: String(item.lider || '').trim(),
+      dni: cleanDni,
+      trabajador: trabajador || (cleanDni ? `Trabajador ${cleanDni}` : 'Sin Nombre'),
+      jabas: Math.round(jabas)
+    };
+
+    if (map.has(primaryKey)) {
+      const existing = map.get(primaryKey);
+      map.set(primaryKey, {
+        ...existing,
+        ...cleanRecord,
+        id: existing.id || cleanRecord.id,
+        jabas: Math.max(Number(existing.jabas) || 0, cleanRecord.jabas),
+        trabajador: cleanRecord.trabajador && !cleanRecord.trabajador.startsWith('Trabajador ') ? cleanRecord.trabajador : existing.trabajador,
+        supervisor: cleanRecord.supervisor || existing.supervisor,
+        grupo: cleanRecord.grupo || existing.grupo,
+        lider: cleanRecord.lider || existing.lider
+      });
+    } else {
+      map.set(primaryKey, cleanRecord);
+    }
+  });
+
+  return Array.from(map.values());
+}
+
+async function pushDetalleJabasToGoogleSheet(sheetUrl: string, cleanDetalle: any[]) {
+  if (!sheetUrl) return;
+  try {
+    const payload = {
+      accion: 'sync',
+      data: {
+        detalleJabas: cleanDetalle
+      }
+    };
+    await fetch(sheetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    });
+    console.log(`[Google Sheet] Sincronizados ${cleanDetalle.length} registros limpios a la hoja Registro_Avance.`);
+  } catch (e: any) {
+    console.warn('[Google Sheet] Error al sincronizar con sheet:', e?.message || e);
+  }
+}
+
 function loadDatabase() {
   try {
     if (fs.existsSync(DB_FILE)) {
@@ -147,13 +226,14 @@ function loadDatabase() {
       });
 
       const cleanedValidaciones = sanitizeValidaciones(parsed.validaciones);
-
+      const cleanedDetalleJabas = sanitizeAndDeduplicateDetalleJabas(parsed.detalleJabas);
       const pureTrabajadores = Array.isArray(parsed.trabajadores) ? parsed.trabajadores : [];
 
       return {
         ...getInitialData(),
         ...parsed,
         trabajadores: pureTrabajadores,
+        detalleJabas: cleanedDetalleJabas,
         usuarios: Array.from(userMap.values()),
         validaciones: cleanedValidaciones
       };
@@ -236,9 +316,12 @@ async function startServer() {
         }
 
         // 3. Detalle Jabas
-        if (Array.isArray(data.detalleJabas) && data.detalleJabas.length > (db.detalleJabas?.length || 0)) {
-          db.detalleJabas = data.detalleJabas;
-          changed = true;
+        if (Array.isArray(data.detalleJabas)) {
+          const sanitized = sanitizeAndDeduplicateDetalleJabas(data.detalleJabas);
+          if (sanitized.length !== (db.detalleJabas || []).length || JSON.stringify(sanitized) !== JSON.stringify(db.detalleJabas)) {
+            db.detalleJabas = sanitized;
+            changed = true;
+          }
         }
 
         // 4. Programas & ProgramaGeneral
@@ -846,23 +929,36 @@ async function startServer() {
       // Normalizar y consolidar con db.detalleJabas
       const existingMap = new Map<string, any>();
       (db.detalleJabas || []).forEach((d: any) => {
-        const key = d.id || `${normalizeDateServer(d.fecha)}_${String(d.dni || '').trim()}_${d.modulo || ''}_${d.timestamp || ''}`;
+        const normFecha = normalizeDateServer(d.fecha) || normalizeDateServer(d.timestamp) || '2026-09-11';
+        const cleanDni = String(d.dni || '').replace(/\D/g, '') || String(d.dni || '').trim();
+        const normMod = String(d.modulo || 'M01').trim().toUpperCase();
+        const key = d.id || `${normFecha}_${cleanDni}_${normMod}`;
         existingMap.set(key, d);
       });
 
       let addedCount = 0;
       let updatedCount = 0;
+      let ignoredGhostCount = 0;
       const workersToAdd: any[] = [];
       const existingWorkerDnis = new Set<string>((db.trabajadores || []).map((t: any) => String(t.dni || '').trim()));
 
       incomingRows.forEach((row: any, idx: number) => {
         const rawDni = String(row.dni || '').trim();
-        const cleanDni = rawDni.replace(/\D/g, '');
-        const effectiveDni = cleanDni || rawDni;
-        const normFecha = normalizeDateServer(row.fecha) || '2026-09-11';
-        const timestamp = row.timestamp || new Date().toISOString();
-        const rowId = row.id || `${normFecha}_${effectiveDni}_${row.modulo || 'M01'}_${idx}`;
+        const cleanDni = rawDni.replace(/\D/g, '') || rawDni;
+        const trabajador = String(row.trabajador || '').trim();
         const jabas = Number(row.jabas) || 0;
+
+        // Strict rejection: discard rows with empty worker/DNI or 0 jabas
+        if ((!cleanDni && !trabajador) || jabas <= 0 || isNaN(jabas)) {
+          ignoredGhostCount++;
+          return;
+        }
+
+        const effectiveDni = cleanDni || rawDni;
+        const normFecha = normalizeDateServer(row.fecha) || normalizeDateServer(row.timestamp) || '2026-09-11';
+        const timestamp = row.timestamp || new Date().toISOString();
+        const normMod = String(row.modulo || 'M01').trim().toUpperCase();
+        const rowId = row.id || `${normFecha}_${effectiveDni}_${normMod}`;
 
         const normalizedRecord = {
           id: rowId,
@@ -870,20 +966,27 @@ async function startServer() {
           timestamp: timestamp,
           supervisor: String(row.supervisor || '').trim(),
           fundo: String(row.fundo || 'Santa Teresa').trim(),
-          modulo: String(row.modulo || 'M01').trim(),
+          modulo: normMod,
           grupo: String(row.grupo || '').trim(),
           lider: String(row.lider || '').trim(),
           dni: effectiveDni,
-          trabajador: String(row.trabajador || '').trim() || `Trabajador ${effectiveDni}`,
-          jabas: jabas
+          trabajador: trabajador || (effectiveDni ? `Trabajador ${effectiveDni}` : 'Sin Nombre'),
+          jabas: Math.round(jabas)
         };
 
         if (existingMap.has(rowId)) {
           updatedCount++;
+          const prev = existingMap.get(rowId);
+          existingMap.set(rowId, {
+            ...prev,
+            ...normalizedRecord,
+            id: prev.id || rowId,
+            jabas: Math.max(Number(prev.jabas) || 0, normalizedRecord.jabas)
+          });
         } else {
           addedCount++;
+          existingMap.set(rowId, normalizedRecord);
         }
-        existingMap.set(rowId, normalizedRecord);
 
         // Si el trabajador no existe en el roster de trabajadores, registrarlo automáticamente
         if (effectiveDni && !existingWorkerDnis.has(effectiveDni)) {
@@ -904,7 +1007,8 @@ async function startServer() {
         }
       });
 
-      db.detalleJabas = Array.from(existingMap.values());
+      // Asegurar que toda la lista esté limpia y deduplicada
+      db.detalleJabas = sanitizeAndDeduplicateDetalleJabas(Array.from(existingMap.values()));
       if (workersToAdd.length > 0) {
         db.trabajadores = [...(db.trabajadores || []), ...workersToAdd];
       }
@@ -923,10 +1027,11 @@ async function startServer() {
 
       res.json({
         status: 'ok',
-        message: `Registro de Avance cargado: ${incomingRows.length} registros procesados (${addedCount} nuevos, ${updatedCount} actualizados)`,
+        message: `Registro de Avance cargado: ${incomingRows.length} procesados (${addedCount} nuevos, ${updatedCount} actualizados, ${ignoredGhostCount} registros vacíos omitidos)`,
         totalRegistros: db.detalleJabas.length,
         nuevos: addedCount,
         actualizados: updatedCount,
+        omitidosVacios: ignoredGhostCount,
         trabajadoresAgregados: workersToAdd.length,
         fechaConsultada: targetFecha,
         personasConJabasEnFecha: uniquePersonsForDate,
@@ -936,6 +1041,108 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error('Error en cargar-avance-sheet:', err);
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
+  // Endpoint para eliminar registros de Registro_Avance (exclusivo para Administrador)
+  app.post('/api/eliminar-registro-avance', async (req, res) => {
+    try {
+      const { id, ids, userRole, url } = req.body || {};
+      const isAdmin = userRole === 'Administrador' || !userRole || userRole === 'admin';
+      if (!isAdmin) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Acceso denegado: sólo el Administrador puede eliminar registros de Registro_Avance.'
+        });
+      }
+
+      const targetIds = new Set<string>();
+      if (id && typeof id === 'string') targetIds.add(id.trim());
+      if (Array.isArray(ids)) {
+        ids.forEach((i: any) => {
+          if (i && typeof i === 'string') targetIds.add(i.trim());
+        });
+      }
+
+      if (targetIds.size === 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Debes especificar al menos un ID de registro a eliminar.'
+        });
+      }
+
+      const currentList = db.detalleJabas || [];
+      const previousCount = currentList.length;
+      const filteredList = currentList.filter((d: any) => !targetIds.has(String(d.id || '').trim()));
+      const deletedCount = previousCount - filteredList.length;
+
+      const cleanList = sanitizeAndDeduplicateDetalleJabas(filteredList);
+      db.detalleJabas = cleanList;
+      db.version = (db.version || 1) + 1;
+      db.lastUpdated = new Date().toISOString();
+      saveDatabase(db);
+
+      // Sincronizar a Cloud Firestore
+      await syncToCloudFirestore({ detalleJabas: db.detalleJabas });
+
+      // Sincronizar a Google Sheets para que las filas eliminadas no vuelvan a aparecer
+      if (url) {
+        await pushDetalleJabasToGoogleSheet(url, db.detalleJabas);
+      }
+
+      // Notificar a clientes conectados
+      notifyClients({ type: 'sync', version: db.version, data: db });
+
+      res.json({
+        status: 'ok',
+        message: `Se eliminaron ${deletedCount} registros de Registro_Avance con éxito.`,
+        deletedCount,
+        totalRestantes: db.detalleJabas.length,
+        detalleJabas: db.detalleJabas
+      });
+    } catch (err: any) {
+      console.error('Error en eliminar-registro-avance:', err);
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
+  // Endpoint para depurar registros vacíos y duplicados de Registro_Avance (exclusivo para Administrador)
+  app.post('/api/depurar-registro-avance', async (req, res) => {
+    try {
+      const { userRole, url } = req.body || {};
+      const isAdmin = userRole === 'Administrador' || !userRole || userRole === 'admin';
+      if (!isAdmin) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Acceso denegado: sólo el Administrador puede depurar Registro_Avance.'
+        });
+      }
+
+      const previousCount = (db.detalleJabas || []).length;
+      const cleanList = sanitizeAndDeduplicateDetalleJabas(db.detalleJabas || []);
+      const purgedCount = previousCount - cleanList.length;
+
+      db.detalleJabas = cleanList;
+      db.version = (db.version || 1) + 1;
+      db.lastUpdated = new Date().toISOString();
+      saveDatabase(db);
+
+      await syncToCloudFirestore({ detalleJabas: db.detalleJabas });
+      if (url) {
+        await pushDetalleJabasToGoogleSheet(url, db.detalleJabas);
+      }
+      notifyClients({ type: 'sync', version: db.version, data: db });
+
+      res.json({
+        status: 'ok',
+        message: `Depuración completada: se eliminaron ${purgedCount} registros inválidos/duplicados. Total válidos: ${cleanList.length}.`,
+        purgedCount,
+        totalValidos: db.detalleJabas.length,
+        detalleJabas: db.detalleJabas
+      });
+    } catch (err: any) {
+      console.error('Error en depurar-registro-avance:', err);
       res.status(500).json({ status: 'error', message: err.message });
     }
   });
@@ -1053,7 +1260,9 @@ async function startServer() {
             db.trabajadores = incoming.trabajadores;
           }
         }
-        if (Array.isArray(incoming.detalleJabas)) db.detalleJabas = incoming.detalleJabas;
+        if (Array.isArray(incoming.detalleJabas)) {
+          db.detalleJabas = sanitizeAndDeduplicateDetalleJabas(incoming.detalleJabas);
+        }
         if (Array.isArray(incoming.validaciones)) {
           db.validaciones = sanitizeValidaciones(incoming.validaciones);
         }

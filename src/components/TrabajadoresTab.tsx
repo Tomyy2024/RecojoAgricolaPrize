@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Trabajador, Lider, UserSession, DetalleJaba, Usuario, ReservaCuadrilla } from '../types';
 import { ScannerModal } from './ScannerModal';
+import { RegistroAvanceModal } from './RegistroAvanceModal';
 import { getLocalToday, getLocalISO, getReservas, saveReservas, mergeReservasArrays, normalizeDateString, getGsheetUrl, saveGsheetUrl } from '../utils/storage';
 import { 
   Users, 
@@ -131,6 +132,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const [reservaModalDateFilter, setReservaModalDateFilter] = useState<'hoy' | 'todas'>('hoy');
   const [reservaModalSearch, setReservaModalSearch] = useState<string>('');
   const [vistaAsignacion, setVistaAsignacion] = useState<'pendientes' | 'asignados' | 'con_jabas' | 'todos' | 'sin_jabas'>('pendientes');
+  const [showRegistroAvanceModal, setShowRegistroAvanceModal] = useState(false);
 
   // Role and supervisor checking
   const isAdmin = session?.rol === 'Administrador';
@@ -3349,6 +3351,22 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     <span>Cargar Registro de Avance</span>
                   </button>
                 )}
+
+                {/* Botón Ver y Gestionar Registro de Avance */}
+                <button
+                  type="button"
+                  onClick={() => setShowRegistroAvanceModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs shadow-xs cursor-pointer transition-all active:scale-95"
+                  title="Ver, depurar y eliminar registros de la hoja Registro_Avance"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Ver Registro de Avance</span>
+                  {detalleJabas && detalleJabas.length > 0 && (
+                    <span className="ml-0.5 bg-emerald-700 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+                      {detalleJabas.length}
+                    </span>
+                  )}
+                </button>
               </div>
             </div>
 
@@ -3609,6 +3627,17 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       <span>Desasignar Todos ({countAsignados})</span>
                     </button>
                   )}
+                  {vistaAsignacion === 'con_jabas' && (
+                    <button
+                      type="button"
+                      onClick={() => setShowRegistroAvanceModal(true)}
+                      className="text-[11px] bg-amber-700 hover:bg-amber-800 text-white font-bold px-2.5 py-1 rounded-md shadow-2xs flex items-center gap-1.5 cursor-pointer shrink-0 transition-all active:scale-95 self-end sm:self-auto"
+                      title="Ver y gestionar registros de avance"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <span>{isAdmin ? '⚙️ Gestionar y Eliminar Registros' : '🔍 Ver Registros de Avance'}</span>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -3847,6 +3876,20 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                             >
                               <X className="w-2.5 h-2.5" />
                               <span>Desasignar</span>
+                            </button>
+                          )}
+                          {isAdmin && tieneJabas && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowRegistroAvanceModal(true);
+                              }}
+                              className="text-[10px] text-amber-800 hover:text-amber-950 bg-amber-50 hover:bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                              title={`Ver y gestionar avance de ${t.nombres}`}
+                            >
+                              <FileSpreadsheet className="w-2.5 h-2.5" />
+                              <span>Avance ({jabasCount})</span>
                             </button>
                           )}
                         </div>
@@ -5320,6 +5363,24 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                         </>
                       )}
                     </button>
+
+                    {/* Opción para inspeccionar y eliminar registros existentes */}
+                    <div className="pt-2 border-t border-amber-200/80 flex items-center justify-between text-xs">
+                      <span className="text-amber-900 text-[11px] font-medium">
+                        ¿Deseas depurar o eliminar registros existentes?
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowModalCargarNomina(false);
+                          setShowRegistroAvanceModal(true);
+                        }}
+                        className="text-amber-800 hover:text-amber-950 font-bold underline flex items-center gap-1 cursor-pointer text-xs"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5 text-amber-700" />
+                        <span>{isAdmin ? 'Ver y Eliminar Registros' : 'Ver Registros de Avance'}</span>
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -5524,6 +5585,20 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         onScanDni={handleScanDniResult}
         trabajadores={trabajadores}
         mode={scannerMode}
+      />
+
+      {/* Modal de Detalle, Inspección y Eliminación de Registros de Avance */}
+      <RegistroAvanceModal
+        isOpen={showRegistroAvanceModal}
+        onClose={() => setShowRegistroAvanceModal(false)}
+        detalleJabas={detalleJabas || []}
+        userRole={session?.rol}
+        onRecordsUpdated={(updatedList) => {
+          if (onUpdateDetalleJabas) {
+            onUpdateDetalleJabas(updatedList);
+          }
+        }}
+        onNotify={(msg, type) => onToast(msg, type || 'info')}
       />
     </div>
   );
