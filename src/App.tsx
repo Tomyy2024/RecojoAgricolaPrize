@@ -218,12 +218,21 @@ export default function App() {
     }
   }, [addToast, addLog]);
 
+  const currentVersionRef = useRef<number>(0);
   // Referencia a syncToServer para que applyServerData pueda sincronizar trabajadores al servidor central sin dependencias circulares
   const syncToServerRef = useRef<(payloadOverride?: any) => Promise<void>>(async () => {});
 
   // Universal Data Applier from Server/Broadcast
   const applyServerData = useCallback((d: any, silent = true) => {
     if (!d || typeof d !== 'object') return;
+
+    if (typeof d.version === 'number' && d.version > 0) {
+      if (currentVersionRef.current > 0 && d.version < currentVersionRef.current) {
+        console.warn(`[Sync] Ignorando payload obsoleto (versión ${d.version} < actual ${currentVersionRef.current})`);
+        return;
+      }
+      currentVersionRef.current = Math.max(currentVersionRef.current, d.version);
+    }
 
     if (Array.isArray(d.programas)) {
       setProgramasState(d.programas);
@@ -234,20 +243,19 @@ export default function App() {
       saveProgramaGeneral(d.programaGeneral);
     }
     if (Array.isArray(d.trabajadores)) {
-      const isLocked = isOfflineNominaLocked();
       const currentWorkers = getTrabajadores();
       const isExplicitPurge = d.depurado === true || d.forceNominaUpdate === true;
 
-      // Si el modo offline está explícitamente bloqueado, no sobrescribir salvo forzado
-      if (isLocked && currentWorkers.length > 0 && !isExplicitPurge) {
-        // Nómina blindada por interruptor de usuario
+      // Si la lista entrante tiene menos trabajadores que los que ya tenemos válidamente (por ejemplo Firestore devolviendo 410 por cuota agotada mientras el servidor ya tiene 446),
+      // protegemos la nómina completa y evitamos degradar la lista.
+      if (!isExplicitPurge && currentWorkers.length > d.trabajadores.length) {
+        console.warn(`[Sync] Protección de nómina activa: se rechazó lista menor (${d.trabajadores.length} vs ${currentWorkers.length} actuales). Se conserva la nómina completa.`);
       } else if (d.trabajadores.length === 0 && currentWorkers.length > 0 && !isExplicitPurge) {
         // Preservar nómina local si la respuesta es vacía no intencionada (evita parpadeo)
         // y asegurar que el servidor central reciba los trabajadores cargados
         syncToServerRef.current({ trabajadores: currentWorkers });
       } else {
-        const userRol = getSession()?.rol;
-        const hoy = getLocalToday();
+        const rawList = d.trabajadores;
 
         // Mapa de trabajadores locales existentes para preservar grupo y líder si vienen sin definir
         const localWorkersMap = new Map<string, Trabajador>();
@@ -256,15 +264,6 @@ export default function App() {
           if (cDni) localWorkersMap.set(cDni, lw);
           if (lw.id) localWorkersMap.set(lw.id, lw);
         });
-
-        // Para rol Trabajador, filtrar registros de días anteriores
-        const rawList = userRol === 'Trabajador'
-          ? d.trabajadores.filter((t: any) => {
-              if (!t.fecha) return true;
-              const fNorm = normalizeDateString(t.fecha);
-              return !fNorm || fNorm >= hoy;
-            })
-          : d.trabajadores;
 
         const seen = new Set<string>();
         const uniqueWorkers: Trabajador[] = [];
@@ -526,7 +525,7 @@ export default function App() {
       es.onmessage = (event) => {
         try {
           const parsed = JSON.parse(event.data);
-          if (parsed && (parsed.type === 'sync' || parsed.type === 'usuarios_updated')) {
+          if (parsed && (parsed.type === 'sync' || parsed.type === 'usuarios_updated' || parsed.type === 'init')) {
             if (parsed.data) {
               applyServerData(parsed.data, true);
             } else {
@@ -1255,10 +1254,6 @@ export default function App() {
     setTrabajadoresState(mergedList);
     saveTrabajadores(mergedList);
 
-    // PASO 2: Activar Modo Offline con los trabajadores cargados para que no se vuelva a sincronizar la nómina
-    setOfflineNominaLocked(true);
-    setOfflineNomina(true);
-
     const descModo =
       effectiveModo === 'reemplazar_fecha'
         ? `Nómina de fecha ${fechaFinal} actualizada (${workersWithFecha.length} trabajadores)`
@@ -1266,8 +1261,8 @@ export default function App() {
         ? `Trabajadores añadidos a fecha ${fechaFinal} (${workersWithFecha.length} trabajadores)`
         : `Nómina global reemplazada (${workersWithFecha.length} trabajadores)`;
 
-    addLog(`📥 ${descModo}. Total histórico en sistema: ${mergedList.length}. 🔒 Modo Offline activo: nómina asegurada en el dispositivo.`, 'ok');
-    addToast(`🔒 ${descModo}. Total en sistema: ${mergedList.length}.`, 'success');
+    addLog(`📥 ${descModo}. Total en sistema: ${mergedList.length}. Sincronizado con el servidor central.`, 'ok');
+    addToast(`✅ ${descModo}. Total en sistema: ${mergedList.length}.`, 'success');
 
     // Fast-path direct push to dedicated trabajadores endpoint
     fetch('/api/trabajadores', {

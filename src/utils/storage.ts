@@ -171,9 +171,12 @@ export function initializeStorage() {
     const TARGET_VERSION = 'v107_reset_realtime_trabajadores_table';
     
     // Check if this browser needs a clean wipe of all backup and cached data
-    if (typeof localStorage !== 'undefined' && localStorage.getItem(WIPE_VERSION_KEY) !== TARGET_VERSION) {
-      wipeAllBackupData(false);
-      localStorage.setItem(WIPE_VERSION_KEY, TARGET_VERSION);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(KEYS.OFFLINE_NOMINA_LOCKED);
+      if (localStorage.getItem(WIPE_VERSION_KEY) !== TARGET_VERSION) {
+        wipeAllBackupData(false);
+        localStorage.setItem(WIPE_VERSION_KEY, TARGET_VERSION);
+      }
     }
 
     // Always ensure login screen is required on shared links or when login parameter is present

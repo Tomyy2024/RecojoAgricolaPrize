@@ -293,15 +293,15 @@ async function startServer() {
         const data = snap.data();
         let changed = false;
 
-        // 1. Trabajadores (sincronizar nómina exacta desde la nube sin borrar accidentalmente)
+        // 1. Trabajadores (sincronizar nómina exacta desde la nube sin degradar accidentalmente a listas desactualizadas)
         if (Array.isArray(data.trabajadores)) {
           const isExplicitPurge = data.depurado === true || data.forceNominaUpdate === true;
-          if (data.trabajadores.length > 0 || isExplicitPurge || !(db.trabajadores && db.trabajadores.length > 0)) {
+          const currentCount = db.trabajadores?.length || 0;
+          if (isExplicitPurge || currentCount === 0 || data.trabajadores.length >= currentCount) {
             db.trabajadores = data.trabajadores;
             changed = true;
-          } else if ((db.trabajadores || []).length > 0 && data.trabajadores.length === 0) {
-            // El servidor local ya tiene trabajadores pero Firestore está vacío: sincronizar a la nube
-            syncToCloudFirestore({ trabajadores: db.trabajadores });
+          } else {
+            console.log(`[Backend] Preservando nómina autoritativa (${currentCount} trabajadores vs ${data.trabajadores.length} en Firestore)`);
           }
         }
 
@@ -418,8 +418,8 @@ async function startServer() {
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders?.();
 
-    // Send current state version on connect
-    res.write(`data: ${JSON.stringify({ type: 'init', version: db.version || 1, lastUpdated: db.lastUpdated })}\n\n`);
+    // Send current state version and data on connect
+    res.write(`data: ${JSON.stringify({ type: 'sync', version: db.version || 1, lastUpdated: db.lastUpdated, data: db })}\n\n`);
 
     sseClients.add(res);
 
@@ -435,6 +435,7 @@ async function startServer() {
     }
     res.json({
       status: 'ok',
+      version: db.version || 1,
       data: db
     });
   });
