@@ -1433,16 +1433,15 @@ async function startServer() {
           return res.json({ status: 'ok', data: db, version: db.version, ignoredStale: true });
         }
 
-        const isWorkerRole = incoming.userRole === 'Trabajador';
-        const isAdmin = incoming.userRole === 'Administrador' || !incoming.userRole || incoming.userRole === 'admin';
+        const isAdmin = incoming.userRole === 'Administrador' || incoming.userRole === 'admin' || incoming.isAdmin === true;
 
         if (Array.isArray(incoming.programas)) db.programas = incoming.programas;
         if (Array.isArray(incoming.programaGeneral)) db.programaGeneral = incoming.programaGeneral;
 
-        // Solo se ignora db.trabajadores si expresamente el rol es 'Trabajador'
-        if (!isWorkerRole && Array.isArray(incoming.trabajadores)) {
+        // Regla estricta: SOLO el rol Administrador puede modificar la nómina maestra de trabajadores.
+        // Los roles Supervisor, Digitador, Trabajador u otros NO pueden alterar la nómina bajo ninguna circunstancia.
+        if (isAdmin && Array.isArray(incoming.trabajadores)) {
           const isExplicitPurge = incoming.depurado === true || incoming.forceNominaUpdate === true || incoming.action === 'reset';
-          // Solo sobrescribir con arreglo vacío si es una depuración explícita
           if (incoming.trabajadores.length > 0 || isExplicitPurge || !(db.trabajadores && db.trabajadores.length > 0)) {
             db.trabajadores = incoming.trabajadores;
           }

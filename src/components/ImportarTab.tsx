@@ -52,8 +52,6 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
   const [mode, setMode] = useState<'file' | 'paste'>('file');
   const [pasteText, setPasteText] = useState('');
   const [parsedData, setParsedData] = useState<Omit<Trabajador, 'id' | 'fecha'>[] | null>(null);
-  const [replicarAlSheet, setReplicarAlSheet] = useState(true);
-  const [isReplicating, setIsReplicating] = useState(false);
 
   const parseCsvText = (text: string) => {
     const lines = text
@@ -173,25 +171,6 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
 
     onImportTrabajadores(newWorkers, modoImportacion, targetFechaStr);
 
-    if (replicarAlSheet) {
-      setIsReplicating(true);
-      replicarTrabajadoresAlSheet(
-        newWorkers,
-        getGsheetUrl(),
-        modoImportacion,
-        targetFechaStr,
-        session?.rol
-      ).then((res) => {
-        if (res.sheetOk) {
-          onToast(`🌐 Nómina replicada automáticamente al Google Sheet (${res.count} registros).`);
-        } else if (res.error) {
-          onToast(`⚠️ Nómina guardada localmente. Aviso Google Sheet: ${res.error}`);
-        }
-      }).catch(() => {}).finally(() => {
-        setIsReplicating(false);
-      });
-    }
-
     const desc =
       modoImportacion === 'reemplazar_fecha'
         ? `Nómina de fecha ${targetFechaStr} actualizada: ${newWorkers.length} trabajadores`
@@ -275,32 +254,13 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
               <ShieldCheck className="w-5 h-5 text-[#2e7d32] shrink-0" />
               <div>
                 <p className="text-xs font-bold text-[#1b5e20]">
-                  Rol Administrador Activo: Autorizado para cargar la nómina
+                  Rol Administrador Activo: Autorizado para cargar y actualizar la nómina
                 </p>
                 <p className="text-[11px] text-[#2e7d32]">
-                  Los cambios que importes se sincronizarán de inmediato en todos los dispositivos conectados.
+                  La nómina maestra es estática y protegida. Los datos que importes se sincronizarán directamente en la base central y en todos los dispositivos de campo.
                 </p>
               </div>
             </div>
-
-            {onDepurarTrabajadoresAyer && (
-              <button
-                type="button"
-                onClick={() => {
-                  const confirmMsg = countTrabajadoresAyer > 0
-                    ? `¿Estás seguro de depurar ${countTrabajadoresAyer} trabajadores del día anterior?\n\nSe eliminarán de la nómina en este equipo, en el servidor y en todos los dispositivos conectados para que no vuelvan a aparecer.`
-                    : '¿Deseas ejecutar la depuración de trabajadores de fechas anteriores a hoy?\n\nEsto asegurará que ningún equipo ni usuario con rol Trabajador vuelva a sincronizar personas de días pasados.';
-                  if (window.confirm(confirmMsg)) {
-                    onDepurarTrabajadoresAyer();
-                  }
-                }}
-                className="bg-red-700 hover:bg-red-800 text-white text-xs font-bold py-1.5 px-3 rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shrink-0 self-start sm:self-auto"
-                title="Depurar y limpiar trabajadores de días anteriores"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Depurar Día Anterior {countTrabajadoresAyer > 0 ? `(${countTrabajadoresAyer})` : ''}</span>
-              </button>
-            )}
           </div>
         )}
 
@@ -548,30 +508,10 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
               </div>
             </div>
 
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-3 space-y-2 text-xs text-emerald-900">
-              <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={replicarAlSheet}
-                  onChange={(e) => setReplicarAlSheet(e.target.checked)}
-                  className="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500 cursor-pointer"
-                />
-                <span className="font-bold text-emerald-950 flex items-center gap-1.5">
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-                  <span>Replicar automáticamente a la hoja 'Trabajadores' de Google Sheets</span>
-                </span>
-              </label>
-              {replicarAlSheet && (
-                <p className="pl-6 text-[11px] text-emerald-800 leading-normal">
-                  Al confirmar la importación, los datos se enviarán inmediatamente a Google Sheets para que la hoja quede actualizada sin ningún paso adicional.
-                </p>
-              )}
-            </div>
-
             <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-4 flex items-center gap-2.5 text-xs text-emerald-900">
               <ShieldCheck className="w-5 h-5 text-emerald-700 shrink-0" />
               <div>
-                <span className="font-bold">Protección Offline Automática:</span> Al confirmar, se activará automáticamente el <strong>Modo Offline</strong>. Los trabajadores quedarán blindados en el dispositivo para que no se restablezcan al perder o reconectar señal.
+                <span className="font-bold">Nómina Central Protegida:</span> Al confirmar, los datos se guardarán como la versión autoritativa en Firebase/Servidor y quedarán cacheados de manera segura en todos los dispositivos de campo.
               </div>
             </div>
 
@@ -584,21 +524,11 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
                 <span>Cancelar</span>
               </button>
               <button
-                disabled={isReplicating}
                 onClick={handleConfirmImport}
-                className="flex-2 bg-[#2e7d32] hover:bg-[#1b5e20] disabled:bg-emerald-400 text-white py-2.5 rounded-xl font-bold text-xs shadow-md flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.99]"
+                className="flex-2 bg-[#2e7d32] hover:bg-[#1b5e20] text-white py-2.5 rounded-xl font-bold text-xs shadow-md flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.99]"
               >
-                {isReplicating ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Guardando y replicando al Sheet...</span>
-                  </>
-                ) : (
-                  <>
-                    <Check className="w-4 h-4" />
-                    <span>✅ Confirmar e Importar Nómina</span>
-                  </>
-                )}
+                <Check className="w-4 h-4" />
+                <span>✅ Confirmar e Importar Nómina</span>
               </button>
             </div>
           </div>

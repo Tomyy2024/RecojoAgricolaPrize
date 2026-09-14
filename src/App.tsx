@@ -408,26 +408,6 @@ export default function App() {
         console.warn('Firestore fetch error in fetchCentralizedData:', err);
       }
     }
-
-    // 3. Fallback: Google Sheets Cloud Backend (solo si el servidor central y Firestore no responden)
-    if (!fetchedFromServer) {
-      const url = getGsheetUrl();
-      if (url) {
-        try {
-          const gRes = await fetch(`${url}?accion=export`);
-          if (gRes.ok) {
-            const gJson = await gRes.json();
-            if (gJson && gJson.status === 'ok' && gJson.data) {
-              const gData = gJson.data;
-              applyServerData(gData, silent);
-              syncToServerRef.current(gData);
-            }
-          }
-        } catch {
-          // Offline fallback
-        }
-      }
-    }
   }, [applyServerData]);
 
   // Network Online/Offline Detection (Paso 1)
@@ -471,13 +451,14 @@ export default function App() {
       const activeSession = session || getSession();
       const currentRole = activeSession?.rol || 'Administrador';
       const currentName = activeSession?.nombre || 'Administrador';
+      const isAdmin = currentRole === 'Administrador' || currentRole === 'admin';
 
-      const basePayload = {
+      const basePayload: Record<string, any> = {
         userRole: currentRole,
         userName: currentName,
+        isAdmin,
         programas: getProgramas(),
         programaGeneral: getProgramaGeneral(),
-        trabajadores: getTrabajadores(),
         detalleJabas: getDetalleJabas(),
         usuarios: getUsuarios(),
         validaciones: getValidaciones(),
@@ -486,8 +467,13 @@ export default function App() {
         reservas: getReservas()
       };
 
+      // Exclusivo Administrador: La nómina maestra solo puede ser mutada por el Administrador
+      if (isAdmin) {
+        basePayload.trabajadores = getTrabajadores();
+      }
+
       const payload = payloadOverride
-        ? { ...basePayload, ...payloadOverride, userRole: payloadOverride.userRole || currentRole }
+        ? { ...basePayload, ...payloadOverride, userRole: payloadOverride.userRole || currentRole, isAdmin: payloadOverride.isAdmin ?? isAdmin }
         : basePayload;
 
       // Broadcast to all tabs on this machine instantly
@@ -589,40 +575,12 @@ export default function App() {
 
   const autoPullDoneRef = useRef(false);
 
-  // Background Auto-fetch from Google Sheets if configured and server not authoritative (ejecutado 1 sola vez al inicio)
+  // Background Auto-fetch: La base de datos central (Firebase / Servidor) es la única fuente de verdad autoritativa.
+  // No se sobreescribe la nómina con Google Sheets para evitar desincronización y corrupción.
   useEffect(() => {
     if (autoPullDoneRef.current) return;
     autoPullDoneRef.current = true;
-
-    const autoPullOnStart = async () => {
-      const url = getGsheetUrl();
-      if (!url) return;
-      try {
-        // Verificar si el servidor ya tiene datos de trabajadores
-        const sRes = await fetch('/api/data').catch(() => null);
-        if (sRes && sRes.ok) {
-          const sJson = await sRes.json().catch(() => null);
-          if (sJson && sJson.status === 'ok' && sJson.data && (sJson.data.trabajadores || []).length > 0) {
-            // El servidor central ya cuenta con la nómina autoritativa más reciente
-            return;
-          }
-        }
-
-        const res = await fetch(`${url}?accion=export`);
-        if (!res.ok) return;
-        const json = await res.json();
-        if (json && json.status === 'ok' && json.data) {
-          const d = json.data;
-          applyServerData(d, true);
-          addLog('☁️ Datos sincronizados automáticamente con Google Sheets', 'ok');
-          syncToServer(d);
-        }
-      } catch {
-        // Silently use offline cache
-      }
-    };
-    autoPullOnStart();
-  }, [addLog, syncToServer, applyServerData]);
+  }, []);
 
   // Background Auto-Sync Trigger
   const triggerAutoSync = useCallback(async (actionName: string, updatedPayload?: any) => {
@@ -631,17 +589,28 @@ export default function App() {
 
     // 2. Sync to Firebase Firestore in real-time
     try {
-      const firestoreData = {
+      const activeSession = session || getSession();
+      const currentRole = activeSession?.rol || 'Administrador';
+      const isAdmin = currentRole === 'Administrador' || currentRole === 'admin';
+
+      const firestoreData: Record<string, any> = {
         programas: getProgramas(),
         programaGeneral: getProgramaGeneral(),
-        trabajadores: getTrabajadores(),
         detalleJabas: getDetalleJabas(),
         usuarios: getUsuarios(),
         validaciones: getValidaciones(),
         lideres: getLideres(),
         grupos: getGrupos(),
+        userRole: currentRole,
+        isAdmin,
         ...updatedPayload
       };
+
+      // Regla estricta: Solo el Administrador sincroniza la nómina de trabajadores a Firestore
+      if (isAdmin) {
+        firestoreData.trabajadores = getTrabajadores();
+      }
+
       syncAllDataToFirestore(firestoreData).catch(() => {});
     } catch {
       // Offline fallback

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserSession, DeviceViewMode } from '../types';
-import { LogOut, User, Sprout, Cloud, RefreshCw, QrCode, Smartphone, Monitor, Clock, ShieldCheck, Lock, Wifi, WifiOff } from 'lucide-react';
+import { LogOut, User, Sprout, Cloud, RefreshCw, QrCode, Smartphone, Monitor, Clock, ShieldCheck, Lock, Wifi, WifiOff, Users } from 'lucide-react';
 
 interface HeaderProps {
   session: UserSession;
@@ -106,36 +106,18 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
-          {/* Botón / Indicador de Bloquear Nómina (Disponible para Administrador y Trabajador) */}
-          {onToggleOfflineNomina && (
-            <button
-              type="button"
-              onClick={onToggleOfflineNomina}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold transition-all active:scale-95 cursor-pointer shadow-sm ${
-                offlineNomina
-                  ? 'bg-amber-400 text-amber-950 hover:bg-amber-300 border border-amber-300 ring-1 ring-amber-400/40'
-                  : 'bg-white/15 text-white/90 hover:bg-white/25 border border-white/20'
-              }`}
-              title={
-                offlineNomina
-                  ? 'Modo Offline Nómina ACTIVO (Nómina Bloqueada): Los trabajadores no se reinician ni re-sincronizan ante cortes de señal. Click para desbloquear.'
-                  : 'Nómina Desbloqueada: Click para Bloquear Nómina en este dispositivo y evitar alteraciones de red.'
-              }
+          {/* Indicador de Nómina Central Protegida */}
+          {typeof trabajadoresCount === 'number' && (
+            <span
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-white/15 text-white/90 border border-white/20 shadow-xs"
+              title="Total de trabajadores registrados en la nómina maestra central"
             >
-              {offlineNomina ? (
-                <Lock className="w-3.5 h-3.5 text-amber-950" />
-              ) : (
-                <ShieldCheck className="w-3.5 h-3.5 text-[#cbffc2]" />
-              )}
-              <span>{offlineNomina ? '🔒 Nómina Bloqueada' : 'Bloquear Nómina'}</span>
-              {typeof trabajadoresCount === 'number' && trabajadoresCount > 0 && (
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
-                  offlineNomina ? 'bg-amber-900/30 text-amber-950' : 'bg-black/30 text-white'
-                }`}>
-                  {trabajadoresCount}
-                </span>
-              )}
-            </button>
+              <Users className="w-3.5 h-3.5 text-emerald-200" />
+              <span>Nómina:</span>
+              <span className="font-mono font-bold text-white bg-black/25 px-1.5 py-0.2 rounded-full text-[10px]">
+                {trabajadoresCount}
+              </span>
+            </span>
           )}
 
           {/* Indicador de Señal de Red */}

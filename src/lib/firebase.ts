@@ -151,15 +151,21 @@ export async function syncAllDataToFirestore(data: {
   auditoriaIngresos?: any[];
   modulos?: Record<string, string[]>;
   userEmail?: string;
+  userRole?: string;
+  isAdmin?: boolean;
 }) {
   const path = 'app_state/master_data';
   try {
     const updateObj: Record<string, any> = {
-      version: 11,
+      version: 12,
       lastUpdated: new Date().toISOString(),
       updatedBy: data.userEmail || auth.currentUser?.email || 'App User'
     };
-    if (Array.isArray(data.trabajadores)) updateObj.trabajadores = data.trabajadores;
+    // Regla de Oro: Solo el Administrador puede actualizar la nómina en Firebase
+    const canUpdateNomina = data.isAdmin === true || data.userRole === 'Administrador' || data.userRole === 'admin';
+    if (canUpdateNomina && Array.isArray(data.trabajadores)) {
+      updateObj.trabajadores = data.trabajadores;
+    }
     if (Array.isArray(data.programas)) updateObj.programas = data.programas;
     if (Array.isArray(data.programaGeneral)) updateObj.programaGeneral = data.programaGeneral;
     if (Array.isArray(data.detalleJabas)) updateObj.detalleJabas = data.detalleJabas;
