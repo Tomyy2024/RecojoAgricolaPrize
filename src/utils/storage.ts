@@ -745,17 +745,97 @@ export function filterTrabajadoresParaRol(trabajadores: Trabajador[], rol?: User
 }
 
 // Programas
+export function sanitizeAndMergeProgramas(existing: Programa[], incoming: Programa[]): Programa[] {
+  const map = new Map<string, Programa>();
+
+  (existing || []).forEach((p) => {
+    if (!p) return;
+    const rawF = String(p.fecha || '').trim();
+    const cleanFecha = normalizeDateString(rawF) || rawF;
+    const cleanId = String(p.id || '').trim();
+    const cleanFundo = String(p.fundo || '').trim();
+    const cleanModulo = String(p.modulo || '').trim();
+    const key = cleanId || `PROG_${cleanFecha}_${cleanFundo}_${cleanModulo}`;
+    map.set(key, {
+      ...p,
+      id: cleanId || key,
+      fecha: cleanFecha,
+      fundo: cleanFundo,
+      modulo: cleanModulo,
+      jabas: Number(p.jabas) || 0,
+      supervisor: String(p.supervisor || '').trim(),
+      estado: String(p.estado || 'Abierto')
+    });
+  });
+
+  (incoming || []).forEach((p) => {
+    if (!p) return;
+    const rawF = String(p.fecha || '').trim();
+    const cleanFecha = normalizeDateString(rawF) || rawF;
+    const cleanId = String(p.id || '').trim();
+    const cleanFundo = String(p.fundo || '').trim();
+    const cleanModulo = String(p.modulo || '').trim();
+    const key = cleanId || `PROG_${cleanFecha}_${cleanFundo}_${cleanModulo}`;
+
+    if (map.has(key)) {
+      const prev = map.get(key)!;
+      map.set(key, {
+        ...prev,
+        ...p,
+        id: cleanId || prev.id,
+        fecha: cleanFecha || prev.fecha,
+        fundo: cleanFundo || prev.fundo,
+        modulo: cleanModulo || prev.modulo,
+        jabas: Number(p.jabas) !== undefined ? Number(p.jabas) : prev.jabas,
+        supervisor: p.supervisor ? String(p.supervisor).trim() : prev.supervisor,
+        estado: p.estado || prev.estado || 'Abierto',
+        lotes: Array.isArray(p.lotes) && p.lotes.length > 0 ? p.lotes : prev.lotes,
+        totalLotes: Array.isArray(p.lotes) && p.lotes.length > 0 ? p.lotes.length : prev.totalLotes
+      });
+    } else {
+      map.set(key, {
+        ...p,
+        id: cleanId || key,
+        fecha: cleanFecha,
+        fundo: cleanFundo,
+        modulo: cleanModulo,
+        jabas: Number(p.jabas) || 0,
+        supervisor: String(p.supervisor || '').trim(),
+        estado: String(p.estado || 'Abierto')
+      });
+    }
+  });
+
+  return Array.from(map.values()).sort((a, b) => {
+    const da = a.fecha || '';
+    const db = b.fecha || '';
+    return db.localeCompare(da);
+  });
+}
+
 export function getProgramas(): Programa[] {
   try {
     const raw = localStorage.getItem(KEYS.PROGRAMAS);
-    return raw ? JSON.parse(raw) : INITIAL_PROGRAMAS;
+    if (!raw) return INITIAL_PROGRAMAS;
+    const parsed: Programa[] = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return INITIAL_PROGRAMAS;
+    return sanitizeAndMergeProgramas([], parsed);
   } catch {
     return INITIAL_PROGRAMAS;
   }
 }
 
 export function saveProgramas(programas: Programa[]) {
-  localStorage.setItem(KEYS.PROGRAMAS, JSON.stringify(programas));
+  const current = getProgramas();
+  const merged = sanitizeAndMergeProgramas(current, programas);
+  localStorage.setItem(KEYS.PROGRAMAS, JSON.stringify(merged));
+}
+
+export function deleteProgramaFromStorage(id: string): Programa[] {
+  const current = getProgramas();
+  const updated = current.filter(p => p.id !== id);
+  localStorage.setItem(KEYS.PROGRAMAS, JSON.stringify(updated));
+  return updated;
 }
 
 // Programa General
@@ -798,11 +878,13 @@ export function sanitizeAndDeduplicateDetalleJabas(list: DetalleJaba[]): Detalle
     }
 
     const normModulo = String(item.modulo || 'M01').trim().toUpperCase();
-    const cleanId = String(item.id || '').trim();
-    const primaryKey = cleanId || `${normFecha}_${cleanDni}_${normModulo}`;
+    const personKey = cleanDni || (trabajador ? trabajador.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '');
+    // Clave unívoca por fecha, persona y módulo para evitar cualquier duplicación accidental
+    const primaryKey = `${normFecha}_${personKey}_${normModulo}`;
+    const cleanId = `JABA_${normFecha}_${cleanDni || 'P'}_${normModulo}`;
 
     const cleanRecord: DetalleJaba = {
-      id: cleanId || primaryKey,
+      id: cleanId,
       fecha: normFecha,
       timestamp: item.timestamp || new Date().toISOString(),
       supervisor: String(item.supervisor || '').trim(),
@@ -817,22 +899,32 @@ export function sanitizeAndDeduplicateDetalleJabas(list: DetalleJaba[]): Detalle
 
     if (map.has(primaryKey)) {
       const existing = map.get(primaryKey)!;
+      // Priorizar el registro más reciente por timestamp
+      const isItemNewer = (item.timestamp || '') >= (existing.timestamp || '');
+      const newer = isItemNewer ? cleanRecord : existing;
+      const older = isItemNewer ? existing : cleanRecord;
       map.set(primaryKey, {
-        ...existing,
-        ...cleanRecord,
-        id: existing.id || cleanRecord.id,
-        jabas: Math.max(Number(existing.jabas) || 0, cleanRecord.jabas),
-        trabajador: cleanRecord.trabajador && !cleanRecord.trabajador.startsWith('Trabajador ') ? cleanRecord.trabajador : existing.trabajador,
-        supervisor: cleanRecord.supervisor || existing.supervisor,
-        grupo: cleanRecord.grupo || existing.grupo,
-        lider: cleanRecord.lider || existing.lider
+        ...older,
+        ...newer,
+        id: cleanId,
+        jabas: newer.jabas, // Respetar estrictamente la jaba asignada más reciente (no duplicar ni sumar)
+        trabajador: newer.trabajador && !newer.trabajador.startsWith('Trabajador ') ? newer.trabajador : older.trabajador,
+        supervisor: newer.supervisor || older.supervisor,
+        grupo: newer.grupo || older.grupo,
+        lider: newer.lider || older.lider,
+        timestamp: newer.timestamp || older.timestamp
       });
     } else {
       map.set(primaryKey, cleanRecord);
     }
   });
 
-  return Array.from(map.values());
+  return Array.from(map.values()).sort((a, b) => {
+    const da = a.fecha || '';
+    const db = b.fecha || '';
+    if (da !== db) return db.localeCompare(da);
+    return (b.timestamp || '').localeCompare(a.timestamp || '');
+  });
 }
 
 export function getDetalleJabas(): DetalleJaba[] {

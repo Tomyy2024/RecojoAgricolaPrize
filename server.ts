@@ -87,6 +87,93 @@ function normalizeDateServer(str?: string): string {
   return s.split('T')[0].split(' ')[0].trim();
 }
 
+function sanitizeAndMergeProgramasServer(existing: any[], incoming: any[]): any[] {
+  const map = new Map<string, any>();
+
+  (existing || []).forEach((p) => {
+    if (!p || typeof p !== 'object') return;
+    const rawF = String(p.fecha || '').trim();
+    const cleanFecha = normalizeDateServer(rawF) || rawF;
+    const cleanId = String(p.id || '').trim();
+    const cleanFundo = String(p.fundo || '').trim();
+    const cleanModulo = String(p.modulo || '').trim();
+    const key = cleanId || `PROG_${cleanFecha}_${cleanFundo}_${cleanModulo}`;
+    map.set(key, {
+      ...p,
+      id: cleanId || key,
+      fecha: cleanFecha,
+      fundo: cleanFundo,
+      modulo: cleanModulo,
+      jabas: Number(p.jabas) || 0,
+      supervisor: String(p.supervisor || '').trim(),
+      estado: String(p.estado || 'Abierto')
+    });
+  });
+
+  (incoming || []).forEach((p) => {
+    if (!p || typeof p !== 'object') return;
+    const rawF = String(p.fecha || '').trim();
+    const cleanFecha = normalizeDateServer(rawF) || rawF;
+    const cleanId = String(p.id || '').trim();
+    const cleanFundo = String(p.fundo || '').trim();
+    const cleanModulo = String(p.modulo || '').trim();
+    const key = cleanId || `PROG_${cleanFecha}_${cleanFundo}_${cleanModulo}`;
+
+    if (map.has(key)) {
+      const prev = map.get(key);
+      map.set(key, {
+        ...prev,
+        ...p,
+        id: cleanId || prev.id,
+        fecha: cleanFecha || prev.fecha,
+        fundo: cleanFundo || prev.fundo,
+        modulo: cleanModulo || prev.modulo,
+        jabas: Number(p.jabas) !== undefined ? Number(p.jabas) : prev.jabas,
+        supervisor: p.supervisor ? String(p.supervisor).trim() : prev.supervisor,
+        estado: p.estado || prev.estado || 'Abierto',
+        lotes: Array.isArray(p.lotes) && p.lotes.length > 0 ? p.lotes : prev.lotes,
+        totalLotes: Array.isArray(p.lotes) && p.lotes.length > 0 ? p.lotes.length : prev.totalLotes
+      });
+    } else {
+      map.set(key, {
+        ...p,
+        id: cleanId || key,
+        fecha: cleanFecha,
+        fundo: cleanFundo,
+        modulo: cleanModulo,
+        jabas: Number(p.jabas) || 0,
+        supervisor: String(p.supervisor || '').trim(),
+        estado: String(p.estado || 'Abierto')
+      });
+    }
+  });
+
+  return Array.from(map.values()).sort((a, b) => {
+    const da = a.fecha || '';
+    const db = b.fecha || '';
+    return db.localeCompare(da);
+  });
+}
+
+function sanitizeAndMergeProgramaGeneralServer(existing: any[], incoming: any[]): any[] {
+  const map = new Map<string, any>();
+  (existing || []).forEach((pg) => {
+    if (!pg || typeof pg !== 'object') return;
+    const key = String(pg.id || `${pg.fundo}_${pg.modulo}`).trim();
+    map.set(key, pg);
+  });
+  (incoming || []).forEach((pg) => {
+    if (!pg || typeof pg !== 'object') return;
+    const key = String(pg.id || `${pg.fundo}_${pg.modulo}`).trim();
+    if (map.has(key)) {
+      map.set(key, { ...map.get(key), ...pg });
+    } else {
+      map.set(key, pg);
+    }
+  });
+  return Array.from(map.values());
+}
+
 function sanitizeValidaciones(list: any[]): any[] {
   if (!Array.isArray(list)) return [];
   const seen = new Set<string>();
@@ -151,11 +238,12 @@ function sanitizeAndDeduplicateDetalleJabas(list: any[]): any[] {
     }
 
     const normModulo = String(item.modulo || 'M01').trim().toUpperCase();
-    const cleanId = String(item.id || '').trim();
-    const primaryKey = cleanId || `${fecha}_${cleanDni}_${normModulo}`;
+    const personKey = cleanDni || (trabajador ? trabajador.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '');
+    const primaryKey = `${fecha}_${personKey}_${normModulo}`;
+    const cleanId = `JABA_${fecha}_${cleanDni || 'P'}_${normModulo}`;
 
     const cleanRecord = {
-      id: cleanId || primaryKey,
+      id: cleanId,
       fecha: fecha,
       timestamp: item.timestamp || new Date().toISOString(),
       supervisor: String(item.supervisor || '').trim(),
@@ -170,22 +258,31 @@ function sanitizeAndDeduplicateDetalleJabas(list: any[]): any[] {
 
     if (map.has(primaryKey)) {
       const existing = map.get(primaryKey);
+      const isItemNewer = (item.timestamp || '') >= (existing.timestamp || '');
+      const newer = isItemNewer ? cleanRecord : existing;
+      const older = isItemNewer ? existing : cleanRecord;
       map.set(primaryKey, {
-        ...existing,
-        ...cleanRecord,
-        id: existing.id || cleanRecord.id,
-        jabas: Math.max(Number(existing.jabas) || 0, cleanRecord.jabas),
-        trabajador: cleanRecord.trabajador && !cleanRecord.trabajador.startsWith('Trabajador ') ? cleanRecord.trabajador : existing.trabajador,
-        supervisor: cleanRecord.supervisor || existing.supervisor,
-        grupo: cleanRecord.grupo || existing.grupo,
-        lider: cleanRecord.lider || existing.lider
+        ...older,
+        ...newer,
+        id: cleanId,
+        jabas: newer.jabas,
+        trabajador: newer.trabajador && !newer.trabajador.startsWith('Trabajador ') ? newer.trabajador : older.trabajador,
+        supervisor: newer.supervisor || older.supervisor,
+        grupo: newer.grupo || older.grupo,
+        lider: newer.lider || older.lider,
+        timestamp: newer.timestamp || older.timestamp
       });
     } else {
       map.set(primaryKey, cleanRecord);
     }
   });
 
-  return Array.from(map.values());
+  return Array.from(map.values()).sort((a: any, b: any) => {
+    const da = a.fecha || '';
+    const db = b.fecha || '';
+    if (da !== db) return db.localeCompare(da);
+    return (b.timestamp || '').localeCompare(a.timestamp || '');
+  });
 }
 
 async function pushDetalleJabasToGoogleSheet(sheetUrl: string, cleanDetalle: any[]) {
@@ -324,14 +421,20 @@ async function startServer() {
           }
         }
 
-        // 4. Programas & ProgramaGeneral
-        if (Array.isArray(data.programas) && data.programas.length > (db.programas?.length || 0)) {
-          db.programas = data.programas;
-          changed = true;
+        // 4. Programas & ProgramaGeneral (Fusionar preservando días anteriores)
+        if (Array.isArray(data.programas) && data.programas.length > 0) {
+          const merged = sanitizeAndMergeProgramasServer(db.programas || [], data.programas);
+          if (merged.length !== (db.programas || []).length || JSON.stringify(merged) !== JSON.stringify(db.programas)) {
+            db.programas = merged;
+            changed = true;
+          }
         }
-        if (Array.isArray(data.programaGeneral) && data.programaGeneral.length > (db.programaGeneral?.length || 0)) {
-          db.programaGeneral = data.programaGeneral;
-          changed = true;
+        if (Array.isArray(data.programaGeneral) && data.programaGeneral.length > 0) {
+          const merged = sanitizeAndMergeProgramaGeneralServer(db.programaGeneral || [], data.programaGeneral);
+          if (merged.length !== (db.programaGeneral || []).length || JSON.stringify(merged) !== JSON.stringify(db.programaGeneral)) {
+            db.programaGeneral = merged;
+            changed = true;
+          }
         }
 
         // 5. Validaciones
@@ -1066,6 +1169,61 @@ async function startServer() {
     }
   });
 
+  // Endpoint para sincronizar o recargar programación desde la hoja 'Programacion' de Google Sheets
+  app.post('/api/cargar-programas-sheet', async (req, res) => {
+    try {
+      const { url } = req.body || {};
+      const targetUrl = url || 'https://script.google.com/macros/s/AKfycbwUwC4PwsVrEGdGItPkAwu8-k8lJePnEIwitNhakUGqHEKWLZLr_i49FMMDh-fog0y2/exec';
+      const fetchUrl = targetUrl.includes('?') ? `${targetUrl}&accion=export` : `${targetUrl}?accion=export`;
+
+      const response = await fetch(fetchUrl);
+      if (!response.ok) {
+        return res.status(502).json({
+          status: 'error',
+          message: `Error al conectar con Google Sheets Web App (HTTP ${response.status})`
+        });
+      }
+
+      const json: any = await response.json();
+      if (!json || json.status !== 'ok' || !json.data) {
+        return res.status(502).json({
+          status: 'error',
+          message: 'La respuesta de Google Sheets no contiene datos válidos.'
+        });
+      }
+
+      const incomingProgramas = json.data.programas;
+      if (!Array.isArray(incomingProgramas)) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'La lista de programas no fue encontrada en la respuesta de Google Sheets.'
+        });
+      }
+
+      const merged = sanitizeAndMergeProgramasServer(db.programas || [], incomingProgramas);
+      db.programas = merged;
+      db.version = (db.version || 1) + 1;
+      db.lastUpdated = new Date().toISOString();
+      saveDatabase(db);
+      syncToCloudFirestore({ programas: db.programas });
+      notifyClients({ type: 'sync', version: db.version, data: db });
+
+      return res.json({
+        status: 'ok',
+        message: `Programación sincronizada: ${incomingProgramas.length} registros cargados desde Google Sheets. Total en sistema: ${merged.length}`,
+        count: incomingProgramas.length,
+        total: merged.length,
+        programas: merged
+      });
+    } catch (err: any) {
+      console.error('Error en cargar-programas-sheet:', err);
+      return res.status(500).json({
+        status: 'error',
+        message: err.message || 'Error interno al cargar programación desde Google Sheets'
+      });
+    }
+  });
+
   // Endpoint para cargar y consolidar registros de la hoja 'Registro_Avance' de Google Sheets
   app.post('/api/cargar-avance-sheet', async (req, res) => {
     try {
@@ -1113,89 +1271,54 @@ async function startServer() {
         });
       }
 
-      // Normalizar y consolidar con db.detalleJabas
-      const existingMap = new Map<string, any>();
-      (db.detalleJabas || []).forEach((d: any) => {
-        const normFecha = normalizeDateServer(d.fecha) || normalizeDateServer(d.timestamp) || '2026-09-11';
-        const cleanDni = String(d.dni || '').replace(/\D/g, '') || String(d.dni || '').trim();
-        const normMod = String(d.modulo || 'M01').trim().toUpperCase();
-        const key = d.id || `${normFecha}_${cleanDni}_${normMod}`;
-        existingMap.set(key, d);
+      // Normalizar y consolidar limpiamente utilizando sanitizeAndDeduplicateDetalleJabas
+      let ignoredGhostCount = 0;
+      const validIncoming = incomingRows.filter((r: any) => {
+        const d = String(r.dni || '').trim();
+        const t = String(r.trabajador || '').trim();
+        const j = Number(r.jabas) || 0;
+        if ((!d && !t) || j <= 0 || isNaN(j)) {
+          ignoredGhostCount++;
+          return false;
+        }
+        return true;
       });
 
-      let addedCount = 0;
-      let updatedCount = 0;
-      let ignoredGhostCount = 0;
+      const initialCount = (db.detalleJabas || []).length;
+      const combined = sanitizeAndDeduplicateDetalleJabas([...(db.detalleJabas || []), ...validIncoming]);
+      db.detalleJabas = combined;
+      const addedCount = Math.max(0, combined.length - initialCount);
+      const updatedCount = validIncoming.length - addedCount;
+
       const workersToAdd: any[] = [];
       const existingWorkerDnis = new Set<string>((db.trabajadores || []).map((t: any) => String(t.dni || '').trim()));
 
-      incomingRows.forEach((row: any, idx: number) => {
+      incomingRows.forEach((row: any) => {
         const rawDni = String(row.dni || '').trim();
         const cleanDni = rawDni.replace(/\D/g, '') || rawDni;
-        const trabajador = String(row.trabajador || '').trim();
-        const jabas = Number(row.jabas) || 0;
-
-        // Strict rejection: discard rows with empty worker/DNI or 0 jabas
-        if ((!cleanDni && !trabajador) || jabas <= 0 || isNaN(jabas)) {
-          ignoredGhostCount++;
-          return;
-        }
-
         const effectiveDni = cleanDni || rawDni;
+        const trabajador = String(row.trabajador || '').trim();
         const normFecha = normalizeDateServer(row.fecha) || normalizeDateServer(row.timestamp) || '2026-09-11';
-        const timestamp = row.timestamp || new Date().toISOString();
         const normMod = String(row.modulo || 'M01').trim().toUpperCase();
-        const rowId = row.id || `${normFecha}_${effectiveDni}_${normMod}`;
 
-        const normalizedRecord = {
-          id: rowId,
-          fecha: normFecha,
-          timestamp: timestamp,
-          supervisor: String(row.supervisor || '').trim(),
-          fundo: String(row.fundo || 'Santa Teresa').trim(),
-          modulo: normMod,
-          grupo: String(row.grupo || '').trim(),
-          lider: String(row.lider || '').trim(),
-          dni: effectiveDni,
-          trabajador: trabajador || (effectiveDni ? `Trabajador ${effectiveDni}` : 'Sin Nombre'),
-          jabas: Math.round(jabas)
-        };
-
-        if (existingMap.has(rowId)) {
-          updatedCount++;
-          const prev = existingMap.get(rowId);
-          existingMap.set(rowId, {
-            ...prev,
-            ...normalizedRecord,
-            id: prev.id || rowId,
-            jabas: Math.max(Number(prev.jabas) || 0, normalizedRecord.jabas)
-          });
-        } else {
-          addedCount++;
-          existingMap.set(rowId, normalizedRecord);
-        }
-
-        // Si el trabajador no existe en el roster de trabajadores, registrarlo automáticamente
-        if (effectiveDni && !existingWorkerDnis.has(effectiveDni)) {
+        if (effectiveDni && !existingWorkerDnis.has(effectiveDni) && trabajador) {
           existingWorkerDnis.add(effectiveDni);
           workersToAdd.push({
-            id: `w_${effectiveDni}`,
+            id: `W_${effectiveDni}_${Date.now()}`,
             dni: effectiveDni,
-            nombres: normalizedRecord.trabajador,
-            fundo: normalizedRecord.fundo,
-            modulo: normalizedRecord.modulo,
-            supervisor: normalizedRecord.supervisor,
-            grupo: normalizedRecord.grupo,
-            lider: normalizedRecord.lider,
-            tipo: 'Cosechero',
-            jabas: jabas,
-            fecha: normFecha
+            nombres: trabajador,
+            supervisor: String(row.supervisor || '').trim(),
+            fundo: String(row.fundo || 'Santa Teresa').trim(),
+            modulo: normMod,
+            grupo: String(row.grupo || '').trim(),
+            lider: String(row.lider || '').trim(),
+            fecha: normFecha,
+            tipo: 'Cosechador',
+            jabas: Number(row.jabas) || 0
           });
         }
       });
 
-      // Asegurar que toda la lista esté limpia y deduplicada
-      db.detalleJabas = sanitizeAndDeduplicateDetalleJabas(Array.from(existingMap.values()));
       if (workersToAdd.length > 0) {
         db.trabajadores = [...(db.trabajadores || []), ...workersToAdd];
       }
@@ -1435,8 +1558,12 @@ async function startServer() {
 
         const isAdmin = incoming.userRole === 'Administrador';
 
-        if (Array.isArray(incoming.programas)) db.programas = incoming.programas;
-        if (Array.isArray(incoming.programaGeneral)) db.programaGeneral = incoming.programaGeneral;
+        if (Array.isArray(incoming.programas)) {
+          db.programas = sanitizeAndMergeProgramasServer(db.programas || [], incoming.programas);
+        }
+        if (Array.isArray(incoming.programaGeneral)) {
+          db.programaGeneral = sanitizeAndMergeProgramaGeneralServer(db.programaGeneral || [], incoming.programaGeneral);
+        }
 
         // SEGURIDAD CRÍTICA: Únicamente el usuario con rol Administrador puede actualizar la nómina central (db.trabajadores).
         // Si un Supervisor, Digitador o usuario no verificado envía trabajadores, el servidor NUNCA sobrescribe la nómina central.

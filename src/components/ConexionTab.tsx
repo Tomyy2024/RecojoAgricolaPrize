@@ -38,6 +38,7 @@ import {
   ChevronUp,
   ShieldCheck,
   Table,
+  Calendar,
   Zap,
   Sparkles,
   LogIn,
@@ -150,24 +151,69 @@ function doPost(e) {
       }
     }
 
-    // 3. Guardar Programas de Cosecha
+    // 3. Guardar Programas de Cosecha / Programación (Preservando días anteriores)
     if (payload.programas && payload.programas.length > 0) {
-      var sheetProg = getOrCreateSheet(ss, 'Programas', [
-        'ID', 'Fecha', 'Fundo', 'Modulo', 'Jabas_Estimadas', 'Supervisor', 'Estado'
-      ]);
-      sheetProg.clearContents();
-      var rowsProg = [['ID', 'Fecha', 'Fundo', 'Modulo', 'Jabas_Estimadas', 'Supervisor', 'Estado']];
+      var sheetProg = ss.getSheetByName('Programacion') || 
+                      ss.getSheetByName('Programas') || 
+                      ss.getSheetByName('Programación') || 
+                      ss.getSheetByName('Programa');
+      if (!sheetProg) {
+        sheetProg = ss.insertSheet('Programacion');
+        sheetProg.appendRow(['ID', 'Fecha', 'Fundo', 'Modulo', 'Jabas_Estimadas', 'Supervisor', 'Estado']);
+      }
+
+      var existingProgMap = {};
+      if (sheetProg.getLastRow() > 1) {
+        var existingValues = sheetProg.getRange(2, 1, sheetProg.getLastRow() - 1, Math.min(sheetProg.getLastColumn(), 7)).getValues();
+        existingValues.forEach(function(r) {
+          var id = String(r[0] || '').trim();
+          var rawF = r[1];
+          var f = formatDateVal(rawF);
+          var fundo = String(r[2] || '').trim();
+          var mod = String(r[3] || '').trim();
+          var key = id || (f + '_' + fundo + '_' + mod);
+          if (key) {
+            existingProgMap[key] = [
+              id || ('PROG_' + f + '_' + fundo + '_' + mod),
+              f,
+              fundo,
+              mod,
+              Number(r[4]) || 0,
+              String(r[5] || '').trim(),
+              String(r[6] || 'Abierto').trim()
+            ];
+          }
+        });
+      }
+
       payload.programas.forEach(function(p) {
-        rowsProg.push([
-          p.id || '',
-          p.fecha || '',
-          p.fundo || '',
-          p.modulo || '',
+        var id = String(p.id || '').trim();
+        var f = formatDateVal(p.fecha) || timestamp.toISOString().slice(0, 10);
+        var fundo = String(p.fundo || '').trim();
+        var mod = String(p.modulo || '').trim();
+        var key = id || (f + '_' + fundo + '_' + mod);
+        existingProgMap[key] = [
+          id || ('PROG_' + f + '_' + fundo + '_' + mod),
+          f,
+          fundo,
+          mod,
           Number(p.jabas) || 0,
-          p.supervisor || '',
-          p.estado || 'Abierto'
-        ]);
+          String(p.supervisor || '').trim(),
+          String(p.estado || 'Abierto').trim()
+        ];
       });
+
+      var allProgRows = Object.keys(existingProgMap).map(function(k) { return existingProgMap[k]; });
+      allProgRows.sort(function(a, b) {
+        return String(b[1] || '').localeCompare(String(a[1] || ''));
+      });
+
+      var rowsProg = [['ID', 'Fecha', 'Fundo', 'Modulo', 'Jabas_Estimadas', 'Supervisor', 'Estado']];
+      allProgRows.forEach(function(row) {
+        rowsProg.push(row);
+      });
+
+      sheetProg.clearContents();
       if (rowsProg.length > 0) {
         sheetProg.getRange(1, 1, rowsProg.length, 7).setValues(rowsProg);
       }
@@ -520,10 +566,13 @@ function doGet(e) {
           });
       }
 
-      // 3. Leer Programas
-      var sheetProg = ss.getSheetByName('Programas');
+      // 3. Leer Programas / Programación
+      var sheetProg = ss.getSheetByName('Programacion') || 
+                      ss.getSheetByName('Programas') || 
+                      ss.getSheetByName('Programación') || 
+                      ss.getSheetByName('Programa');
       if (sheetProg && sheetProg.getLastRow() > 1) {
-        var progValues = sheetProg.getRange(2, 1, sheetProg.getLastRow() - 1, 7).getValues();
+        var progValues = sheetProg.getRange(2, 1, sheetProg.getLastRow() - 1, Math.min(sheetProg.getLastColumn(), 7)).getValues();
         result.programas = progValues
           .filter(function(r) {
             return String(r[0] || '').trim() !== '' || String(r[1] || '').trim() !== '';
@@ -531,7 +580,7 @@ function doGet(e) {
           .map(function(r) {
             return {
               id: String(r[0] || ''),
-              fecha: String(r[1] || ''),
+              fecha: formatDateVal(r[1]),
               fundo: String(r[2] || ''),
               modulo: String(r[3] || ''),
               jabas: Number(r[4]) || 0,
@@ -542,9 +591,11 @@ function doGet(e) {
       }
 
       // 4. Leer Programa_General
-      var sheetGen = ss.getSheetByName('Programa_General');
+      var sheetGen = ss.getSheetByName('Programa_General') || 
+                     ss.getSheetByName('Programa General') || 
+                     ss.getSheetByName('Plan_General');
       if (sheetGen && sheetGen.getLastRow() > 1) {
-        var genValues = sheetGen.getRange(2, 1, sheetGen.getLastRow() - 1, 8).getValues();
+        var genValues = sheetGen.getRange(2, 1, sheetGen.getLastRow() - 1, Math.min(sheetGen.getLastColumn(), 8)).getValues();
         result.programaGeneral = genValues
           .filter(function(r) {
             return String(r[0] || '').trim() !== '' || String(r[1] || '').trim() !== '';
@@ -552,7 +603,7 @@ function doGet(e) {
           .map(function(r) {
             return {
               id: String(r[0] || ''),
-              fecha: String(r[1] || ''),
+              fecha: formatDateVal(r[1]),
               fundo: String(r[2] || ''),
               modulo: String(r[3] || ''),
               variedad: String(r[4] || ''),
@@ -814,6 +865,7 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
   const [testingConnection, setTestingConnection] = useState(false);
   const [testingFirebase, setTestingFirebase] = useState(false);
   const [syncingFirebase, setSyncingFirebase] = useState(false);
+  const [syncingProgramas, setSyncingProgramas] = useState(false);
   const [generatingTables, setGeneratingTables] = useState(false);
   const [showCodeGuide, setShowCodeGuide] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
@@ -1078,6 +1130,55 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
     onToast('✅ Backup JSON descargado', 'success');
   };
 
+  const handleSyncProgramasFromSheets = async () => {
+    if (!gsheetUrl.trim()) {
+      onToast('⚠️ Ingresa la URL de Google Sheets primero', 'warning');
+      return;
+    }
+    setSyncingProgramas(true);
+    onAddLog('📥 Sincronizando programación histórica desde hoja "Programacion" de Google Sheets...', 'info');
+    try {
+      // 1. Probar vía endpoint backend
+      const res = await fetch('/api/cargar-programas-sheet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: gsheetUrl })
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === 'ok' && Array.isArray(json.programas)) {
+          if (onDataLoadedFromCloud) {
+            onDataLoadedFromCloud({ programas: json.programas });
+          }
+          onAddLog(`✅ Programación sincronizada con éxito: ${json.count} registros de Google Sheets (${json.total} total en sistema). Días anteriores preservados.`, 'ok');
+          onToast(`✅ ${json.count} programas sincronizados desde Sheets`, 'success');
+          return;
+        }
+      }
+
+      // 2. Fallback directo a Google Sheets
+      const gRes = await fetch(`${gsheetUrl}?accion=export`);
+      if (gRes.ok) {
+        const gJson = await gRes.json();
+        if (gJson && gJson.status === 'ok' && gJson.data && Array.isArray(gJson.data.programas)) {
+          if (onDataLoadedFromCloud) {
+            onDataLoadedFromCloud({ programas: gJson.data.programas });
+          }
+          onAddLog(`✅ ${gJson.data.programas.length} programas cargados directamente de Google Sheets`, 'ok');
+          onToast(`✅ ${gJson.data.programas.length} programas sincronizados`, 'success');
+          return;
+        }
+      }
+      onAddLog('⚠️ No se encontraron registros de programas en la respuesta de Google Sheets.', 'info');
+      onToast('⚠️ Sin programas en Google Sheets', 'warning');
+    } catch (err: any) {
+      onAddLog(`❌ Error al sincronizar programación: ${err?.message || 'Error de red'}`, 'err');
+      onToast('❌ Error al sincronizar programación', 'error');
+    } finally {
+      setSyncingProgramas(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Firebase Firestore Cloud Card */}
@@ -1257,6 +1358,15 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
           >
             <DownloadCloud className="w-5 h-5" />
             <span>📥 Descargar de Sheets</span>
+          </button>
+
+          <button
+            onClick={handleSyncProgramasFromSheets}
+            disabled={syncingProgramas}
+            className="bg-amber-600 hover:bg-amber-700 text-white p-3 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
+          >
+            <Calendar className={`w-5 h-5 ${syncingProgramas ? 'animate-spin' : ''}`} />
+            <span>📅 Sincronizar Programación</span>
           </button>
 
           <button

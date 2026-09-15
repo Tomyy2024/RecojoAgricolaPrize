@@ -86,6 +86,8 @@ export interface Programa {
   totalLotes: number;
   fechaRegistro: string;
   supervisor?: string;
+  estado?: string;
+  variedad?: string;
   avance?: Record<string, number>;
   _demo?: boolean;
 }

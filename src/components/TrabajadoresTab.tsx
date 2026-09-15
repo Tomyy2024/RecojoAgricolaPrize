@@ -15,7 +15,8 @@ import {
   getTrabajadores,
   parsePastedWorkers,
   ParsedWorkerResult,
-  replicarTrabajadoresAlSheet
+  replicarTrabajadoresAlSheet,
+  sanitizeAndDeduplicateDetalleJabas
 } from '../utils/storage';
 import { 
   Users, 
@@ -684,26 +685,27 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     const map: Record<string, number> = {};
     const targetFecha = fechaPersonal || getLocalToday();
 
-    if (Array.isArray(detalleJabas)) {
-      detalleJabas.forEach((d) => {
-        // La fecha comercial d.fecha es la fuente primaria y exacta (nunca usar timestamps UTC que desfasen el día)
-        const dFecha = d.fecha ? normalizeDateString(d.fecha) : (d.timestamp ? normalizeDateString(d.timestamp) : '');
-        if (dFecha === targetFecha) {
-          const jabas = Number(d.jabas) || 0;
-          if (jabas > 0) {
-            const norm = normalizeDni(d.dni);
-            const raw = String(d.dni || '').trim();
-            if (norm) map[norm] = (map[norm] || 0) + jabas;
-            if (raw) map[raw] = (map[raw] || 0) + jabas;
-            if (d.id) map[d.id] = (map[d.id] || 0) + jabas;
-            if (d.trabajador) {
-              const normName = normalizeStr(d.trabajador);
-              map[`NAME_${normName}`] = (map[`NAME_${normName}`] || 0) + jabas;
-            }
+    // Deduplicar estrictamente detalleJabas para prevenir cualquier conteo duplicado accidental
+    const cleanList = sanitizeAndDeduplicateDetalleJabas(detalleJabas || []);
+
+    cleanList.forEach((d) => {
+      // La fecha comercial d.fecha es la fuente primaria y exacta (nunca usar timestamps UTC que desfasen el día)
+      const dFecha = d.fecha ? normalizeDateString(d.fecha) : (d.timestamp ? normalizeDateString(d.timestamp) : '');
+      if (dFecha === targetFecha) {
+        const jabas = Number(d.jabas) || 0;
+        if (jabas > 0) {
+          const norm = normalizeDni(d.dni);
+          const raw = String(d.dni || '').trim();
+          if (norm) map[norm] = (map[norm] || 0) + jabas;
+          if (raw && raw !== norm) map[raw] = (map[raw] || 0) + jabas;
+          if (d.id) map[d.id] = (map[d.id] || 0) + jabas;
+          if (d.trabajador) {
+            const normName = normalizeStr(d.trabajador);
+            map[`NAME_${normName}`] = (map[`NAME_${normName}`] || 0) + jabas;
           }
         }
-      });
-    }
+      }
+    });
 
     return map;
   }, [detalleJabas, fechaPersonal, normalizeDni, normalizeStr]);
@@ -716,24 +718,24 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     const uniquePersons = new Set<string>();
     let totalRegistros = 0;
 
-    if (Array.isArray(detalleJabas)) {
-      detalleJabas.forEach((d) => {
-        const dFecha = d.fecha ? normalizeDateString(d.fecha) : (d.timestamp ? normalizeDateString(d.timestamp) : '');
-        if (dFecha === targetFecha) {
-          const j = Number(d.jabas) || 0;
-          if (j > 0) {
-            totalJabasDia += j;
-            totalRegistros++;
-            const norm = normalizeDni(d.dni);
-            const raw = String(d.dni || '').trim();
-            const personKey = norm || raw || (d.trabajador ? `NAME_${normalizeStr(d.trabajador)}` : (d.id ? `ID_${d.id}` : ''));
-            if (personKey) {
-              uniquePersons.add(personKey);
-            }
+    const cleanList = sanitizeAndDeduplicateDetalleJabas(detalleJabas || []);
+
+    cleanList.forEach((d) => {
+      const dFecha = d.fecha ? normalizeDateString(d.fecha) : (d.timestamp ? normalizeDateString(d.timestamp) : '');
+      if (dFecha === targetFecha) {
+        const j = Number(d.jabas) || 0;
+        if (j > 0) {
+          totalJabasDia += j;
+          totalRegistros++;
+          const norm = normalizeDni(d.dni);
+          const raw = String(d.dni || '').trim();
+          const personKey = norm || raw || (d.trabajador ? `NAME_${normalizeStr(d.trabajador)}` : (d.id ? `ID_${d.id}` : ''));
+          if (personKey) {
+            uniquePersons.add(personKey);
           }
         }
-      });
-    }
+      }
+    });
 
     return {
       targetFecha,
@@ -2417,19 +2419,21 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             x.id === key ||
             String(x.dni || '').trim() === String(key || '').trim()
         );
-        const resolvedDni = t ? (normalizeDni(t.dni) || t.dni) : key;
+        const rawResolvedDni = t ? (normalizeDni(t.dni) || t.dni) : key;
+        const cleanDni = String(rawResolvedDni).replace(/\D/g, '') || String(rawResolvedDni).trim();
+        const normModulo = (cuadrillaModulo || 'M01').trim().toUpperCase();
         const assignedGrupo =
           workerAssignedGrupos[key] ||
           (t ? workerAssignedGrupos[normalizeDni(t.dni)] || workerAssignedGrupos[t.dni] : undefined) ||
           cuadrillaGrupo;
 
         detalleList.push({
-          id: `${fechaAvance}_${resolvedDni}_${cuadrillaModulo || 'M01'}_${Date.now().toString().slice(-4)}`,
+          id: `JABA_${fechaAvance}_${cleanDni}_${normModulo}`,
           fecha: fechaAvance,
-          dni: String(resolvedDni),
-          trabajador: t ? t.nombres : String(resolvedDni),
+          dni: cleanDni,
+          trabajador: t ? t.nombres : String(cleanDni),
           fundo: cuadrillaFundo || 'Santa Teresa',
-          modulo: cuadrillaModulo || 'M01',
+          modulo: normModulo,
           jabas,
           supervisor: cuadrillaSupervisor || session.nombre,
           grupo: assignedGrupo,
@@ -2467,7 +2471,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             modulo: d.modulo || t.modulo,
             grupo: d.grupo || t.grupo,
             lider: d.lider || t.lider,
-            jabas: (getWorkerJabasCount(t) || 0) + Number(d.jabas || 0),
+            jabas: Number(d.jabas || 0),
             fecha: fechaAvance
           };
         }

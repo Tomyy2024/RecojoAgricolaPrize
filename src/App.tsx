@@ -32,6 +32,7 @@ import {
   saveTrabajadores, 
   getDetalleJabas, 
   saveDetalleJabas, 
+  sanitizeAndDeduplicateDetalleJabas,
   getUsuarios, 
   saveUsuarios, 
   getGrupos, 
@@ -328,8 +329,9 @@ export default function App() {
       }
     }
     if (Array.isArray(d.detalleJabas)) {
-      setDetalleJabasState(d.detalleJabas);
-      saveDetalleJabas(d.detalleJabas);
+      const cleanJabas = sanitizeAndDeduplicateDetalleJabas(d.detalleJabas);
+      setDetalleJabasState(cleanJabas);
+      saveDetalleJabas(cleanJabas);
     }
     if (Array.isArray(d.validaciones)) {
       const cleanVal = cleanValidacionesList(d.validaciones);
@@ -815,7 +817,8 @@ export default function App() {
   };
 
   const handleSaveAvance = (avanceMap: Record<string, number>, newDetalleList: DetalleJaba[]) => {
-    const mergedDetalle = [...newDetalleList, ...detalleJabas];
+    // Sanitizar y deduplicar estrictamente para evitar duplicados o multiplicaciones
+    const mergedDetalle = sanitizeAndDeduplicateDetalleJabas([...newDetalleList, ...detalleJabas]);
     setDetalleJabasState(mergedDetalle);
     saveDetalleJabas(mergedDetalle);
 
@@ -832,8 +835,8 @@ export default function App() {
         if (d.dni) {
           const cleanD = String(d.dni).replace(/\s+/g, '').trim();
           const rawD = String(d.dni).trim();
-          if (cleanD) workerJabasToday[cleanD] = (workerJabasToday[cleanD] || 0) + j;
-          if (rawD) workerJabasToday[rawD] = (workerJabasToday[rawD] || 0) + j;
+          if (cleanD) workerJabasToday[cleanD] = j;
+          if (rawD) workerJabasToday[rawD] = j;
         }
       }
     });
@@ -876,7 +879,7 @@ export default function App() {
           grupo: u.grupo || t.grupo,
           lider: u.lider || t.lider,
           fecha: u.fecha || t.fecha,
-          jabas: currentJabasToday > 0 ? currentJabasToday : ((t.jabas || 0) + (u.jabas || 0))
+          jabas: currentJabasToday > 0 ? currentJabasToday : (Number(u.jabas) || Number(t.jabas) || 0)
         };
       }
       if (currentJabasToday > 0) {
@@ -1667,8 +1670,9 @@ export default function App() {
       if (res.ok) {
         const json = await res.json();
         if (json.status === 'ok' && Array.isArray(json.detalleJabas)) {
-          setDetalleJabasState(json.detalleJabas);
-          saveDetalleJabas(json.detalleJabas);
+          const cleanJabas = sanitizeAndDeduplicateDetalleJabas(json.detalleJabas);
+          setDetalleJabasState(cleanJabas);
+          saveDetalleJabas(cleanJabas);
           if (Array.isArray(json.trabajadores)) {
             setTrabajadoresState(json.trabajadores);
             saveTrabajadores(json.trabajadores);
