@@ -1,5 +1,6 @@
 import { LoteItem, Trabajador, Programa, ProgramaGeneral, Usuario } from '../types';
 import { PARSED_INITIAL_LOTES } from './lotesCatalog';
+import { NOMINA_MAESTRA } from './nominaMaestra';
 
 export const INITIAL_FUNDOS: string[] = [
   "Ampliacion",
@@ -25,7 +26,7 @@ export const INITIAL_USUARIOS: Usuario[] = [
   { user: 'admin', pass: 'prize2026', nombre: 'Administrador General', rol: 'Administrador', creado: '2026-08-18' }
 ];
 
-export const INITIAL_TRABAJADORES: Trabajador[] = [];
+export const INITIAL_TRABAJADORES: Trabajador[] = NOMINA_MAESTRA;
 
 export const INITIAL_PROGRAMA_GENERAL: ProgramaGeneral[] = [];
 

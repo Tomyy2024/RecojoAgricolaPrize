@@ -168,7 +168,7 @@ export function formatDateDDMMAAAA(d?: string): string {
 export function initializeStorage() {
   try {
     const WIPE_VERSION_KEY = 'recojoFrutosDataVersion';
-    const TARGET_VERSION = 'v107_reset_realtime_trabajadores_table';
+    const TARGET_VERSION = 'v108_sync_446_nomina_maestra';
     
     // Check if this browser needs a clean wipe of all backup and cached data
     if (typeof localStorage !== 'undefined') {
@@ -220,8 +220,21 @@ export function initializeStorage() {
     }
 
     // Check & Seed Trabajadores
-    if (!localStorage.getItem(KEYS.TRABAJADORES)) {
+    const currentStoredTrabajadores = localStorage.getItem(KEYS.TRABAJADORES);
+    if (!currentStoredTrabajadores || currentStoredTrabajadores === '[]') {
       localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(INITIAL_TRABAJADORES));
+    } else {
+      try {
+        const parsed = JSON.parse(currentStoredTrabajadores);
+        if (!Array.isArray(parsed) || (INITIAL_TRABAJADORES.length > 0 && parsed.length < INITIAL_TRABAJADORES.length)) {
+          const existingDnis = new Set((Array.isArray(parsed) ? parsed : []).map((w: any) => String(w.dni || '').trim()));
+          const missing = INITIAL_TRABAJADORES.filter(w => !existingDnis.has(String(w.dni || '').trim()));
+          const merged = [...(Array.isArray(parsed) ? parsed : []), ...missing];
+          localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(merged));
+        }
+      } catch {
+        localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(INITIAL_TRABAJADORES));
+      }
     }
 
     // Check & Seed Programas
@@ -269,7 +282,7 @@ export function wipeAllBackupData(clearAuth: boolean = false) {
     if (typeof localStorage === 'undefined') return;
 
     // 1. Reset standard app datasets to clean empty arrays
-    localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify([]));
+    localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(INITIAL_TRABAJADORES));
     localStorage.setItem(KEYS.PROGRAMAS, JSON.stringify([]));
     localStorage.setItem(KEYS.PROGRAMA_GENERAL, JSON.stringify([]));
     localStorage.setItem(KEYS.DETALLE_JABAS, JSON.stringify([]));
@@ -488,21 +501,34 @@ export function getTrabajadores(): Trabajador[] {
     let list: Trabajador[] = [];
 
     if (raw === null) {
-      // Primera vez absoluto sin inicializar
-      list = [];
+      list = INITIAL_TRABAJADORES;
       try {
-        localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify([]));
+        localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(INITIAL_TRABAJADORES));
       } catch {}
     } else {
       try {
         list = JSON.parse(raw);
       } catch {
-        list = [];
+        list = INITIAL_TRABAJADORES;
       }
     }
 
-    if (!Array.isArray(list)) {
-      list = [];
+    if (!Array.isArray(list) || list.length === 0) {
+      list = INITIAL_TRABAJADORES;
+    } else if (INITIAL_TRABAJADORES.length > 0 && list.length < INITIAL_TRABAJADORES.length) {
+      // Si la lista guardada en el cliente tiene menos trabajadores que la nómina maestra (ej. 410 vs 446),
+      // rellenar con los faltantes sin perder asignaciones locales
+      const existingMap = new Map<string, Trabajador>();
+      list.forEach(w => {
+        if (w && w.dni) existingMap.set(String(w.dni).trim(), w);
+      });
+      const missing = INITIAL_TRABAJADORES.filter(w => !existingMap.has(String(w.dni).trim()));
+      if (missing.length > 0) {
+        list = [...list, ...missing];
+        try {
+          localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(list));
+        } catch {}
+      }
     }
 
     const seen = new Set<string>();
@@ -1553,6 +1579,24 @@ export async function replicarTrabajadoresAlSheet(
       const payload = {
         accion: 'sync',
         data: {
+          // Hoja 1: Nomina_General (Estática / Base)
+          nominaGeneral: trabajadores.map((t) => ({
+            dni: t.dni || '',
+            nombres: t.nombres || '',
+            fundo: t.fundo || '',
+            modulo: t.modulo || '',
+            supervisor: t.supervisor || '',
+            tipo: t.tipo || 'Cosechador'
+          })),
+          // Hoja 2: Asignacion_Cuadrillas (Dinámica: Grupos y Líderes)
+          asignaciones: trabajadores.map((t) => ({
+            dni: t.dni || '',
+            nombres: t.nombres || '',
+            grupo: t.grupo || '',
+            lider: t.lider || '',
+            fecha: t.fecha || effectiveFecha
+          })),
+          // Compatibilidad tradicional: Trabajadores
           trabajadores: trabajadores.map((t) => ({
             dni: t.dni || '',
             nombres: t.nombres || '',

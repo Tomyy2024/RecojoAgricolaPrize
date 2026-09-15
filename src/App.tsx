@@ -249,7 +249,34 @@ export default function App() {
       // Si la lista entrante tiene menos trabajadores que los que ya tenemos válidamente (por ejemplo Firestore devolviendo 410 por cuota agotada mientras el servidor ya tiene 446),
       // protegemos la nómina completa y evitamos degradar la lista.
       if (!isExplicitPurge && currentWorkers.length > d.trabajadores.length) {
-        console.warn(`[Sync] Protección de nómina activa: se rechazó lista menor (${d.trabajadores.length} vs ${currentWorkers.length} actuales). Se conserva la nómina completa.`);
+        console.warn(`[Sync] Protección de nómina activa: lista entrante (${d.trabajadores.length}) menor que nómina actual (${currentWorkers.length}). Fusionando actualizaciones sin perder trabajadores.`);
+        const incomingMap = new Map<string, any>();
+        d.trabajadores.forEach((t: any) => {
+          const cDni = String(t.dni || '').replace(/\s+/g, '').trim();
+          if (cDni) incomingMap.set(cDni, t);
+          if (t.id) incomingMap.set(t.id, t);
+        });
+
+        let anyMergedChange = false;
+        const mergedWorkers = currentWorkers.map(cw => {
+          const cDni = String(cw.dni || '').replace(/\s+/g, '').trim();
+          const inc = (cDni ? incomingMap.get(cDni) : null) || (cw.id ? incomingMap.get(cw.id) : null);
+          if (inc) {
+            const nextGrupo = inc.grupo !== undefined && inc.grupo !== null ? String(inc.grupo).trim() : cw.grupo;
+            const nextLider = inc.lider !== undefined && inc.lider !== null ? String(inc.lider).trim() : cw.lider;
+            const nextJabas = typeof inc.jabas === 'number' ? inc.jabas : cw.jabas;
+            if (nextGrupo !== cw.grupo || nextLider !== cw.lider || nextJabas !== cw.jabas) {
+              anyMergedChange = true;
+              return { ...cw, grupo: nextGrupo, lider: nextLider, jabas: nextJabas };
+            }
+          }
+          return cw;
+        });
+
+        if (anyMergedChange) {
+          saveTrabajadores(mergedWorkers);
+          setTrabajadoresState(mergedWorkers);
+        }
       } else if (d.trabajadores.length === 0 && currentWorkers.length > 0 && !isExplicitPurge) {
         // Preservar nómina local si la respuesta es vacía no intencionada (evita parpadeo)
         // y asegurar que el servidor central reciba los trabajadores cargados

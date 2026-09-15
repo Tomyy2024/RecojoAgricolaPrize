@@ -196,7 +196,51 @@ function doPost(e) {
       }
     }
 
-    // 5. Guardar Trabajadores (Bulk Rápido con setValues)
+    // 5. Guardar Trabajadores / Asignaciones
+    // Si viene asignaciones: guardar en 'Asignacion_Cuadrillas'
+    if (payload.asignaciones && payload.asignaciones.length > 0) {
+      var sheetAsig = getOrCreateSheet(ss, 'Asignacion_Cuadrillas', [
+        'DNI', 'Nombres', 'Grupo', 'Lider', 'Fecha_Asignacion'
+      ]);
+      sheetAsig.clearContents();
+      var rowsAsig = [['DNI', 'Nombres', 'Grupo', 'Lider', 'Fecha_Asignacion']];
+      payload.asignaciones.forEach(function(a) {
+        rowsAsig.push([
+          a.dni || '',
+          a.nombres || '',
+          a.grupo || '',
+          a.lider || '',
+          a.fecha || a.fechaAsignacion || timestamp.toISOString().slice(0, 10)
+        ]);
+      });
+      if (rowsAsig.length > 0) {
+        sheetAsig.getRange(1, 1, rowsAsig.length, 5).setValues(rowsAsig);
+      }
+    }
+
+    // Si viene nómina general pura: guardar en 'Nomina_General' (o 'Trabajadores' para compatibilidad)
+    if (payload.nominaGeneral && payload.nominaGeneral.length > 0) {
+      var sheetNom = getOrCreateSheet(ss, 'Nomina_General', [
+        'DNI', 'Nombres', 'Fundo', 'Modulo', 'Supervisor', 'Tipo'
+      ]);
+      sheetNom.clearContents();
+      var rowsNom = [['DNI', 'Nombres', 'Fundo', 'Modulo', 'Supervisor', 'Tipo']];
+      payload.nominaGeneral.forEach(function(t) {
+        rowsNom.push([
+          t.dni || '',
+          t.nombres || '',
+          t.fundo || '',
+          t.modulo || '',
+          t.supervisor || '',
+          t.tipo || 'Cosechador'
+        ]);
+      });
+      if (rowsNom.length > 0) {
+        sheetNom.getRange(1, 1, rowsNom.length, 6).setValues(rowsNom);
+      }
+    }
+
+    // Guardar también en 'Trabajadores' consolidado para compatibilidad total con vistas anteriores
     if (payload.trabajadores && payload.trabajadores.length > 0) {
       var sheetTrab = getOrCreateSheet(ss, 'Trabajadores', [
         'DNI', 'Nombres', 'Fundo', 'Modulo', 'Grupo', 'Supervisor', 'Lider', 'Tipo'
@@ -474,25 +518,66 @@ function doGet(e) {
           });
       }
 
-      // 5. Leer Trabajadores
-      var sheetTrab = ss.getSheetByName('Trabajadores') || ss.getSheetByName('Personal') || ss.getSheetByName('Nomina') || ss.getSheetByName('Nómina');
-      if (sheetTrab && sheetTrab.getLastRow() > 1) {
-        var trabValues = sheetTrab.getRange(2, 1, sheetTrab.getLastRow() - 1, 8).getValues();
+      // 5. Leer Trabajadores / Nómina General / Asignación Cuadrillas
+      var sheetNom = ss.getSheetByName('Nomina_General') || ss.getSheetByName('Trabajadores') || ss.getSheetByName('Personal') || ss.getSheetByName('Nomina') || ss.getSheetByName('Nómina');
+      var sheetAsig = ss.getSheetByName('Asignacion_Cuadrillas') || ss.getSheetByName('Asignaciones');
+
+      // Mapa de asignaciones dinámicas por DNI (Grupo y Líder)
+      var asigMap = {};
+      if (sheetAsig && sheetAsig.getLastRow() > 1) {
+        var asigValues = sheetAsig.getRange(2, 1, sheetAsig.getLastRow() - 1, Math.min(sheetAsig.getLastColumn(), 5)).getValues();
+        asigValues.forEach(function(r) {
+          var d = cleanDni(r[0]);
+          if (d) {
+            asigMap[d] = {
+              grupo: String(r[2] || '').trim(),
+              lider: String(r[3] || '').trim(),
+              fecha: String(r[4] || '').trim()
+            };
+          }
+        });
+      }
+
+      if (sheetNom && sheetNom.getLastRow() > 1) {
+        var maxCols = Math.max(sheetNom.getLastColumn(), 6);
+        var trabValues = sheetNom.getRange(2, 1, sheetNom.getLastRow() - 1, maxCols).getValues();
+        var isNominaGeneral = (sheetNom.getName() === 'Nomina_General');
+
         result.trabajadores = trabValues
           .filter(function(r) {
             return String(r[0] || '').trim() !== '' || String(r[1] || '').trim() !== '';
           })
           .map(function(r) {
-            return {
-              dni: cleanDni(r[0]),
-              nombres: String(r[1] || '').trim(),
-              fundo: String(r[2] || '').trim(),
-              modulo: String(r[3] || '').trim(),
-              grupo: String(r[4] || '').trim(),
-              supervisor: String(r[5] || '').trim(),
-              lider: String(r[6] || '').trim(),
-              tipo: String(r[7] || 'Trabajador').trim()
-            };
+            var dni = cleanDni(r[0]);
+            var dynamicAsig = asigMap[dni] || null;
+
+            if (isNominaGeneral) {
+              // Nomina_General: DNI(0), Nombres(1), Fundo(2), Modulo(3), Supervisor(4), Tipo(5)
+              return {
+                dni: dni,
+                nombres: String(r[1] || '').trim(),
+                fundo: String(r[2] || '').trim(),
+                modulo: String(r[3] || '').trim(),
+                grupo: dynamicAsig ? dynamicAsig.grupo : '',
+                supervisor: String(r[4] || '').trim(),
+                lider: dynamicAsig ? dynamicAsig.lider : '',
+                tipo: String(r[5] || 'Trabajador').trim()
+              };
+            } else {
+              // Trabajadores tradicional: DNI(0), Nombres(1), Fundo(2), Modulo(3), Grupo(4), Supervisor(5), Lider(6), Tipo(7)
+              var baseGrupo = String(r[4] || '').trim();
+              var baseLider = String(r[6] || '').trim();
+              return {
+                dni: dni,
+                nombres: String(r[1] || '').trim(),
+                fundo: String(r[2] || '').trim(),
+                modulo: String(r[3] || '').trim(),
+                grupo: dynamicAsig && dynamicAsig.grupo ? dynamicAsig.grupo : baseGrupo,
+                supervisor: String(r[5] || '').trim(),
+                lider: dynamicAsig && dynamicAsig.lider ? dynamicAsig.lider : baseLider,
+                tipo: String(r[7] || 'Trabajador').trim()
+              };
+            }
           });
       }
 

@@ -850,7 +850,7 @@ async function startServer() {
       syncToCloudFirestore({ trabajadores: db.trabajadores });
       notifyClients({ type: 'sync', version: db.version, data: db });
 
-      // 2. Replicar hacia la hoja 'Trabajadores' de Google Sheets
+      // 2. Replicar hacia Google Sheets (hojas: 'Nomina_General', 'Asignacion_Cuadrillas' y 'Trabajadores')
       const targetUrl = url || 'https://script.google.com/macros/s/AKfycbwUwC4PwsVrEGdGItPkAwu8-k8lJePnEIwitNhakUGqHEKWLZLr_i49FMMDh-fog0y2/exec';
       let sheetReplicated = false;
       let sheetError = '';
@@ -860,6 +860,24 @@ async function startServer() {
           const sheetPayload = {
             accion: 'sync',
             data: {
+              // Hoja 1: Nomina_General (Estática / Base)
+              nominaGeneral: db.trabajadores.map((t: any) => ({
+                dni: t.dni || '',
+                nombres: t.nombres || '',
+                fundo: t.fundo || '',
+                modulo: t.modulo || '',
+                supervisor: t.supervisor || '',
+                tipo: t.tipo || 'Cosechador'
+              })),
+              // Hoja 2: Asignacion_Cuadrillas (Dinámica: Grupos y Líderes)
+              asignaciones: db.trabajadores.map((t: any) => ({
+                dni: t.dni || '',
+                nombres: t.nombres || '',
+                grupo: t.grupo || '',
+                lider: t.lider || '',
+                fecha: t.fecha || targetFechaNorm
+              })),
+              // Compatibilidad tradicional: Trabajadores
               trabajadores: db.trabajadores.map((t: any) => ({
                 dni: t.dni || '',
                 nombres: t.nombres || '',

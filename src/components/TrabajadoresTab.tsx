@@ -1580,7 +1580,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         if (targetDate) {
           setFechaPersonal(targetDate);
         }
-        onToast(`✅ Nómina sincronizada (${targetDate}): ${res.count} trabajadores cargados desde hoja 'Trabajadores'`, 'success');
+        onToast(`✅ Nómina sincronizada (${targetDate}): ${res.count} trabajadores cargados desde Google Sheets ('Nomina_General' / 'Trabajadores')`, 'success');
       }
     } catch (err: any) {
       onToast(`❌ Error al cargar nómina: ${err?.message || 'Error de conexión'}`, 'error');

@@ -327,6 +327,32 @@ export const GruposLideresTab: React.FC<GruposLideresTabProps> = ({
     setShowImportarAsignacionesModal(false);
     setImportText('');
     onToast(`✅ Se actualizaron Grupo y Líder para ${actualizados} trabajadores coincidentes`, 'success');
+
+    // Sincronizar al backend central y replicar a Google Sheets (hoja Asignacion_Cuadrillas)
+    fetch('/api/trabajadores', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        trabajadores: updated,
+        modo: 'reemplazar_todo',
+        userRole: session?.rol || 'Administrador'
+      })
+    }).catch(() => {});
+
+    // Replicar hacia Google Sheets
+    import('../utils/storage').then(({ replicarTrabajadoresAlSheet, getGsheetUrl }) => {
+      replicarTrabajadoresAlSheet(
+        updated,
+        getGsheetUrl(),
+        'reemplazar_todo',
+        undefined,
+        session?.rol
+      ).then((res) => {
+        if (res.sheetOk) {
+          onToast(`🌐 Asignaciones replicadas a Google Sheets (${res.count} registros)`, 'info');
+        }
+      }).catch(() => {});
+    });
   };
 
   return (

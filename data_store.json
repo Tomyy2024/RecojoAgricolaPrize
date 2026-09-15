@@ -1,124 +1,124 @@
 {
-  "version": 474,
+  "version": 476,
   "usuarios": [
     {
-      "nombre": "Administrador General",
-      "pass": "prize2026",
+      "creado": "Tue Aug 18 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "user": "admin",
+      "pass": "prize2026",
       "rol": "Administrador",
-      "creado": "Tue Aug 18 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
+      "nombre": "Administrador General"
     },
     {
+      "user": "rrisco",
       "creado": "Thu Aug 27 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "pass": "ayllu123",
-      "user": "rrisco",
-      "rol": "Supervisor",
-      "nombre": "Rogger Risco"
+      "nombre": "Rogger Risco",
+      "rol": "Supervisor"
     },
     {
-      "user": "emaquen",
       "nombre": "Eduar Maquen",
-      "creado": "Thu Aug 27 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "rol": "Supervisor",
+      "user": "emaquen",
+      "creado": "Thu Aug 27 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "pass": "arena123"
     },
     {
-      "rol": "Supervisor",
       "creado": "Tue Aug 18 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "user": "supervisor1",
-      "pass": "super12345",
-      "nombre": "Supervisor de Campo"
+      "nombre": "Supervisor de Campo",
+      "rol": "Supervisor",
+      "pass": "super12345"
     },
     {
-      "nombre": "Alejandro Eustaquio",
-      "user": "aeustaquio",
       "rol": "Supervisor",
       "pass": "santa123",
-      "creado": "Thu Aug 27 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
+      "creado": "Thu Aug 27 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "user": "aeustaquio",
+      "nombre": "Alejandro Eustaquio"
     },
     {
-      "pass": "campo12345",
-      "nombre": "Trabajador de Campo",
       "user": "trabajador1",
+      "pass": "campo12345",
       "creado": "Tue Aug 18 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "nombre": "Trabajador de Campo",
       "rol": "Trabajador"
     },
     {
       "user": "rquito",
-      "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "pass": "allpa123",
       "nombre": "Rosa Quito",
-      "rol": "Trabajador",
-      "pass": "allpa123"
-    },
-    {
-      "creado": "Tue Aug 18 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "pass": "campo123456",
-      "user": "trabajador",
-      "rol": "Trabajador",
-      "nombre": "Trabajador General"
-    },
-    {
-      "user": "dcastro",
       "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "rol": "Trabajador",
-      "nombre": "Dayanna Castro",
-      "pass": "teresa123"
-    },
-    {
-      "creado": "Thu Aug 27 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "user": "cvillegas",
-      "nombre": "Carlos Villegas",
-      "pass": "vivadis123",
-      "rol": "Supervisor"
-    },
-    {
-      "user": "rrubio",
-      "nombre": "Raquel Rubio",
-      "rol": "Trabajador",
-      "pass": "74216973",
-      "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
-    },
-    {
-      "nombre": "Cinthia More",
-      "rol": "Trabajador",
-      "user": "cmore",
-      "pass": "48127750",
-      "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
-    },
-    {
-      "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "pass": "46466422",
-      "user": "ljimenez",
-      "rol": "Supervisor",
-      "nombre": "Luis Jimenez"
-    },
-    {
-      "creado": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "pass": "46042674",
-      "rol": "Trabajador",
-      "user": "ngraciano",
-      "nombre": "Nataly Graciano"
-    },
-    {
-      "user": "Ajimenez",
-      "nombre": "Angello Jiménez",
-      "creado": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "pass": "73248472",
       "rol": "Trabajador"
     },
     {
-      "nombre": "Ana Maria Lopez",
-      "user": "alopez",
-      "rol": "Trabajador",
-      "pass": "48605206",
-      "creado": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
+      "user": "trabajador",
+      "nombre": "Trabajador General",
+      "pass": "campo123456",
+      "creado": "Tue Aug 18 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "rol": "Trabajador"
     },
     {
-      "creado": "Fri Sep 11 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "pass": "45104460",
+      "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "rol": "Trabajador",
+      "pass": "teresa123",
+      "user": "dcastro",
+      "nombre": "Dayanna Castro"
+    },
+    {
+      "rol": "Supervisor",
+      "creado": "Thu Aug 27 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "pass": "vivadis123",
+      "nombre": "Carlos Villegas",
+      "user": "cvillegas"
+    },
+    {
+      "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "rol": "Trabajador",
+      "user": "rrubio",
+      "nombre": "Raquel Rubio",
+      "pass": "74216973"
+    },
+    {
+      "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "rol": "Trabajador",
+      "pass": "48127750",
+      "nombre": "Cinthia More",
+      "user": "cmore"
+    },
+    {
+      "pass": "46466422",
+      "nombre": "Luis Jimenez",
+      "rol": "Supervisor",
+      "user": "ljimenez",
+      "creado": "Mon Aug 31 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
+    },
+    {
+      "creado": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "user": "ngraciano",
+      "pass": "46042674",
+      "rol": "Trabajador",
+      "nombre": "Nataly Graciano"
+    },
+    {
+      "pass": "73248472",
+      "rol": "Trabajador",
+      "user": "Ajimenez",
+      "nombre": "Angello Jiménez",
+      "creado": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
+    },
+    {
+      "creado": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "rol": "Trabajador",
+      "pass": "48605206",
+      "user": "alopez",
+      "nombre": "Ana Maria Lopez"
+    },
+    {
       "nombre": "Vasquez Alcalde Luigui Norberto",
-      "user": "lvasquez"
+      "rol": "Trabajador",
+      "pass": "45104460",
+      "user": "lvasquez",
+      "creado": "Fri Sep 11 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     }
   ],
   "fundos": [
@@ -11082,9 +11082,9 @@
   ],
   "lideres": [
     {
+      "fechaAlta": "Mon Sep 14 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "nombres": "Lopez Perez Ana Maria",
       "lider": "Lopez Perez Ana Maria",
-      "fechaAlta": "Mon Sep 14 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "dni": "48605206"
     },
     {
@@ -11094,93 +11094,93 @@
       "lider": "Jorge Luis Vera Cruz"
     },
     {
-      "dni": "73619236",
+      "nombres": "Ramirez Lara José Arturo Samuel",
       "fechaAlta": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "lider": "Ramirez Lara José Arturo Samuel",
-      "nombres": "Ramirez Lara José Arturo Samuel"
+      "dni": "73619236",
+      "lider": "Ramirez Lara José Arturo Samuel"
     },
     {
-      "fechaAlta": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "nombres": "Aracely Del Milagro Campos Llontop",
       "dni": "72712553",
-      "lider": "Aracely Del Milagro Campos Llontop"
+      "lider": "Aracely Del Milagro Campos Llontop",
+      "fechaAlta": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     },
     {
-      "dni": "73272173",
-      "lider": "Caballero Rosas Pool Farid",
       "fechaAlta": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "nombres": "Caballero Rosas Pool Farid"
+      "nombres": "Caballero Rosas Pool Farid",
+      "dni": "73272173",
+      "lider": "Caballero Rosas Pool Farid"
     },
     {
-      "lider": "Ana rosa Jave Abanto",
       "nombres": "Ana rosa Jave Abanto",
+      "lider": "Ana rosa Jave Abanto",
       "fechaAlta": "Wed Sep 09 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "dni": "70116018"
     },
     {
       "lider": "Vásquez Reyez Neyser",
-      "dni": "41745016",
       "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "dni": "41745016",
       "nombres": "Vásquez Reyez Neyser"
     },
     {
-      "lider": "Quito Chucas Rosa",
+      "nombres": "Quito Chucas Rosa",
       "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "dni": "73123214",
-      "nombres": "Quito Chucas Rosa"
+      "lider": "Quito Chucas Rosa",
+      "dni": "73123214"
     },
     {
-      "fechaAlta": "Wed Aug 26 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "dni": "71091611",
+      "fechaAlta": "Wed Aug 26 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "lider": "Escobar Chávez Maryuri",
       "nombres": "Escobar Chávez Maryuri"
     },
     {
-      "lider": "Luis Gustavo Diaz Diaz",
       "dni": "63346327",
+      "lider": "Luis Gustavo Diaz Diaz",
       "nombres": "Luis Gustavo Diaz Diaz",
       "fechaAlta": "Tue Aug 25 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     },
     {
-      "nombres": "Cuenca Roncal Laura",
+      "dni": "77459996",
       "lider": "Cuenca Roncal Laura",
       "fechaAlta": "Wed Aug 26 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "dni": "77459996"
+      "nombres": "Cuenca Roncal Laura"
     },
     {
       "nombres": "Reyes Mendoza yubizat",
-      "dni": "42862936",
       "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "lider": "Reyes Mendoza yubizat"
+      "lider": "Reyes Mendoza yubizat",
+      "dni": "42862936"
     },
     {
-      "dni": "18854396",
+      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "nombres": "Camacho ramirez juan",
       "lider": "Camacho ramirez juan",
-      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
+      "dni": "18854396"
     },
     {
+      "lider": "Torres Rondon Alberto",
       "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "nombres": "Torres Rondon Alberto",
-      "lider": "Torres Rondon Alberto",
       "dni": "41717558"
     },
     {
-      "lider": "bautista torres Nayeli",
+      "nombres": "bautista torres Nayeli",
       "dni": "60036679",
-      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "nombres": "bautista torres Nayeli"
+      "lider": "bautista torres Nayeli",
+      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     },
     {
       "nombres": "Alfaro vigo Leslie",
+      "dni": "41809697",
       "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "lider": "Alfaro vigo Leslie",
-      "dni": "41809697"
+      "lider": "Alfaro vigo Leslie"
     },
     {
       "dni": "70675551",
-      "nombres": "Huingo Cerquin Luz",
       "lider": "Huingo Cerquin Luz",
+      "nombres": "Huingo Cerquin Luz",
       "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     },
     {
@@ -11191,625 +11191,625 @@
     },
     {
       "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "lider": "More Nizama Cinthia",
       "dni": "48127750",
-      "nombres": "More Nizama Cinthia",
-      "lider": "More Nizama Cinthia"
+      "nombres": "More Nizama Cinthia"
     },
     {
-      "nombres": "Correa Olano Fiorela",
-      "dni": "46838329",
       "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "dni": "46838329",
+      "nombres": "Correa Olano Fiorela",
       "lider": "Correa Olano Fiorela"
     },
     {
-      "nombres": "Carranza Tantarico jeanpierre Alexander",
       "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "nombres": "Carranza Tantarico jeanpierre Alexander",
       "dni": "60329183",
       "lider": "Carranza Tantarico jeanpierre Alexander"
     },
     {
-      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
-      "dni": "75842464",
       "lider": "Guanilo Castillo Isabel",
+      "dni": "75842464",
+      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
       "nombres": "Guanilo Castillo Isabel"
     },
     {
-      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)",
+      "dni": "63346327",
       "lider": "Diaz Diaz Gustavo",
       "nombres": "Diaz Diaz Gustavo",
-      "dni": "63346327"
+      "fechaAlta": "Tue Sep 01 2026 00:00:00 GMT-0500 (hora estándar de Perú)"
     }
   ],
   "reservas": [
     {
       "lider": "Vásquez Reyez Neyser",
-      "timestamp": "2026-09-11T20:16:54.594Z",
-      "fecha": "2026-09-11",
-      "totalTrabajadores": 43,
-      "grupo": "Grupo 03",
-      "fundo": "Santa Teresa",
-      "hora": "03:16 p. m.",
-      "id": "RES_2026-09-11_aguilar_castro_gehel_M09_grupo_03_4593",
-      "modulo": "M09",
       "trabajadores": [
         {
           "dni": "78014519",
-          "grupo": "Grupo 03",
-          "nombres": "AGUILAR FERNANDEZ HERSON",
           "id": "IMP_1789139968343_252",
-          "lider": "Vásquez Reyez Neyser"
+          "grupo": "Grupo 03",
+          "lider": "Vásquez Reyez Neyser",
+          "nombres": "AGUILAR FERNANDEZ HERSON"
         },
         {
+          "nombres": "AVILA ALDAVE JOSEFINA ALEJANDRINA",
           "id": "IMP_1789139968343_447",
           "grupo": "Grupo 03",
-          "dni": "18861342",
           "lider": "Vásquez Reyez Neyser",
-          "nombres": "AVILA ALDAVE JOSEFINA ALEJANDRINA"
+          "dni": "18861342"
         },
         {
+          "nombres": "BUENO HUACCHA CARLOS ALFREDO",
           "dni": "18896537",
           "id": "IMP_1789139968343_448",
           "grupo": "Grupo 03",
-          "lider": "Vásquez Reyez Neyser",
-          "nombres": "BUENO HUACCHA CARLOS ALFREDO"
+          "lider": "Vásquez Reyez Neyser"
         },
         {
-          "nombres": "CAMPOS LLAMOGA MARIA ESTHER",
-          "lider": "Vásquez Reyez Neyser",
-          "dni": "80558136",
           "id": "IMP_1789139968343_263",
-          "grupo": "Grupo 03"
-        },
-        {
-          "lider": "Vásquez Reyez Neyser",
-          "dni": "74293126",
-          "id": "IMP_1789139968343_459",
-          "nombres": "CARDENAS HUAMAN MARIA NOEMI",
-          "grupo": "Grupo 03"
-        },
-        {
+          "dni": "80558136",
+          "nombres": "CAMPOS LLAMOGA MARIA ESTHER",
           "grupo": "Grupo 03",
-          "dni": "74293127",
-          "nombres": "CARDENAS HUAMAN SHIRLEY ALEJANDRINA",
+          "lider": "Vásquez Reyez Neyser"
+        },
+        {
+          "nombres": "CARDENAS HUAMAN MARIA NOEMI",
+          "dni": "74293126",
+          "grupo": "Grupo 03",
           "lider": "Vásquez Reyez Neyser",
+          "id": "IMP_1789139968343_459"
+        },
+        {
+          "lider": "Vásquez Reyez Neyser",
+          "grupo": "Grupo 03",
+          "nombres": "CARDENAS HUAMAN SHIRLEY ALEJANDRINA",
+          "dni": "74293127",
           "id": "IMP_1789139968343_460"
         },
         {
-          "grupo": "Grupo 03",
-          "dni": "26731518",
           "nombres": "CELIS LOPEZ BERNARDO",
-          "id": "IMP_1789139968343_450",
-          "lider": "Vásquez Reyez Neyser"
+          "dni": "26731518",
+          "grupo": "Grupo 03",
+          "lider": "Vásquez Reyez Neyser",
+          "id": "IMP_1789139968343_450"
         },
         {
-          "id": "IMP_1789139968343_164",
           "dni": "48397614",
-          "nombres": "CHALAN PEREZ SANDRA LIZBETH",
           "grupo": "Grupo 03",
-          "lider": "Vásquez Reyez Neyser"
+          "lider": "Vásquez Reyez Neyser",
+          "id": "IMP_1789139968343_164",
+          "nombres": "CHALAN PEREZ SANDRA LIZBETH"
         },
         {
           "lider": "Vásquez Reyez Neyser",
-          "nombres": "CHUQUIPOMA JULCAMORO HUGO CESAR",
           "grupo": "Grupo 03",
+          "dni": "70606129",
           "id": "IMP_1789139968343_195",
-          "dni": "70606129"
+          "nombres": "CHUQUIPOMA JULCAMORO HUGO CESAR"
         },
         {
-          "id": "IMP_1789139968343_462",
-          "dni": "80306404",
-          "grupo": "Grupo 03",
+          "nombres": "CORNEJO GUZMAN JHONY ORLANDO",
           "lider": "Vásquez Reyez Neyser",
-          "nombres": "CORNEJO GUZMAN JHONY ORLANDO"
+          "grupo": "Grupo 03",
+          "id": "IMP_1789139968343_462",
+          "dni": "80306404"
         },
         {
           "dni": "77321270",
-          "lider": "Vásquez Reyez Neyser",
           "id": "IMP_1789139968343_248",
+          "lider": "Vásquez Reyez Neyser",
           "grupo": "Grupo 03",
           "nombres": "DELAGADO LOPEZ DANIELA"
         },
         {
-          "dni": "18853452",
-          "id": "TRAB_18853452_6999",
           "grupo": "Grupo 03",
           "lider": "Vásquez Reyez Neyser",
-          "nombres": "FERRER ACEVEDO JUAN OSWALDO"
+          "dni": "18853452",
+          "nombres": "FERRER ACEVEDO JUAN OSWALDO",
+          "id": "TRAB_18853452_6999"
         },
         {
           "id": "IMP_1789139968343_458",
+          "lider": "Vásquez Reyez Neyser",
           "grupo": "Grupo 03",
-          "nombres": "FLORES ZAÑA CESAR ANTONIO",
           "dni": "72866310",
-          "lider": "Vásquez Reyez Neyser"
+          "nombres": "FLORES ZAÑA CESAR ANTONIO"
         },
         {
           "grupo": "Grupo 03",
-          "id": "IMP_1789139968343_495",
           "lider": "Vásquez Reyez Neyser",
           "dni": "80544862",
-          "nombres": "GONZALES AMARINGO IRIS"
+          "nombres": "GONZALES AMARINGO IRIS",
+          "id": "IMP_1789139968343_495"
         },
         {
+          "lider": "Vásquez Reyez Neyser",
           "grupo": "Grupo 03",
           "dni": "45540890",
           "nombres": "GUTIERREZ SAUCEDO FLOR ALEJANDRINA",
-          "id": "IMP_1789139968343_452",
-          "lider": "Vásquez Reyez Neyser"
+          "id": "IMP_1789139968343_452"
         },
         {
-          "dni": "47094703",
-          "grupo": "Grupo 03",
-          "id": "IMP_1789139968343_453",
           "nombres": "HUAMAN MALCA JOHN DIEGO",
+          "lider": "Vásquez Reyez Neyser",
+          "grupo": "Grupo 03",
+          "dni": "47094703",
+          "id": "IMP_1789139968343_453"
+        },
+        {
+          "grupo": "Grupo 03",
+          "lider": "Vásquez Reyez Neyser",
+          "dni": "60317094",
+          "id": "TRAB_60317094_0263",
+          "nombres": "INUMA  CASTERNOQUE GELCI"
+        },
+        {
+          "id": "IMP_1789139968343_176",
+          "dni": "60317095",
+          "nombres": "INUMA CASTERNOQUE ANAHI",
+          "grupo": "Grupo 03",
           "lider": "Vásquez Reyez Neyser"
         },
         {
           "grupo": "Grupo 03",
           "lider": "Vásquez Reyez Neyser",
-          "nombres": "INUMA  CASTERNOQUE GELCI",
-          "id": "TRAB_60317094_0263",
-          "dni": "60317094"
-        },
-        {
-          "grupo": "Grupo 03",
-          "nombres": "INUMA CASTERNOQUE ANAHI",
-          "lider": "Vásquez Reyez Neyser",
-          "dni": "60317095",
-          "id": "IMP_1789139968343_176"
-        },
-        {
-          "lider": "Vásquez Reyez Neyser",
-          "id": "IMP_1789139968343_446",
+          "dni": "18856143",
           "nombres": "LLAJARUNA CABANILLAS MARIA DEL PILAR",
-          "grupo": "Grupo 03",
-          "dni": "18856143"
+          "id": "IMP_1789139968343_446"
         },
         {
-          "id": "IMP_1789139968343_69",
+          "lider": "Vásquez Reyez Neyser",
           "dni": "19704193",
           "grupo": "Grupo 03",
-          "nombres": "LLAPO DE LA CRUZ SANTOS FELIPA",
-          "lider": "Vásquez Reyez Neyser"
+          "id": "IMP_1789139968343_69",
+          "nombres": "LLAPO DE LA CRUZ SANTOS FELIPA"
         },
         {
-          "lider": "Vásquez Reyez Neyser",
-          "nombres": "LOPEZ RODRIGUEZ NOELIA ZENOBIA",
-          "grupo": "Grupo 03",
           "dni": "40291561",
+          "nombres": "LOPEZ RODRIGUEZ NOELIA ZENOBIA",
+          "lider": "Vásquez Reyez Neyser",
+          "grupo": "Grupo 03",
           "id": "IMP_1789139968343_78"
         },
         {
-          "grupo": "Grupo 03",
           "dni": "70516992",
           "nombres": "MARTINEZ GUEVARA ENRIQUE AGUSTIN",
           "id": "IMP_1789139968343_456",
-          "lider": "Vásquez Reyez Neyser"
-        },
-        {
-          "dni": "47534353",
-          "id": "IMP_1789139968343_454",
-          "grupo": "Grupo 03",
           "lider": "Vásquez Reyez Neyser",
-          "nombres": "MENDEZ PAREDES JOSE FRANCISCO"
-        },
-        {
-          "lider": "Vásquez Reyez Neyser",
-          "dni": "18856419",
-          "nombres": "NINAQUISPE CARHUACHIN SANTOS HIPOLITO",
-          "id": "IMP_1789139968343_35",
           "grupo": "Grupo 03"
         },
         {
+          "id": "IMP_1789139968343_454",
+          "dni": "47534353",
+          "nombres": "MENDEZ PAREDES JOSE FRANCISCO",
           "grupo": "Grupo 03",
-          "id": "IMP_1789139968343_449",
-          "nombres": "OBANDO PORTILLA ZENAIDA NOEMI",
-          "dni": "18898258",
           "lider": "Vásquez Reyez Neyser"
         },
         {
-          "grupo": "Grupo 03",
           "lider": "Vásquez Reyez Neyser",
-          "id": "IMP_1789139968343_444",
+          "grupo": "Grupo 03",
+          "nombres": "NINAQUISPE CARHUACHIN SANTOS HIPOLITO",
+          "dni": "18856419",
+          "id": "IMP_1789139968343_35"
+        },
+        {
+          "dni": "18898258",
+          "nombres": "OBANDO PORTILLA ZENAIDA NOEMI",
+          "id": "IMP_1789139968343_449",
+          "grupo": "Grupo 03",
+          "lider": "Vásquez Reyez Neyser"
+        },
+        {
+          "dni": "18847981",
+          "lider": "Vásquez Reyez Neyser",
+          "grupo": "Grupo 03",
           "nombres": "PALOMINO CAMPOS AUGUSTO",
-          "dni": "18847981"
+          "id": "IMP_1789139968343_444"
         },
         {
+          "id": "IMP_1789139968343_49",
           "lider": "Vásquez Reyez Neyser",
-          "dni": "18888972",
+          "grupo": "Grupo 03",
           "nombres": "PAREDES MAURICIO JOSE NATIVIDAD",
-          "grupo": "Grupo 03",
-          "id": "IMP_1789139968343_49"
+          "dni": "18888972"
         },
         {
-          "grupo": "Grupo 03",
           "dni": "41717559",
-          "id": "IMP_1789139968343_91",
+          "grupo": "Grupo 03",
           "lider": "Vásquez Reyez Neyser",
+          "id": "IMP_1789139968343_91",
           "nombres": "PAREDES REYES ELIZABETH ROSANGELA"
         },
         {
-          "grupo": "Grupo 03",
-          "nombres": "PEÑA HORNA SARA YSABEL",
-          "lider": "Vásquez Reyez Neyser",
+          "id": "IMP_1789139968343_14",
           "dni": "18834025",
-          "id": "IMP_1789139968343_14"
-        },
-        {
-          "lider": "Vásquez Reyez Neyser",
-          "nombres": "PILCO INUMA ANGELICA ATIANA",
-          "dni": "60402917",
+          "nombres": "PEÑA HORNA SARA YSABEL",
           "grupo": "Grupo 03",
-          "id": "IMP_1789139968343_178"
-        },
-        {
-          "grupo": "Grupo 03",
-          "id": "IMP_1789139968343_84",
-          "dni": "41112925",
-          "lider": "Vásquez Reyez Neyser",
-          "nombres": "QUEZADA JUAREZ LADY LISSET"
-        },
-        {
-          "lider": "Vásquez Reyez Neyser",
-          "id": "IMP_1789139968343_4",
-          "dni": "18142256",
-          "nombres": "REQUELME GARCIA RICARDO MANUEL",
-          "grupo": "Grupo 03"
-        },
-        {
-          "lider": "Vásquez Reyez Neyser",
-          "id": "IMP_1789139968343_457",
-          "nombres": "RODRIGUEZ TIRADO DANIELA VICTORIA",
-          "grupo": "Grupo 03",
-          "dni": "72211880"
-        },
-        {
-          "lider": "Vásquez Reyez Neyser",
-          "dni": "18859960",
-          "nombres": "ROMERO CHALAN RUTTI PATRICIA",
-          "id": "IMP_1789139968343_477",
-          "grupo": "Grupo 03"
-        },
-        {
-          "grupo": "Grupo 03",
-          "lider": "Vásquez Reyez Neyser",
-          "id": "IMP_1789139968343_144",
-          "nombres": "RUIZ VARGAS ROSA MARIA",
-          "dni": "46292410"
-        },
-        {
-          "lider": "Vásquez Reyez Neyser",
-          "nombres": "TAPIA DE LA CRUZ LUIS ALBERTO",
-          "grupo": "Grupo 03",
-          "dni": "80194383",
-          "id": "IMP_1789139968343_461"
-        },
-        {
-          "id": "IMP_1789139968343_455",
-          "nombres": "TAPIA TAPIA ANDERSON ALANFRANCO",
-          "grupo": "Grupo 03",
-          "dni": "48680257",
           "lider": "Vásquez Reyez Neyser"
         },
         {
+          "lider": "Vásquez Reyez Neyser",
+          "grupo": "Grupo 03",
+          "nombres": "PILCO INUMA ANGELICA ATIANA",
+          "id": "IMP_1789139968343_178",
+          "dni": "60402917"
+        },
+        {
+          "dni": "41112925",
+          "id": "IMP_1789139968343_84",
+          "lider": "Vásquez Reyez Neyser",
+          "grupo": "Grupo 03",
+          "nombres": "QUEZADA JUAREZ LADY LISSET"
+        },
+        {
+          "id": "IMP_1789139968343_4",
+          "nombres": "REQUELME GARCIA RICARDO MANUEL",
+          "lider": "Vásquez Reyez Neyser",
+          "grupo": "Grupo 03",
+          "dni": "18142256"
+        },
+        {
+          "dni": "72211880",
+          "grupo": "Grupo 03",
+          "lider": "Vásquez Reyez Neyser",
+          "id": "IMP_1789139968343_457",
+          "nombres": "RODRIGUEZ TIRADO DANIELA VICTORIA"
+        },
+        {
+          "id": "IMP_1789139968343_477",
+          "dni": "18859960",
+          "nombres": "ROMERO CHALAN RUTTI PATRICIA",
+          "grupo": "Grupo 03",
+          "lider": "Vásquez Reyez Neyser"
+        },
+        {
+          "nombres": "RUIZ VARGAS ROSA MARIA",
+          "id": "IMP_1789139968343_144",
+          "dni": "46292410",
+          "grupo": "Grupo 03",
+          "lider": "Vásquez Reyez Neyser"
+        },
+        {
+          "dni": "80194383",
+          "nombres": "TAPIA DE LA CRUZ LUIS ALBERTO",
+          "grupo": "Grupo 03",
+          "lider": "Vásquez Reyez Neyser",
+          "id": "IMP_1789139968343_461"
+        },
+        {
+          "dni": "48680257",
+          "nombres": "TAPIA TAPIA ANDERSON ALANFRANCO",
+          "grupo": "Grupo 03",
+          "lider": "Vásquez Reyez Neyser",
+          "id": "IMP_1789139968343_455"
+        },
+        {
+          "lider": "Vásquez Reyez Neyser",
           "grupo": "Grupo 03",
           "id": "IMP_1789139968343_443",
-          "nombres": "TIRADO VALDIVIA JUANA SANTOS",
-          "lider": "Vásquez Reyez Neyser",
-          "dni": "18836316"
+          "dni": "18836316",
+          "nombres": "TIRADO VALDIVIA JUANA SANTOS"
         },
         {
-          "grupo": "Grupo 03",
-          "dni": "18898375",
-          "lider": "Vásquez Reyez Neyser",
           "id": "IMP_1789139968343_308",
-          "nombres": "TORRES MENDOZA JORGE LUIS"
+          "dni": "18898375",
+          "nombres": "TORRES MENDOZA JORGE LUIS",
+          "lider": "Vásquez Reyez Neyser",
+          "grupo": "Grupo 03"
         },
         {
-          "lider": "Vásquez Reyez Neyser",
-          "nombres": "TRUJILLO LEDESMA RAFAEL EBELIO",
-          "dni": "18858520",
           "id": "IMP_1789139968343_39",
-          "grupo": "Grupo 03"
+          "lider": "Vásquez Reyez Neyser",
+          "grupo": "Grupo 03",
+          "nombres": "TRUJILLO LEDESMA RAFAEL EBELIO",
+          "dni": "18858520"
         },
         {
-          "grupo": "Grupo 03",
-          "lider": "Vásquez Reyez Neyser",
-          "dni": "18858347",
           "id": "IMP_1789139968343_38",
-          "nombres": "ULLOA GONZALES SANTOS MARCIONILA"
+          "lider": "Vásquez Reyez Neyser",
+          "grupo": "Grupo 03",
+          "nombres": "ULLOA GONZALES SANTOS MARCIONILA",
+          "dni": "18858347"
         },
         {
-          "nombres": "VACA VASQUEZ NANCY FIORELLA",
-          "dni": "75831632",
           "id": "IMP_1789139968343_234",
+          "dni": "75831632",
+          "nombres": "VACA VASQUEZ NANCY FIORELLA",
+          "grupo": "Grupo 03",
+          "lider": "Vásquez Reyez Neyser"
+        },
+        {
+          "id": "IMP_1789139968343_265",
+          "dni": "80616223",
+          "nombres": "VALVERDE NOLASCO SEGUNDO ABELARDO",
           "lider": "Vásquez Reyez Neyser",
           "grupo": "Grupo 03"
-        },
-        {
-          "dni": "80616223",
-          "id": "IMP_1789139968343_265",
-          "grupo": "Grupo 03",
-          "lider": "Vásquez Reyez Neyser",
-          "nombres": "VALVERDE NOLASCO SEGUNDO ABELARDO"
         }
       ],
-      "supervisor": "AGUILAR CASTRO GEHELEN DAYANNA"
+      "supervisor": "AGUILAR CASTRO GEHELEN DAYANNA",
+      "hora": "03:16 p. m.",
+      "fecha": "2026-09-11",
+      "timestamp": "2026-09-11T20:16:54.594Z",
+      "grupo": "Grupo 03",
+      "modulo": "M09",
+      "totalTrabajadores": 43,
+      "id": "RES_2026-09-11_aguilar_castro_gehel_M09_grupo_03_4593",
+      "fundo": "Santa Teresa"
     },
     {
       "trabajadores": [
         {
-          "id": "IMP_1789139968343_395",
           "nombres": "ABANTO PALMA JOSE ANGEL",
-          "lider": "Reyes Mendoza yubizat",
           "dni": "71613519",
-          "grupo": "Grupo 02"
+          "id": "IMP_1789139968343_395",
+          "grupo": "Grupo 02",
+          "lider": "Reyes Mendoza yubizat"
         },
         {
           "grupo": "Grupo 02",
-          "nombres": "ARROYO ARTEAGA MARCO ANTONIO",
-          "lider": "Reyes Mendoza yubizat",
           "id": "IMP_1789139968343_339",
-          "dni": "47197322"
+          "lider": "Reyes Mendoza yubizat",
+          "dni": "47197322",
+          "nombres": "ARROYO ARTEAGA MARCO ANTONIO"
         },
         {
           "nombres": "ASCOY RUIZ ANITA BALVINA",
-          "lider": "Reyes Mendoza yubizat",
           "dni": "46783175",
-          "grupo": "Grupo 02",
-          "id": "IMP_1789139968343_337"
-        },
-        {
-          "grupo": "Grupo 02",
-          "id": "IMP_1789139968343_333",
-          "nombres": "BASILIO JUAREZ KARINA ELIZABETH",
+          "id": "IMP_1789139968343_337",
           "lider": "Reyes Mendoza yubizat",
-          "dni": "41073674"
+          "grupo": "Grupo 02"
         },
         {
-          "nombres": "BORJAS BACILIO DE CHAVEZ SANDRA ELENA",
+          "grupo": "Grupo 02",
+          "lider": "Reyes Mendoza yubizat",
+          "id": "IMP_1789139968343_333",
+          "dni": "41073674",
+          "nombres": "BASILIO JUAREZ KARINA ELIZABETH"
+        },
+        {
           "id": "IMP_1789139968343_332",
           "dni": "40131970",
-          "lider": "Reyes Mendoza yubizat",
-          "grupo": "Grupo 02"
-        },
-        {
-          "id": "IMP_1789139968343_338",
-          "nombres": "CABANILLAS ORBECOSO FLOR MAGDALENA",
+          "nombres": "BORJAS BACILIO DE CHAVEZ SANDRA ELENA",
           "grupo": "Grupo 02",
-          "dni": "47156630",
           "lider": "Reyes Mendoza yubizat"
         },
         {
-          "lider": "Reyes Mendoza yubizat",
           "grupo": "Grupo 02",
-          "nombres": "CASTILLO DIAZ JULIO CESAR",
+          "lider": "Reyes Mendoza yubizat",
+          "dni": "47156630",
+          "nombres": "CABANILLAS ORBECOSO FLOR MAGDALENA",
+          "id": "IMP_1789139968343_338"
+        },
+        {
           "dni": "19033711",
-          "id": "IMP_1789139968343_330"
+          "id": "IMP_1789139968343_330",
+          "nombres": "CASTILLO DIAZ JULIO CESAR",
+          "grupo": "Grupo 02",
+          "lider": "Reyes Mendoza yubizat"
         },
         {
+          "grupo": "Grupo 02",
           "lider": "Reyes Mendoza yubizat",
-          "id": "IMP_1789139968343_489",
+          "dni": "61704118",
           "nombres": "CHAVEZ MANTILLA JHERSON DIEGO",
-          "grupo": "Grupo 02",
-          "dni": "61704118"
+          "id": "IMP_1789139968343_489"
         },
         {
-          "dni": "47852936",
-          "grupo": "Grupo 02",
-          "lider": "Reyes Mendoza yubizat",
           "nombres": "CHAVEZ PAREDES FLOFI GLADYS",
-          "id": "IMP_1789139968343_340"
+          "id": "IMP_1789139968343_340",
+          "lider": "Reyes Mendoza yubizat",
+          "grupo": "Grupo 02",
+          "dni": "47852936"
         },
         {
+          "id": "IMP_1789139968343_335",
+          "grupo": "Grupo 02",
           "lider": "Reyes Mendoza yubizat",
           "dni": "42621142",
-          "id": "IMP_1789139968343_335",
-          "nombres": "DELA CRUZ POLO JULIO ALBERTO",
-          "grupo": "Grupo 02"
+          "nombres": "DELA CRUZ POLO JULIO ALBERTO"
         },
         {
-          "grupo": "Grupo 02",
           "id": "IMP_1789139968343_247",
-          "nombres": "DOMINGUEZ CASTILLO JEANS POOL ALEXANDER",
           "dni": "77053839",
-          "lider": "Reyes Mendoza yubizat"
-        },
-        {
+          "nombres": "DOMINGUEZ CASTILLO JEANS POOL ALEXANDER",
           "lider": "Reyes Mendoza yubizat",
-          "dni": "49057126",
-          "id": "IMP_1789139968343_171",
-          "grupo": "Grupo 02",
-          "nombres": "DOMINGUEZ LOYOLA ROSA"
-        },
-        {
-          "grupo": "Grupo 02",
-          "id": "IMP_1789139968343_402",
-          "nombres": "FERNANDEZ GUTIERREZ RENEE JEANPIERE",
-          "dni": "70525433",
-          "lider": "Reyes Mendoza yubizat"
-        },
-        {
-          "lider": "Reyes Mendoza yubizat",
-          "nombres": "FLORES VIDAL MONICA CAROL",
-          "grupo": "Grupo 02",
-          "dni": "41086356",
-          "id": "IMP_1789139968343_281"
-        },
-        {
-          "nombres": "FLORES ZAVALETA MILAGROS YANET",
-          "dni": "47897812",
-          "lider": "Reyes Mendoza yubizat",
-          "id": "IMP_1789139968343_341",
           "grupo": "Grupo 02"
         },
         {
-          "dni": "18227219",
+          "lider": "Reyes Mendoza yubizat",
           "grupo": "Grupo 02",
+          "nombres": "DOMINGUEZ LOYOLA ROSA",
+          "id": "IMP_1789139968343_171",
+          "dni": "49057126"
+        },
+        {
+          "dni": "70525433",
+          "lider": "Reyes Mendoza yubizat",
+          "grupo": "Grupo 02",
+          "nombres": "FERNANDEZ GUTIERREZ RENEE JEANPIERE",
+          "id": "IMP_1789139968343_402"
+        },
+        {
+          "id": "IMP_1789139968343_281",
+          "nombres": "FLORES VIDAL MONICA CAROL",
+          "lider": "Reyes Mendoza yubizat",
+          "grupo": "Grupo 02",
+          "dni": "41086356"
+        },
+        {
+          "dni": "47897812",
+          "nombres": "FLORES ZAVALETA MILAGROS YANET",
+          "lider": "Reyes Mendoza yubizat",
+          "grupo": "Grupo 02",
+          "id": "IMP_1789139968343_341"
+        },
+        {
           "nombres": "GONZALES CHAVEZ NELLY MARIBEL",
           "id": "IMP_1789139968343_329",
-          "lider": "Reyes Mendoza yubizat"
+          "grupo": "Grupo 02",
+          "lider": "Reyes Mendoza yubizat",
+          "dni": "18227219"
         },
         {
           "lider": "Reyes Mendoza yubizat",
+          "grupo": "Grupo 02",
+          "id": "IMP_1789139968343_345",
           "dni": "74556226",
-          "nombres": "GONZALES RAMOS ALEXANDRA",
-          "grupo": "Grupo 02",
-          "id": "IMP_1789139968343_345"
+          "nombres": "GONZALES RAMOS ALEXANDRA"
         },
         {
-          "grupo": "Grupo 02",
+          "dni": "47925003",
           "nombres": "GONZALES RAMOS ERICKA MILADY",
-          "id": "IMP_1789139968343_160",
           "lider": "Reyes Mendoza yubizat",
-          "dni": "47925003"
+          "grupo": "Grupo 02",
+          "id": "IMP_1789139968343_160"
         },
         {
-          "nombres": "GUEVARA LEON CARMEN ROSA",
           "lider": "Reyes Mendoza yubizat",
+          "grupo": "Grupo 02",
+          "id": "IMP_1789139968343_7",
           "dni": "18181274",
-          "grupo": "Grupo 02",
-          "id": "IMP_1789139968343_7"
+          "nombres": "GUEVARA LEON CARMEN ROSA"
         },
         {
-          "lider": "Reyes Mendoza yubizat",
           "id": "IMP_1789139968343_295",
-          "grupo": "Grupo 02",
           "dni": "71510177",
-          "nombres": "HONORIO ALVA CINTYA LIZETH"
+          "nombres": "HONORIO ALVA CINTYA LIZETH",
+          "lider": "Reyes Mendoza yubizat",
+          "grupo": "Grupo 02"
         },
         {
           "dni": "43474898",
-          "lider": "Reyes Mendoza yubizat",
           "nombres": "LAZARO ALVARADO ROCIO MABEL",
           "id": "IMP_1789139968343_336",
+          "lider": "Reyes Mendoza yubizat",
           "grupo": "Grupo 02"
         },
         {
-          "dni": "42429161",
-          "grupo": "Grupo 02",
+          "nombres": "LAZARO DIAZ JEISON JOEL",
           "id": "IMP_1789139968343_405",
+          "grupo": "Grupo 02",
           "lider": "Reyes Mendoza yubizat",
-          "nombres": "LAZARO DIAZ JEISON JOEL"
+          "dni": "42429161"
         },
         {
           "lider": "Reyes Mendoza yubizat",
+          "grupo": "Grupo 02",
+          "nombres": "LAZARO REYES TABITA VASTI",
           "dni": "40819468",
-          "id": "IMP_1789139968343_451",
-          "grupo": "Grupo 02",
-          "nombres": "LAZARO REYES TABITA VASTI"
+          "id": "IMP_1789139968343_451"
         },
         {
+          "lider": "Reyes Mendoza yubizat",
           "grupo": "Grupo 02",
-          "id": "IMP_1789139968343_226",
           "dni": "74582225",
           "nombres": "LOZANO PINEDO NESTOR SMITH",
-          "lider": "Reyes Mendoza yubizat"
+          "id": "IMP_1789139968343_226"
         },
         {
-          "grupo": "Grupo 02",
-          "id": "IMP_1789139968343_209",
           "dni": "71444335",
-          "nombres": "MALLOQUI DE LA CRUZ NATHANAEL JOB",
-          "lider": "Reyes Mendoza yubizat"
+          "id": "IMP_1789139968343_209",
+          "grupo": "Grupo 02",
+          "lider": "Reyes Mendoza yubizat",
+          "nombres": "MALLOQUI DE LA CRUZ NATHANAEL JOB"
         },
         {
-          "grupo": "Grupo 02",
           "id": "IMP_1789139968343_282",
           "dni": "71444334",
-          "lider": "Reyes Mendoza yubizat",
-          "nombres": "MALLQUI DE LA CRUZ ROSMERY AVELINA"
+          "nombres": "MALLQUI DE LA CRUZ ROSMERY AVELINA",
+          "grupo": "Grupo 02",
+          "lider": "Reyes Mendoza yubizat"
         },
         {
+          "dni": "17816325",
           "grupo": "Grupo 02",
           "nombres": "MORALES FERRER LILA ZENAIDA",
-          "id": "IMP_1789139968343_328",
-          "dni": "17816325",
-          "lider": "Reyes Mendoza yubizat"
+          "lider": "Reyes Mendoza yubizat",
+          "id": "IMP_1789139968343_328"
         },
         {
           "lider": "Reyes Mendoza yubizat",
-          "id": "IMP_1789139968343_148",
+          "grupo": "Grupo 02",
           "nombres": "NORIEGA NARRO EDITA SOLEDAD",
-          "grupo": "Grupo 02",
-          "dni": "46487239"
+          "dni": "46487239",
+          "id": "IMP_1789139968343_148"
         },
         {
-          "nombres": "ORBREGOSO OJEDA SERGIO ALDAIR",
-          "lider": "Reyes Mendoza yubizat",
-          "grupo": "Grupo 02",
           "dni": "71510097",
-          "id": "IMP_1789139968343_210"
+          "id": "IMP_1789139968343_210",
+          "lider": "Reyes Mendoza yubizat",
+          "nombres": "ORBREGOSO OJEDA SERGIO ALDAIR",
+          "grupo": "Grupo 02"
         },
         {
-          "lider": "Reyes Mendoza yubizat",
-          "id": "IMP_1789139968343_343",
           "dni": "73500187",
+          "nombres": "ORUNA VELASQUEZ LUCIANE RAQUEL",
+          "lider": "Reyes Mendoza yubizat",
           "grupo": "Grupo 02",
-          "nombres": "ORUNA VELASQUEZ LUCIANE RAQUEL"
+          "id": "IMP_1789139968343_343"
         },
         {
-          "grupo": "Grupo 02",
-          "lider": "Reyes Mendoza yubizat",
-          "dni": "70032496",
           "id": "IMP_1789139968343_190",
-          "nombres": "OTINIANO QUISPE KELIN GLADIS"
+          "dni": "70032496",
+          "nombres": "OTINIANO QUISPE KELIN GLADIS",
+          "lider": "Reyes Mendoza yubizat",
+          "grupo": "Grupo 02"
         },
         {
-          "dni": "73088436",
-          "id": "IMP_1789139968343_217",
-          "grupo": "Grupo 02",
           "nombres": "PALOMINO LAVADO FLOR MARGARITA",
-          "lider": "Reyes Mendoza yubizat"
+          "dni": "73088436",
+          "grupo": "Grupo 02",
+          "lider": "Reyes Mendoza yubizat",
+          "id": "IMP_1789139968343_217"
         },
         {
           "lider": "Reyes Mendoza yubizat",
-          "dni": "48819617",
           "grupo": "Grupo 02",
+          "dni": "48819617",
           "nombres": "REYES FLORES SANDRA SULEMA",
           "id": "IMP_1789139968343_488"
         },
         {
-          "dni": "40067997",
-          "lider": "Reyes Mendoza yubizat",
           "id": "IMP_1789139968343_331",
           "nombres": "RIOS CONTRERAS SANTOS SABINA",
+          "dni": "40067997",
+          "lider": "Reyes Mendoza yubizat",
           "grupo": "Grupo 02"
         },
         {
-          "grupo": "Grupo 02",
+          "nombres": "RIOS YUPANQUI JACOBA",
           "dni": "19539421",
-          "lider": "Reyes Mendoza yubizat",
           "id": "IMP_1789139968343_68",
-          "nombres": "RIOS YUPANQUI JACOBA"
+          "lider": "Reyes Mendoza yubizat",
+          "grupo": "Grupo 02"
         },
         {
-          "lider": "Reyes Mendoza yubizat",
           "dni": "77907646",
-          "id": "IMP_1789139968343_346",
           "grupo": "Grupo 02",
+          "lider": "Reyes Mendoza yubizat",
+          "id": "IMP_1789139968343_346",
           "nombres": "RODRIGUEZ POLO DEYSSI ELITA"
         },
         {
-          "grupo": "Grupo 02",
-          "nombres": "ROJAS CABANILLAS ALEXANDER TOMAS",
           "dni": "60799748",
           "id": "IMP_1789139968343_342",
-          "lider": "Reyes Mendoza yubizat"
+          "grupo": "Grupo 02",
+          "lider": "Reyes Mendoza yubizat",
+          "nombres": "ROJAS CABANILLAS ALEXANDER TOMAS"
         },
         {
+          "id": "IMP_1789139968343_110",
           "dni": "43305827",
           "grupo": "Grupo 02",
-          "id": "IMP_1789139968343_110",
           "lider": "Reyes Mendoza yubizat",
           "nombres": "ROJAS DOMINGUEZ ROSVIT ENITH"
         },
         {
-          "nombres": "ROJAS DOMINGUEZ SEGUNDO GERARDO",
-          "id": "IMP_1789139968343_407",
-          "lider": "Reyes Mendoza yubizat",
           "dni": "48515985",
-          "grupo": "Grupo 02"
+          "id": "IMP_1789139968343_407",
+          "nombres": "ROJAS DOMINGUEZ SEGUNDO GERARDO",
+          "grupo": "Grupo 02",
+          "lider": "Reyes Mendoza yubizat"
         },
         {
           "grupo": "Grupo 02",
@@ -11819,380 +11819,380 @@
           "nombres": "ROJAS SILVA VICTOR JULIO"
         },
         {
-          "grupo": "Grupo 02",
-          "nombres": "RUIZ CASTILLO JHON ROBERTO",
           "id": "IMP_1789139968343_200",
-          "dni": "71175345",
-          "lider": "Reyes Mendoza yubizat"
-        },
-        {
-          "id": "IMP_1789139968343_208",
+          "nombres": "RUIZ CASTILLO JHON ROBERTO",
+          "grupo": "Grupo 02",
           "lider": "Reyes Mendoza yubizat",
-          "nombres": "RUIZ SACHUN LUIS DAVID",
-          "dni": "71444300",
-          "grupo": "Grupo 02"
+          "dni": "71175345"
         },
         {
-          "nombres": "SANCHEZ SALIRROSAS DEMETRIO",
+          "grupo": "Grupo 02",
+          "lider": "Reyes Mendoza yubizat",
+          "id": "IMP_1789139968343_208",
+          "dni": "71444300",
+          "nombres": "RUIZ SACHUN LUIS DAVID"
+        },
+        {
+          "grupo": "Grupo 02",
           "lider": "Reyes Mendoza yubizat",
           "dni": "80504050",
           "id": "IMP_1789139968343_490",
-          "grupo": "Grupo 02"
+          "nombres": "SANCHEZ SALIRROSAS DEMETRIO"
         },
         {
-          "nombres": "SILVA PARIATANTA RONE",
-          "lider": "Reyes Mendoza yubizat",
-          "id": "IMP_1789139968343_157",
           "dni": "47192533",
+          "nombres": "SILVA PARIATANTA RONE",
+          "grupo": "Grupo 02",
+          "lider": "Reyes Mendoza yubizat",
+          "id": "IMP_1789139968343_157"
+        },
+        {
+          "nombres": "SOTELO RIOS YRIS BERLINDA",
+          "dni": "41178975",
+          "id": "IMP_1789139968343_85",
+          "lider": "Reyes Mendoza yubizat",
           "grupo": "Grupo 02"
         },
         {
-          "grupo": "Grupo 02",
-          "dni": "41178975",
           "lider": "Reyes Mendoza yubizat",
-          "id": "IMP_1789139968343_85",
-          "nombres": "SOTELO RIOS YRIS BERLINDA"
-        },
-        {
-          "dni": "73680374",
-          "nombres": "SOTELO SOTELO ANDREA NICOLE",
           "grupo": "Grupo 02",
           "id": "IMP_1789139968343_220",
-          "lider": "Reyes Mendoza yubizat"
+          "dni": "73680374",
+          "nombres": "SOTELO SOTELO ANDREA NICOLE"
         },
         {
           "nombres": "TACILLA BARROS KEVIN RICARDO",
-          "lider": "Reyes Mendoza yubizat",
-          "grupo": "Grupo 02",
           "dni": "74805961",
-          "id": "IMP_1789139968343_478"
+          "id": "IMP_1789139968343_478",
+          "lider": "Reyes Mendoza yubizat",
+          "grupo": "Grupo 02"
         },
         {
-          "lider": "Reyes Mendoza yubizat",
           "dni": "70055469",
-          "nombres": "TACILLA BARROS KEYLA BRIGHIT",
           "grupo": "Grupo 02",
-          "id": "IMP_1789139968343_483"
+          "lider": "Reyes Mendoza yubizat",
+          "id": "IMP_1789139968343_483",
+          "nombres": "TACILLA BARROS KEYLA BRIGHIT"
         },
         {
           "lider": "Reyes Mendoza yubizat",
+          "grupo": "Grupo 02",
+          "id": "IMP_1789139968343_216",
           "nombres": "VALENCIA OTINIANO GENJHI AXEL",
-          "grupo": "Grupo 02",
-          "dni": "73011462",
-          "id": "IMP_1789139968343_216"
+          "dni": "73011462"
         },
         {
-          "grupo": "Grupo 02",
           "id": "IMP_1789139968343_344",
-          "dni": "74540801",
+          "lider": "Reyes Mendoza yubizat",
+          "grupo": "Grupo 02",
           "nombres": "VEGA SANCHEZ RUT CATERINE",
-          "lider": "Reyes Mendoza yubizat"
+          "dni": "74540801"
         },
         {
-          "id": "IMP_1789139968343_225",
-          "lider": "Reyes Mendoza yubizat",
           "dni": "74378170",
           "nombres": "VILLANUEVA PALOMINO KELLY JHACKELINE",
+          "id": "IMP_1789139968343_225",
+          "lider": "Reyes Mendoza yubizat",
           "grupo": "Grupo 02"
         }
       ],
-      "grupo": "Grupo 02",
+      "fundo": "Santa Teresa",
       "fecha": "2026-09-11",
-      "id": "RES_2026-09-11_aguilar_castro_gehel_M09_grupo_02_3703",
-      "hora": "02:37 p. m.",
-      "lider": "Reyes Mendoza yubizat",
-      "modulo": "M09",
-      "timestamp": "2026-09-11T19:37:33.704Z",
-      "totalTrabajadores": 51,
-      "supervisor": "AGUILAR CASTRO GEHELEN DAYANNA",
+      "grupo": "Grupo 02",
       "estado": "completada",
-      "fundo": "Santa Teresa"
+      "timestamp": "2026-09-11T19:37:33.704Z",
+      "modulo": "M09",
+      "totalTrabajadores": 51,
+      "lider": "Reyes Mendoza yubizat",
+      "supervisor": "AGUILAR CASTRO GEHELEN DAYANNA",
+      "id": "RES_2026-09-11_aguilar_castro_gehel_M09_grupo_02_3703",
+      "hora": "02:37 p. m."
     },
     {
-      "supervisor": "AGUILAR CASTRO GEHELEN DAYANNA",
-      "id": "RES_2026-09-11_aguilar_castro_gehel_M09_grupo_01_5695",
-      "hora": "02:05 p. m.",
       "fundo": "Santa Teresa",
+      "id": "RES_2026-09-11_aguilar_castro_gehel_M09_grupo_01_5695",
       "timestamp": "2026-09-11T19:05:55.697Z",
+      "supervisor": "AGUILAR CASTRO GEHELEN DAYANNA",
+      "grupo": "Grupo 01",
+      "fecha": "2026-09-11",
+      "totalTrabajadores": 39,
+      "hora": "02:05 p. m.",
       "trabajadores": [
         {
-          "id": "IMP_1789139968343_215",
           "grupo": "Grupo 01",
-          "dni": "72768440",
+          "lider": "Camacho ramirez juan",
           "nombres": "AGUILAR AGUILAR LUZ DEL PILAR",
-          "lider": "Camacho ramirez juan"
+          "dni": "72768440",
+          "id": "IMP_1789139968343_215"
         },
         {
-          "id": "IMP_1789139968343_27",
-          "lider": "Camacho ramirez juan",
-          "dni": "18852457",
           "nombres": "ALVARADO CARRION MARIA ELENA",
+          "id": "IMP_1789139968343_27",
+          "dni": "18852457",
+          "lider": "Camacho ramirez juan",
           "grupo": "Grupo 01"
         },
         {
-          "lider": "Camacho ramirez juan",
           "id": "IMP_1789139968343_138",
-          "nombres": "BADA RASCO MERCEDES",
           "grupo": "Grupo 01",
+          "lider": "Camacho ramirez juan",
+          "nombres": "BADA RASCO MERCEDES",
           "dni": "45818788"
         },
         {
-          "grupo": "Grupo 01",
-          "id": "IMP_1789139968343_485",
+          "nombres": "BAUTISTA VILLANUEVA TEODORO",
           "dni": "18822987",
+          "id": "IMP_1789139968343_485",
           "lider": "Camacho ramirez juan",
-          "nombres": "BAUTISTA VILLANUEVA TEODORO"
+          "grupo": "Grupo 01"
         },
         {
-          "grupo": "Grupo 01",
           "dni": "45946029",
-          "lider": "Camacho ramirez juan",
+          "nombres": "BERMUDEZ DE LA CRUZ GLADYS SHARON",
           "id": "IMP_1789139968343_311",
-          "nombres": "BERMUDEZ DE LA CRUZ GLADYS SHARON"
+          "grupo": "Grupo 01",
+          "lider": "Camacho ramirez juan"
         },
         {
-          "grupo": "Grupo 01",
           "nombres": "CABANILLAS MURILLOS ROBERTO CARLOS",
-          "dni": "41987402",
           "lider": "Camacho ramirez juan",
+          "grupo": "Grupo 01",
+          "dni": "41987402",
           "id": "IMP_1789139968343_310"
         },
         {
           "id": "IMP_1789139968343_394",
+          "dni": "18897131",
           "nombres": "CABANILLAS MURILLOS RONNY ALEXANDER",
           "lider": "Camacho ramirez juan",
-          "dni": "18897131",
           "grupo": "Grupo 01"
         },
         {
-          "lider": "Camacho ramirez juan",
           "dni": "18854470",
+          "id": "IMP_1789139968343_30",
           "grupo": "Grupo 01",
-          "nombres": "CARRANZA MARIN JORGE LEONIDAS",
-          "id": "IMP_1789139968343_30"
-        },
-        {
-          "dni": "42274001",
           "lider": "Camacho ramirez juan",
-          "id": "IMP_1789139968343_97",
-          "nombres": "CASTILLO VERA CESAR WALTER",
-          "grupo": "Grupo 01"
+          "nombres": "CARRANZA MARIN JORGE LEONIDAS"
         },
         {
+          "lider": "Camacho ramirez juan",
           "grupo": "Grupo 01",
+          "dni": "42274001",
+          "nombres": "CASTILLO VERA CESAR WALTER",
+          "id": "IMP_1789139968343_97"
+        },
+        {
           "id": "IMP_1789139968343_10",
           "dni": "18828448",
-          "lider": "Camacho ramirez juan",
-          "nombres": "CASTILLO VIGO LUIS HUMBERTO"
+          "nombres": "CASTILLO VIGO LUIS HUMBERTO",
+          "grupo": "Grupo 01",
+          "lider": "Camacho ramirez juan"
         },
         {
-          "nombres": "CORTEZ CHUQUIRUNA SEGUNDO JUAN",
-          "lider": "Camacho ramirez juan",
           "id": "IMP_1789139968343_8",
-          "grupo": "Grupo 01",
-          "dni": "18821248"
+          "nombres": "CORTEZ CHUQUIRUNA SEGUNDO JUAN",
+          "dni": "18821248",
+          "lider": "Camacho ramirez juan",
+          "grupo": "Grupo 01"
         },
         {
           "nombres": "CUEVA PORTAL JAN CARLOS",
-          "lider": "Camacho ramirez juan",
-          "dni": "46471704",
           "grupo": "Grupo 01",
-          "id": "IMP_1789139968343_312"
+          "lider": "Camacho ramirez juan",
+          "id": "IMP_1789139968343_312",
+          "dni": "46471704"
         },
         {
-          "dni": "18851531",
           "id": "IMP_1789139968343_306",
           "nombres": "DIAZ HUATAY ALBERTO",
+          "lider": "Camacho ramirez juan",
           "grupo": "Grupo 01",
-          "lider": "Camacho ramirez juan"
+          "dni": "18851531"
         },
         {
-          "dni": "18822808",
           "id": "IMP_1789139968343_484",
+          "dni": "18822808",
           "grupo": "Grupo 01",
-          "nombres": "FLORES ARENAS JACINTO DIOMEDES",
-          "lider": "Camacho ramirez juan"
+          "lider": "Camacho ramirez juan",
+          "nombres": "FLORES ARENAS JACINTO DIOMEDES"
         },
         {
+          "lider": "Camacho ramirez juan",
+          "grupo": "Grupo 01",
           "dni": "18844900",
-          "grupo": "Grupo 01",
-          "nombres": "FLORES CASTRO TOMAS",
-          "lider": "Camacho ramirez juan",
-          "id": "TRAB_18844900_0066"
+          "id": "TRAB_18844900_0066",
+          "nombres": "FLORES CASTRO TOMAS"
         },
         {
-          "lider": "Camacho ramirez juan",
-          "grupo": "Grupo 01",
+          "dni": "48744932",
           "nombres": "FLORES GALLARDO GEOANNA",
           "id": "IMP_1789139968343_168",
-          "dni": "48744932"
+          "grupo": "Grupo 01",
+          "lider": "Camacho ramirez juan"
         },
         {
-          "id": "IMP_1789139968343_9",
-          "lider": "Camacho ramirez juan",
-          "nombres": "HUARIPATA CARHUALLAY SABINO",
           "dni": "18821527",
+          "nombres": "HUARIPATA CARHUALLAY SABINO",
+          "lider": "Camacho ramirez juan",
+          "id": "IMP_1789139968343_9",
           "grupo": "Grupo 01"
         },
         {
-          "nombres": "LINARES LOZADA SEGUNDO CARLOS",
-          "lider": "Camacho ramirez juan",
-          "grupo": "Grupo 01",
           "dni": "80044961",
+          "grupo": "Grupo 01",
+          "lider": "Camacho ramirez juan",
+          "nombres": "LINARES LOZADA SEGUNDO CARLOS",
           "id": "IMP_1789139968343_255"
         },
         {
           "nombres": "LOPEZ DE LA CRUZ ERIKA ESTHER",
-          "id": "IMP_1789139968343_309",
           "dni": "40435070",
-          "grupo": "Grupo 01",
-          "lider": "Camacho ramirez juan"
+          "id": "IMP_1789139968343_309",
+          "lider": "Camacho ramirez juan",
+          "grupo": "Grupo 01"
         },
         {
-          "nombres": "MANTILLA FERNANDEZ ANTONIO",
-          "lider": "Camacho ramirez juan",
           "id": "IMP_1789139968343_37",
+          "dni": "18857922",
           "grupo": "Grupo 01",
-          "dni": "18857922"
+          "lider": "Camacho ramirez juan",
+          "nombres": "MANTILLA FERNANDEZ ANTONIO"
         },
         {
-          "grupo": "Grupo 01",
-          "nombres": "MIRANDA REYES LUCY GUADALUPE",
           "id": "IMP_1789139968343_121",
+          "grupo": "Grupo 01",
           "lider": "Camacho ramirez juan",
-          "dni": "43873742"
+          "dni": "43873742",
+          "nombres": "MIRANDA REYES LUCY GUADALUPE"
         },
         {
-          "lider": "Camacho ramirez juan",
-          "grupo": "Grupo 01",
-          "id": "IMP_1789139968343_26",
           "nombres": "MORENO RISCO SEGUNDO MAXIMO",
-          "dni": "18846543"
+          "id": "IMP_1789139968343_26",
+          "dni": "18846543",
+          "lider": "Camacho ramirez juan",
+          "grupo": "Grupo 01"
         },
         {
-          "dni": "18854282",
           "grupo": "Grupo 01",
-          "id": "IMP_1789139968343_28",
           "lider": "Camacho ramirez juan",
+          "dni": "18854282",
+          "id": "IMP_1789139968343_28",
           "nombres": "ORTIZ DE LOS SANTOS LEONARDO"
         },
         {
-          "dni": "42171428",
           "grupo": "Grupo 01",
           "lider": "Camacho ramirez juan",
           "id": "IMP_1789139968343_96",
+          "dni": "42171428",
           "nombres": "PELAEZ BADO PEDRO CARLOS"
         },
         {
-          "dni": "48837921",
           "nombres": "PERALES SÁNCHEZ LEONARDO ANTONELY",
-          "grupo": "Grupo 01",
           "id": "IMP_1789139968343_169",
-          "lider": "Camacho ramirez juan"
+          "dni": "48837921",
+          "lider": "Camacho ramirez juan",
+          "grupo": "Grupo 01"
         },
         {
-          "grupo": "Grupo 01",
+          "dni": "18843999",
           "id": "IMP_1789139968343_24",
           "nombres": "QUISPE MATARA RICARDO",
-          "dni": "18843999",
-          "lider": "Camacho ramirez juan"
+          "lider": "Camacho ramirez juan",
+          "grupo": "Grupo 01"
         },
         {
-          "grupo": "Grupo 01",
           "id": "IMP_1789139968343_17",
           "dni": "18838828",
+          "nombres": "QUISPE PICHEN JAIME HUMBERTO",
           "lider": "Camacho ramirez juan",
-          "nombres": "QUISPE PICHEN JAIME HUMBERTO"
+          "grupo": "Grupo 01"
         },
         {
           "grupo": "Grupo 01",
-          "nombres": "RAMIREZ ORDOÑEZ WILLIANS PAUL",
           "lider": "Camacho ramirez juan",
+          "nombres": "RAMIREZ ORDOÑEZ WILLIANS PAUL",
           "dni": "18858457",
           "id": "IMP_1789139968343_307"
         },
         {
-          "nombres": "ROBLES MESTANZA JUAN BAUTISTA",
-          "lider": "Camacho ramirez juan",
-          "dni": "18892596",
           "grupo": "Grupo 01",
+          "lider": "Camacho ramirez juan",
+          "nombres": "ROBLES MESTANZA JUAN BAUTISTA",
+          "dni": "18892596",
           "id": "IMP_1789139968343_325"
         },
         {
-          "nombres": "RUIZ FLORES WILMER",
-          "lider": "Camacho ramirez juan",
-          "id": "IMP_1789139968343_40",
           "grupo": "Grupo 01",
-          "dni": "18859052"
+          "lider": "Camacho ramirez juan",
+          "dni": "18859052",
+          "nombres": "RUIZ FLORES WILMER",
+          "id": "IMP_1789139968343_40"
         },
         {
-          "dni": "71568314",
-          "grupo": "Grupo 01",
-          "id": "IMP_1789139968343_211",
           "nombres": "RUIZ IDROGO LEIDE MEDALI",
-          "lider": "Camacho ramirez juan"
+          "lider": "Camacho ramirez juan",
+          "grupo": "Grupo 01",
+          "dni": "71568314",
+          "id": "IMP_1789139968343_211"
         },
         {
           "dni": "18898192",
           "lider": "Camacho ramirez juan",
-          "id": "IMP_1789139968343_57",
+          "grupo": "Grupo 01",
           "nombres": "RUZ MELENDEZ DE BOBADILLA ROSA ISELA",
-          "grupo": "Grupo 01"
+          "id": "IMP_1789139968343_57"
         },
         {
-          "dni": "18844733",
           "nombres": "SAUCEDO ORBECOSO SEGUNDO ALEJANDRO",
+          "dni": "18844733",
           "grupo": "Grupo 01",
-          "id": "IMP_1789139968343_305",
+          "lider": "Camacho ramirez juan",
+          "id": "IMP_1789139968343_305"
+        },
+        {
+          "id": "IMP_1789139968343_2",
+          "nombres": "TANTAJULCA MONTENEGRO BILFREDO",
+          "grupo": "Grupo 01",
+          "dni": "17441602",
           "lider": "Camacho ramirez juan"
         },
         {
-          "nombres": "TANTAJULCA MONTENEGRO BILFREDO",
-          "lider": "Camacho ramirez juan",
-          "id": "IMP_1789139968343_2",
-          "grupo": "Grupo 01",
-          "dni": "17441602"
-        },
-        {
-          "lider": "Camacho ramirez juan",
-          "nombres": "TORRES RONDO ALBERTO",
-          "id": "IMP_1789139968343_90",
           "dni": "41717558",
+          "id": "IMP_1789139968343_90",
+          "nombres": "TORRES RONDO ALBERTO",
+          "lider": "Camacho ramirez juan",
           "grupo": "Grupo 01"
         },
         {
-          "grupo": "Grupo 01",
-          "id": "IMP_1789139968343_21",
-          "dni": "18839926",
           "nombres": "TORRES RONDO PAULA",
-          "lider": "Camacho ramirez juan"
-        },
-        {
-          "id": "IMP_1789139968343_22",
+          "dni": "18839926",
           "lider": "Camacho ramirez juan",
-          "dni": "18840288",
           "grupo": "Grupo 01",
-          "nombres": "URTEAGA CORCUERA LUIS ALBERTO"
+          "id": "IMP_1789139968343_21"
         },
         {
+          "nombres": "URTEAGA CORCUERA LUIS ALBERTO",
+          "grupo": "Grupo 01",
           "lider": "Camacho ramirez juan",
+          "id": "IMP_1789139968343_22",
+          "dni": "18840288"
+        },
+        {
+          "id": "IMP_1789139968343_53",
           "nombres": "VIDAL PAJARES MARCO ANTONIO",
           "dni": "18890785",
-          "id": "IMP_1789139968343_53",
+          "lider": "Camacho ramirez juan",
           "grupo": "Grupo 01"
         },
         {
           "dni": "70375504",
+          "grupo": "Grupo 01",
           "lider": "Camacho ramirez juan",
-          "nombres": "VILLANUEVA ALCANTARA SILVIA DEL PILAR",
           "id": "IMP_1789139968343_386",
-          "grupo": "Grupo 01"
+          "nombres": "VILLANUEVA ALCANTARA SILVIA DEL PILAR"
         }
       ],
-      "grupo": "Grupo 01",
-      "fecha": "2026-09-11",
       "modulo": "M09",
-      "totalTrabajadores": 39,
       "lider": "Camacho ramirez juan"
     }
   ],
@@ -12220,5 +12220,5 @@
       "timestamp": "2026-09-14T19:20:36.758Z"
     }
   ],
-  "lastUpdated": "2026-09-14T23:38:20.729Z"
+  "lastUpdated": "2026-09-14T23:52:51.080Z"
 }
