@@ -1390,11 +1390,27 @@ export default function App() {
 
     addLog('📤 Iniciando subida manual completa a Google Sheets...', 'info');
     try {
+      const todayIso = new Date().toISOString().slice(0, 10);
       const payload = {
         accion: 'sync',
         data: {
           programas,
           programaGeneral,
+          nominaGeneral: trabajadores.map((t) => ({
+            dni: t.dni || '',
+            nombres: t.nombres || '',
+            fundo: t.fundo || '',
+            modulo: t.modulo || '',
+            supervisor: t.supervisor || '',
+            tipo: t.tipo || 'Cosechador'
+          })),
+          asignaciones: trabajadores.map((t) => ({
+            dni: t.dni || '',
+            nombres: t.nombres || '',
+            grupo: t.grupo || '',
+            lider: t.lider || '',
+            fecha: t.fecha || todayIso
+          })),
           trabajadores,
           detalleJabas,
           usuarios,

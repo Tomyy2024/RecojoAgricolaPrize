@@ -39,6 +39,7 @@ import {
   ShieldCheck,
   Table,
   Zap,
+  Sparkles,
   LogIn,
   LogOut,
   Database,
@@ -197,6 +198,33 @@ function doPost(e) {
     }
 
     // 5. Guardar Trabajadores / Asignaciones
+    // Auto-completar si solo vino trabajadores
+    if (payload.trabajadores && payload.trabajadores.length > 0) {
+      if (!payload.nominaGeneral || payload.nominaGeneral.length === 0) {
+        payload.nominaGeneral = payload.trabajadores.map(function(t) {
+          return {
+            dni: t.dni || '',
+            nombres: t.nombres || '',
+            fundo: t.fundo || '',
+            modulo: t.modulo || '',
+            supervisor: t.supervisor || '',
+            tipo: t.tipo || 'Cosechador'
+          };
+        });
+      }
+      if (!payload.asignaciones || payload.asignaciones.length === 0) {
+        payload.asignaciones = payload.trabajadores.map(function(t) {
+          return {
+            dni: t.dni || '',
+            nombres: t.nombres || '',
+            grupo: t.grupo || '',
+            lider: t.lider || '',
+            fecha: t.fecha || t.fechaAsignacion || timestamp.toISOString().slice(0, 10)
+          };
+        });
+      }
+    }
+
     // Si viene asignaciones: guardar en 'Asignacion_Cuadrillas'
     if (payload.asignaciones && payload.asignaciones.length > 0) {
       var sheetAsig = getOrCreateSheet(ss, 'Asignacion_Cuadrillas', [
@@ -345,6 +373,23 @@ function doGet(e) {
       message: 'Conexión exitosa a Google Sheets - Recojo de Fruta API',
       spreadsheetName: ss.getName()
     })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  if (action === 'crear_tablas' || action === 'migrar_tablas') {
+    try {
+      var resMig = migrarHojasDesdeTrabajadores(ss);
+      return ContentService.createTextOutput(JSON.stringify({
+        status: resMig.ok ? 'ok' : 'error',
+        message: resMig.message,
+        nominaCount: resMig.nominaCount,
+        asigCount: resMig.asigCount
+      })).setMimeType(ContentService.MimeType.JSON);
+    } catch (err) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'error',
+        message: err.toString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
   }
 
   if (action === 'export') {
@@ -643,15 +688,109 @@ function doGet(e) {
 }
 
 function getOrCreateSheet(ss, name, headers) {
-  var sheet = ss.getSheetByName(name);
+  if (!ss) {
+    ss = SpreadsheetApp.getActiveSpreadsheet();
+  }
+  if (!ss) {
+    throw new Error('No se detectó una hoja de cálculo activa.');
+  }
+  var sheetName = name || 'Hoja1';
+  var sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
-    sheet = ss.insertSheet(name);
+    sheet = ss.insertSheet(sheetName);
     if (headers && headers.length > 0) {
       sheet.appendRow(headers);
       sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#e8f5e9');
     }
   }
   return sheet;
+}
+
+// Función principal para ejecutar con el botón "Ejecutar" ▶️ en Apps Script
+function CREAR_TABLAS_AHORA() {
+  return menuCrearHojasNominaYCuadrillas();
+}
+
+// Menú en Google Sheets para crear o separar las tablas con un clic
+function onOpen() {
+  try {
+    var ui = SpreadsheetApp.getUi();
+    ui.createMenu('🌱 Sistema Cosecha')
+      .addItem('⚡ Crear / Separar Hojas Nómina y Cuadrillas', 'menuCrearHojasNominaYCuadrillas')
+      .addToUi();
+  } catch (e) {}
+}
+
+function menuCrearHojasNominaYCuadrillas() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    Logger.log('⚠️ Error: No se encontró la hoja activa.');
+    return;
+  }
+  var res = migrarHojasDesdeTrabajadores(ss);
+  var msg = res.ok
+    ? '✅ ¡Éxito! Se crearon las hojas:\n- "Nomina_General" (' + res.nominaCount + ' trabajadores)\n- "Asignacion_Cuadrillas" (' + res.asigCount + ' asignaciones)'
+    : '⚠️ ' + res.message;
+  
+  Logger.log(msg);
+  try {
+    SpreadsheetApp.getUi().alert(msg);
+  } catch (e) {
+    // Si se ejecuta desde el editor de código sin la ventana de Sheets abierta
+  }
+  return res;
+}
+
+function migrarHojasDesdeTrabajadores(ss) {
+  if (!ss) {
+    ss = SpreadsheetApp.getActiveSpreadsheet();
+  }
+  if (!ss) {
+    return { ok: false, message: 'No se encontró la hoja activa.' };
+  }
+  var sheetTrab = ss.getSheetByName('Trabajadores') || ss.getSheetByName('Personal') || ss.getSheetByName('Nomina') || ss.getSheetByName('Nómina');
+  if (!sheetTrab || sheetTrab.getLastRow() <= 1) {
+    return { ok: false, message: 'No se encontró la hoja "Trabajadores" con filas de datos.' };
+  }
+  var maxCols = Math.max(sheetTrab.getLastColumn(), 8);
+  var values = sheetTrab.getRange(2, 1, sheetTrab.getLastRow() - 1, maxCols).getValues();
+
+  var sheetNom = getOrCreateSheet(ss, 'Nomina_General', ['DNI', 'Nombres', 'Fundo', 'Modulo', 'Supervisor', 'Tipo']);
+  sheetNom.clearContents();
+  var rowsNom = [['DNI', 'Nombres', 'Fundo', 'Modulo', 'Supervisor', 'Tipo']];
+
+  var sheetAsig = getOrCreateSheet(ss, 'Asignacion_Cuadrillas', ['DNI', 'Nombres', 'Grupo', 'Lider', 'Fecha_Asignacion']);
+  sheetAsig.clearContents();
+  var rowsAsig = [['DNI', 'Nombres', 'Grupo', 'Lider', 'Fecha_Asignacion']];
+
+  var hoy = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'America/Lima', 'yyyy-MM-dd');
+
+  values.forEach(function(r) {
+    var dni = String(r[0] || '').trim();
+    if (dni.slice(-2) === '.0') dni = dni.slice(0, -2);
+    var nombres = String(r[1] || '').trim();
+    if (!dni && !nombres) return;
+
+    var fundo = String(r[2] || '').trim();
+    var modulo = String(r[3] || '').trim();
+    var grupo = String(r[4] || '').trim();
+    var supervisor = String(r[5] || '').trim();
+    var lider = String(r[6] || '').trim();
+    var tipo = String(r[7] || 'Cosechador').trim();
+
+    rowsNom.push([dni, nombres, fundo, modulo, supervisor, tipo]);
+    rowsAsig.push([dni, nombres, grupo, lider, hoy]);
+  });
+
+  if (rowsNom.length > 0) sheetNom.getRange(1, 1, rowsNom.length, 6).setValues(rowsNom);
+  if (rowsAsig.length > 0) sheetAsig.getRange(1, 1, rowsAsig.length, 5).setValues(rowsAsig);
+
+  return {
+    ok: true,
+    message: 'Hojas generadas correctamente',
+    nominaCount: rowsNom.length - 1,
+    asigCount: rowsAsig.length - 1
+  };
 }`;
 
 export const ConexionTab: React.FC<ConexionTabProps> = ({
@@ -675,6 +814,7 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
   const [testingConnection, setTestingConnection] = useState(false);
   const [testingFirebase, setTestingFirebase] = useState(false);
   const [syncingFirebase, setSyncingFirebase] = useState(false);
+  const [generatingTables, setGeneratingTables] = useState(false);
   const [showCodeGuide, setShowCodeGuide] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [firebaseUser, setFirebaseUser] = useState(() => auth.currentUser);
@@ -870,6 +1010,41 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
     }
   };
 
+  const handleGenerarTablasSheets = async () => {
+    if (!gsheetUrl.trim()) {
+      onToast('⚠️ Ingresa una URL de Web App de Google Sheets primero', 'warning');
+      return;
+    }
+    setGeneratingTables(true);
+    onAddLog('⚡ Solicitando generación y separación de hojas Nomina_General y Asignacion_Cuadrillas en Google Sheets...', 'info');
+    try {
+      // 1. Probar llamada directa al endpoint GET ?accion=crear_tablas
+      const res = await fetch(`${gsheetUrl}?accion=crear_tablas`);
+      const text = await res.text();
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch {}
+
+      if (json && json.status === 'ok') {
+        onAddLog(`✅ ¡Hojas creadas en Google Sheets con éxito! Nomina_General (${json.nominaCount || 0} filas) y Asignacion_Cuadrillas (${json.asigCount || 0} filas).`, 'ok');
+        onToast(`✅ ¡Hojas creadas con éxito en Google Sheets! (${json.nominaCount || 0} trabajadores)`, 'success');
+        return;
+      }
+
+      // 2. Si el Web App aún no tiene ese endpoint, enviar un push completo que autogenera ambas hojas
+      onAddLog('📤 Enviando nómina completa para forzar la creación de ambas hojas...', 'info');
+      await onManualSyncPush();
+      onAddLog('✅ Solicitud enviada a Google Sheets. Revisa las pestañas en la parte inferior de tu archivo.', 'ok');
+      onToast('✅ Solicitud de creación enviada a Google Sheets', 'success');
+    } catch (err: any) {
+      onAddLog(`⚠️ Error al generar tablas: ${err?.message || 'Error de conexión'}. Verifica que hayas implementado la "Nueva Versión" en Apps Script.`, 'err');
+      onToast('⚠️ Error al generar tablas en Google Sheets', 'warning');
+    } finally {
+      setGeneratingTables(false);
+    }
+  };
+
   const handleCopyCode = async () => {
     try {
       if (navigator.clipboard && window.isSecureContext) {
@@ -1039,6 +1214,31 @@ export const ConexionTab: React.FC<ConexionTabProps> = ({
               <span>Guardar URL</span>
             </button>
           </div>
+        </div>
+
+        {/* Banner Generador de Tablas Nomina y Cuadrillas */}
+        <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-2 border-emerald-400/80 p-3.5 sm:p-4 rounded-xl mb-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm sm:text-base font-extrabold text-emerald-950 flex items-center gap-1.5">
+                ⚡ Generar Hojas 'Nomina_General' y 'Asignacion_Cuadrillas'
+              </span>
+              <span className="text-[10px] bg-emerald-700 text-white px-2 py-0.5 rounded-full font-bold uppercase">
+                Separación Automática
+              </span>
+            </div>
+            <p className="text-xs text-emerald-800 mt-1 max-w-xl">
+              Crea y rellena automáticamente las dos hojas en tu Google Sheet activo a partir de tu hoja <strong>'Trabajadores'</strong> existente o enviando la nómina actual.
+            </p>
+          </div>
+          <button
+            onClick={handleGenerarTablasSheets}
+            disabled={generatingTables}
+            className="bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer whitespace-nowrap flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            <Sparkles className={`w-4 h-4 ${generatingTables ? 'animate-spin' : ''}`} />
+            <span>{generatingTables ? 'Generando en Sheets...' : '⚡ Crear Tablas en Sheets Ahora'}</span>
+          </button>
         </div>
 
         {/* Action Buttons Grid */}
