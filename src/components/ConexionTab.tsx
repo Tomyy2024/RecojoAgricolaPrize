@@ -724,19 +724,19 @@ function onOpen() {
 function menuCrearHojasNominaYCuadrillas() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!ss) {
-    Logger.log('⚠️ Error: No se encontró la hoja activa.');
+    Logger.log('Error: No se encontro la hoja activa.');
     return;
   }
   var res = migrarHojasDesdeTrabajadores(ss);
   var msg = res.ok
-    ? '✅ ¡Éxito! Se crearon las hojas:\n- "Nomina_General" (' + res.nominaCount + ' trabajadores)\n- "Asignacion_Cuadrillas" (' + res.asigCount + ' asignaciones)'
-    : '⚠️ ' + res.message;
-  
+    ? ('Exito: Se crearon las hojas "Nomina_General" (' + res.nominaCount + ' trabajadores) y "Asignacion_Cuadrillas" (' + res.asigCount + ' asignaciones).')
+    : ('Aviso: ' + res.message);
+
   Logger.log(msg);
   try {
     SpreadsheetApp.getUi().alert(msg);
   } catch (e) {
-    // Si se ejecuta desde el editor de código sin la ventana de Sheets abierta
+    // Si se ejecuta desde el editor de codigo sin la ventana de Sheets abierta
   }
   return res;
 }
