@@ -12,6 +12,7 @@ import {
   saveGsheetUrl, 
   getFechasDisponiblesTrabajadores, 
   getTrabajadoresPorFecha,
+  getTrabajadores,
   parsePastedWorkers,
   ParsedWorkerResult,
   replicarTrabajadoresAlSheet
@@ -114,6 +115,7 @@ interface TrabajadoresTabProps {
   ) => Promise<{ success: boolean; count?: number; pendientes?: number; asignados?: number; error?: string }>;
   onCargarAvanceDesdeSheet?: (customUrl?: string, avanceRows?: any[]) => Promise<{ success: boolean; totalRegistros?: number; personasConJabasEnFecha?: number; jabasEnFecha?: number; fechaConsultada?: string; error?: string }>;
   onUpdateDetalleJabas?: (updated: DetalleJaba[]) => void;
+  onRecargarNominaServidor?: () => Promise<void>;
 }
 
 export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
@@ -146,7 +148,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   onDepurarTrabajadoresAyer,
   onCargarNominaDesdeSheet,
   onCargarAvanceDesdeSheet,
-  onUpdateDetalleJabas
+  onUpdateDetalleJabas,
+  onRecargarNominaServidor
 }) => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
@@ -180,8 +183,22 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const [cuadrillaLider, setCuadrillaLider] = useState('');
   const [cuadrillaLiderDni, setCuadrillaLiderDni] = useState('');
 
-  // Selected Work / Harvest date in Personal tab (defaults to local today)
-  const [fechaPersonal, setFechaPersonal] = useState<string>(() => getLocalToday());
+  // Selected Work / Harvest date in Personal tab (defaults to local today or latest date with workers)
+  const [fechaPersonal, setFechaPersonal] = useState<string>(() => {
+    const today = getLocalToday();
+    const allWorkers = Array.isArray(trabajadores) && trabajadores.length > 0 ? trabajadores : getTrabajadores();
+    if (allWorkers.length > 0) {
+      const hasToday = allWorkers.some((t) => (t.fecha ? normalizeDateString(t.fecha) : '') === today);
+      if (!hasToday) {
+        const dates = allWorkers
+          .map((t) => (t.fecha ? normalizeDateString(t.fecha) : ''))
+          .filter(Boolean)
+          .sort((a, b) => b.localeCompare(a));
+        if (dates.length > 0) return dates[0];
+      }
+    }
+    return today;
+  });
 
   // Search filter and high-performance list pagination
   const [searchTerm, setSearchTerm] = useState('');
@@ -546,6 +563,20 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       return fn === target || (!fn && target === hoyStr);
     }).length;
   }, [fullTrabajadores, fechaPersonal, hoyStr]);
+
+  // Auto-ajustar fechaPersonal a la fecha con personal cargado si la fecha actual no tiene registros
+  useEffect(() => {
+    if (fullTrabajadores.length > 0) {
+      const target = normalizeDateString(fechaPersonal) || hoyStr;
+      const matchCount = fullTrabajadores.filter((t) => {
+        const fn = t.fecha ? normalizeDateString(t.fecha) : '';
+        return fn === target || (!fn && target === hoyStr);
+      }).length;
+      if (matchCount === 0 && fechasDisponiblesTrabajadores.length > 0) {
+        setFechaPersonal(fechasDisponiblesTrabajadores[0].fecha);
+      }
+    }
+  }, [fullTrabajadores, fechasDisponiblesTrabajadores, fechaPersonal, hoyStr]);
 
   // Pre-indexed workers for sub-millisecond search and strict binding
   const indexedTrabajadores = useMemo(() => {
@@ -3410,6 +3441,23 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 />
               </div>
               <div className="flex items-center gap-2 flex-wrap">
+                {onRecargarNominaServidor && (
+                  <button
+                    type="button"
+                    onClick={() => onRecargarNominaServidor()}
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 px-3 rounded-lg shadow-sm flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap transition-all active:scale-95"
+                    title={`Recargar nómina central del servidor (${fullTrabajadores.length} registrados en este dispositivo)`}
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-blue-100" />
+                    <span>Sincronizar Servidor ({fullTrabajadores.length})</span>
+                  </button>
+                )}
+                {!isAdmin && (
+                  <span className="bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg flex items-center gap-1 shadow-2xs">
+                    <Lock className="w-3 h-3 text-amber-600" />
+                    <span>Nómina Protegida (Solo lectura)</span>
+                  </span>
+                )}
                 {isAdmin && (
                   <button
                     type="button"
@@ -3459,6 +3507,34 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* Scope / Filter Info Banner */}
+            {scopedTrabajadores.length < fullTrabajadores.length && (
+              <div className="flex items-center justify-between gap-2 px-3 py-1.5 mb-3 bg-blue-50/90 border border-blue-200 rounded-lg text-xs text-blue-900 shadow-2xs">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <Filter className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                  <span>
+                    Filtro activo: mostrando <strong>{scopedTrabajadores.length}</strong> de <strong>{fullTrabajadores.length}</strong> trabajadores totales en el sistema.
+                    {filtrarTrabajadoresPorFecha && (
+                      <span className="ml-1 text-blue-700 font-medium">(filtrado por fecha {fechaPersonal})</span>
+                    )}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFiltrarTrabajadoresPorFecha(false);
+                    setSearchTerm('');
+                    setCuadrillaSupervisor('');
+                    setCuadrillaFundo('');
+                    setCuadrillaModulo('');
+                  }}
+                  className="font-bold underline text-blue-700 hover:text-blue-900 cursor-pointer text-[11px] whitespace-nowrap ml-auto"
+                >
+                  Ver todos los {fullTrabajadores.length} trabajadores
+                </button>
+              </div>
+            )}
 
             {/* Selector de Vista de Asignación en Pantalla */}
             <div className="flex items-center gap-2 mb-3 text-xs overflow-x-auto pb-1">

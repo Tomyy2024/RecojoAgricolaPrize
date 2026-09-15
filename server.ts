@@ -293,15 +293,15 @@ async function startServer() {
         const data = snap.data();
         let changed = false;
 
-        // 1. Trabajadores (sincronizar nómina exacta desde la nube sin degradar accidentalmente a listas desactualizadas)
+        // 1. Trabajadores (sincronizar nómina exacta desde la nube sin borrar accidentalmente)
         if (Array.isArray(data.trabajadores)) {
           const isExplicitPurge = data.depurado === true || data.forceNominaUpdate === true;
-          const currentCount = db.trabajadores?.length || 0;
-          if (isExplicitPurge || currentCount === 0 || data.trabajadores.length >= currentCount) {
+          if (data.trabajadores.length > 0 || isExplicitPurge || !(db.trabajadores && db.trabajadores.length > 0)) {
             db.trabajadores = data.trabajadores;
             changed = true;
-          } else {
-            console.log(`[Backend] Preservando nómina autoritativa (${currentCount} trabajadores vs ${data.trabajadores.length} en Firestore)`);
+          } else if ((db.trabajadores || []).length > 0 && data.trabajadores.length === 0) {
+            // El servidor local ya tiene trabajadores pero Firestore está vacío: sincronizar a la nube
+            syncToCloudFirestore({ trabajadores: db.trabajadores });
           }
         }
 
@@ -418,8 +418,8 @@ async function startServer() {
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders?.();
 
-    // Send current state version and data on connect
-    res.write(`data: ${JSON.stringify({ type: 'sync', version: db.version || 1, lastUpdated: db.lastUpdated, data: db })}\n\n`);
+    // Send current state version on connect
+    res.write(`data: ${JSON.stringify({ type: 'init', version: db.version || 1, lastUpdated: db.lastUpdated })}\n\n`);
 
     sseClients.add(res);
 
@@ -435,7 +435,6 @@ async function startServer() {
     }
     res.json({
       status: 'ok',
-      version: db.version || 1,
       data: db
     });
   });
@@ -594,10 +593,10 @@ async function startServer() {
   app.post('/api/depurar-trabajadores', (req, res) => {
     try {
       const { userRole, targetDate } = req.body || {};
-      if (userRole && userRole !== 'Administrador') {
+      if (userRole !== 'Administrador') {
         return res.status(403).json({
           status: 'error',
-          message: 'Solo el rol Administrador tiene permisos para depurar la nómina de trabajadores'
+          message: 'Acceso denegado: Solo el rol Administrador tiene autorización para depurar la nómina de trabajadores.'
         });
       }
 
@@ -643,16 +642,16 @@ async function startServer() {
     }
   });
 
-  // Fast bulk worker sync endpoint - Administrador y Supervisor pueden actualizar nómina
+  // Fast bulk worker sync endpoint - Únicamente el Administrador puede actualizar la nómina central
   app.post('/api/trabajadores', (req, res) => {
     try {
       const { trabajadores, append, modo, fechaTarget, userRole } = req.body || {};
 
-      // Restricción estricta: Rol Trabajador no puede modificar la nómina central
-      if (userRole === 'Trabajador') {
+      // Restricción de seguridad estricta: Solo el Administrador puede modificar o cargar la nómina central
+      if (userRole !== 'Administrador') {
         return res.status(403).json({
           status: 'error',
-          message: 'El rol Trabajador no tiene permisos para cargar o modificar la nómina de personal.'
+          message: 'Acceso denegado: Solo el usuario Administrador puede cargar, reemplazar o modificar la nómina central de personal.'
         });
       }
 
@@ -730,10 +729,10 @@ async function startServer() {
   app.post('/api/desasignar-todos-trabajadores', (req, res) => {
     try {
       const { userRole, filtroSupervisor, filtroFundo, filtroModulo } = req.body || {};
-      if (userRole === 'Trabajador') {
+      if (userRole !== 'Administrador') {
         return res.status(403).json({
           status: 'error',
-          message: 'No tienes permisos para modificar asignaciones de personal.'
+          message: 'Acceso denegado: Solo el Administrador puede desasignar masivamente los trabajadores.'
         });
       }
 
@@ -783,10 +782,10 @@ async function startServer() {
   app.post('/api/replicar-trabajadores-sheet', async (req, res) => {
     try {
       const { trabajadores, url, modo = 'reemplazar_fecha', fechaTarget, userRole, replicarSheet = true } = req.body || {};
-      if (userRole === 'Trabajador') {
+      if (userRole !== 'Administrador') {
         return res.status(403).json({
           status: 'error',
-          message: 'No tienes permisos para modificar la nómina de trabajadores.'
+          message: 'Acceso denegado: Solo el Administrador puede modificar, cargar o replicar la nómina de trabajadores.'
         });
       }
 
@@ -850,7 +849,7 @@ async function startServer() {
       syncToCloudFirestore({ trabajadores: db.trabajadores });
       notifyClients({ type: 'sync', version: db.version, data: db });
 
-      // 2. Replicar hacia Google Sheets (hojas: 'Nomina_General', 'Asignacion_Cuadrillas' y 'Trabajadores')
+      // 2. Replicar hacia la hoja 'Trabajadores' de Google Sheets
       const targetUrl = url || 'https://script.google.com/macros/s/AKfycbwUwC4PwsVrEGdGItPkAwu8-k8lJePnEIwitNhakUGqHEKWLZLr_i49FMMDh-fog0y2/exec';
       let sheetReplicated = false;
       let sheetError = '';
@@ -860,24 +859,6 @@ async function startServer() {
           const sheetPayload = {
             accion: 'sync',
             data: {
-              // Hoja 1: Nomina_General (Estática / Base)
-              nominaGeneral: db.trabajadores.map((t: any) => ({
-                dni: t.dni || '',
-                nombres: t.nombres || '',
-                fundo: t.fundo || '',
-                modulo: t.modulo || '',
-                supervisor: t.supervisor || '',
-                tipo: t.tipo || 'Cosechador'
-              })),
-              // Hoja 2: Asignacion_Cuadrillas (Dinámica: Grupos y Líderes)
-              asignaciones: db.trabajadores.map((t: any) => ({
-                dni: t.dni || '',
-                nombres: t.nombres || '',
-                grupo: t.grupo || '',
-                lider: t.lider || '',
-                fecha: t.fecha || targetFechaNorm
-              })),
-              // Compatibilidad tradicional: Trabajadores
               trabajadores: db.trabajadores.map((t: any) => ({
                 dni: t.dni || '',
                 nombres: t.nombres || '',
@@ -936,10 +917,10 @@ async function startServer() {
   app.post('/api/cargar-nomina-sheet', async (req, res) => {
     try {
       const { url, userRole, fechaTarget, fecha, modo = 'reemplazar_fecha' } = req.body || {};
-      if (userRole === 'Trabajador') {
+      if (userRole !== 'Administrador') {
         return res.status(403).json({
           status: 'error',
-          message: 'No tienes permisos para cargar la nómina de personal.'
+          message: 'Acceso denegado: Solo el Administrador puede cargar la nómina de personal desde Google Sheets.'
         });
       }
 
@@ -1452,17 +1433,22 @@ async function startServer() {
           return res.json({ status: 'ok', data: db, version: db.version, ignoredStale: true });
         }
 
-        const isAdmin = incoming.userRole === 'Administrador' || incoming.userRole === 'admin' || incoming.isAdmin === true;
+        const isAdmin = incoming.userRole === 'Administrador';
 
         if (Array.isArray(incoming.programas)) db.programas = incoming.programas;
         if (Array.isArray(incoming.programaGeneral)) db.programaGeneral = incoming.programaGeneral;
 
-        // Regla estricta: SOLO el rol Administrador puede modificar la nómina maestra de trabajadores.
-        // Los roles Supervisor, Digitador, Trabajador u otros NO pueden alterar la nómina bajo ninguna circunstancia.
-        if (isAdmin && Array.isArray(incoming.trabajadores)) {
+        // SEGURIDAD CRÍTICA: Únicamente el usuario con rol Administrador puede actualizar la nómina central (db.trabajadores).
+        // Si un Supervisor, Digitador o usuario no verificado envía trabajadores, el servidor NUNCA sobrescribe la nómina central.
+        if (isAdmin && Array.isArray(incoming.trabajadores) && incoming.trabajadores.length > 0) {
           const isExplicitPurge = incoming.depurado === true || incoming.forceNominaUpdate === true || incoming.action === 'reset';
-          if (incoming.trabajadores.length > 0 || isExplicitPurge || !(db.trabajadores && db.trabajadores.length > 0)) {
+          const currentCount = (db.trabajadores || []).length;
+          // Si el servidor ya cuenta con una nómina mayor (ej. 446 trabajadores), no permitir que un cliente con datos viejos o incompletos (ej. 410)
+          // la rebaje a menos que venga expresamente con la bandera forceNominaUpdate
+          if (incoming.trabajadores.length >= currentCount || isExplicitPurge || currentCount === 0) {
             db.trabajadores = incoming.trabajadores;
+          } else {
+            console.warn(`[Seguridad Nómina] Rechazada reducción no autorizada de nómina: Servidor=${currentCount}, Recibido=${incoming.trabajadores.length}`);
           }
         }
         if (Array.isArray(incoming.detalleJabas)) {
@@ -1521,9 +1507,16 @@ async function startServer() {
     }
   });
 
-  // Clean all test/mock data
+  // Clean all test/mock data - Solo Administrador
   app.post('/api/reset', (req, res) => {
     try {
+      const { userRole } = req.body || {};
+      if (userRole !== 'Administrador') {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Acceso denegado: Solo el Administrador puede reiniciar los datos.'
+        });
+      }
       const preservedUsers = (db.usuarios || DEFAULT_USUARIOS).filter(
         (u: any) => u.rol !== 'Supervisor' && u.user?.toLowerCase() === 'admin'
       );

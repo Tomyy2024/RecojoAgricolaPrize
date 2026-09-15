@@ -218,21 +218,12 @@ export default function App() {
     }
   }, [addToast, addLog]);
 
-  const currentVersionRef = useRef<number>(0);
   // Referencia a syncToServer para que applyServerData pueda sincronizar trabajadores al servidor central sin dependencias circulares
   const syncToServerRef = useRef<(payloadOverride?: any) => Promise<void>>(async () => {});
 
   // Universal Data Applier from Server/Broadcast
   const applyServerData = useCallback((d: any, silent = true) => {
     if (!d || typeof d !== 'object') return;
-
-    if (typeof d.version === 'number' && d.version > 0) {
-      if (currentVersionRef.current > 0 && d.version < currentVersionRef.current) {
-        console.warn(`[Sync] Ignorando payload obsoleto (versión ${d.version} < actual ${currentVersionRef.current})`);
-        return;
-      }
-      currentVersionRef.current = Math.max(currentVersionRef.current, d.version);
-    }
 
     if (Array.isArray(d.programas)) {
       setProgramasState(d.programas);
@@ -243,46 +234,34 @@ export default function App() {
       saveProgramaGeneral(d.programaGeneral);
     }
     if (Array.isArray(d.trabajadores)) {
+      const isLocked = isOfflineNominaLocked();
       const currentWorkers = getTrabajadores();
       const isExplicitPurge = d.depurado === true || d.forceNominaUpdate === true;
+      const activeSession = session || getSession();
+      const userRol = activeSession?.rol;
+      const isAdmin = userRol === 'Administrador';
 
-      // Si la lista entrante tiene menos trabajadores que los que ya tenemos válidamente (por ejemplo Firestore devolviendo 410 por cuota agotada mientras el servidor ya tiene 446),
-      // protegemos la nómina completa y evitamos degradar la lista.
-      if (!isExplicitPurge && currentWorkers.length > d.trabajadores.length) {
-        console.warn(`[Sync] Protección de nómina activa: lista entrante (${d.trabajadores.length}) menor que nómina actual (${currentWorkers.length}). Fusionando actualizaciones sin perder trabajadores.`);
-        const incomingMap = new Map<string, any>();
-        d.trabajadores.forEach((t: any) => {
-          const cDni = String(t.dni || '').replace(/\s+/g, '').trim();
-          if (cDni) incomingMap.set(cDni, t);
-          if (t.id) incomingMap.set(t.id, t);
-        });
+      // REGLA CRÍTICA DE PROTECCIÓN Y ACTUALIZACIÓN:
+      // Si el servidor trae más trabajadores (ej. 446 vs 410 local), o si el usuario es Administrador,
+      // o si la lista local está vacía, o si viene forzada la nómina: SIEMPRE actualizar la nómina local.
+      // Esto previene que una máquina con 410 trabajadores se quede congelada e ignore los 446 del servidor.
+      const shouldApplyServerWorkers =
+        d.trabajadores.length > currentWorkers.length ||
+        isAdmin ||
+        isExplicitPurge ||
+        !isLocked ||
+        currentWorkers.length === 0;
 
-        let anyMergedChange = false;
-        const mergedWorkers = currentWorkers.map(cw => {
-          const cDni = String(cw.dni || '').replace(/\s+/g, '').trim();
-          const inc = (cDni ? incomingMap.get(cDni) : null) || (cw.id ? incomingMap.get(cw.id) : null);
-          if (inc) {
-            const nextGrupo = inc.grupo !== undefined && inc.grupo !== null ? String(inc.grupo).trim() : cw.grupo;
-            const nextLider = inc.lider !== undefined && inc.lider !== null ? String(inc.lider).trim() : cw.lider;
-            const nextJabas = typeof inc.jabas === 'number' ? inc.jabas : cw.jabas;
-            if (nextGrupo !== cw.grupo || nextLider !== cw.lider || nextJabas !== cw.jabas) {
-              anyMergedChange = true;
-              return { ...cw, grupo: nextGrupo, lider: nextLider, jabas: nextJabas };
-            }
-          }
-          return cw;
-        });
-
-        if (anyMergedChange) {
-          saveTrabajadores(mergedWorkers);
-          setTrabajadoresState(mergedWorkers);
-        }
+      if (!shouldApplyServerWorkers && isLocked && currentWorkers.length > 0) {
+        // Nómina blindada por interruptor de usuario offline en este cliente
       } else if (d.trabajadores.length === 0 && currentWorkers.length > 0 && !isExplicitPurge) {
         // Preservar nómina local si la respuesta es vacía no intencionada (evita parpadeo)
-        // y asegurar que el servidor central reciba los trabajadores cargados
-        syncToServerRef.current({ trabajadores: currentWorkers });
+        // Solo el Administrador puede enviar trabajadores al servidor si estuvieran vacíos
+        if (isAdmin) {
+          syncToServerRef.current({ trabajadores: currentWorkers });
+        }
       } else {
-        const rawList = d.trabajadores;
+        const hoy = getLocalToday();
 
         // Mapa de trabajadores locales existentes para preservar grupo y líder si vienen sin definir
         const localWorkersMap = new Map<string, Trabajador>();
@@ -291,6 +270,15 @@ export default function App() {
           if (cDni) localWorkersMap.set(cDni, lw);
           if (lw.id) localWorkersMap.set(lw.id, lw);
         });
+
+        // Para rol Trabajador, filtrar registros de días anteriores
+        const rawList = userRol === 'Trabajador'
+          ? d.trabajadores.filter((t: any) => {
+              if (!t.fecha) return true;
+              const fNorm = normalizeDateString(t.fecha);
+              return !fNorm || fNorm >= hoy;
+            })
+          : d.trabajadores;
 
         const seen = new Set<string>();
         const uniqueWorkers: Trabajador[] = [];
@@ -434,6 +422,26 @@ export default function App() {
         console.warn('Firestore fetch error in fetchCentralizedData:', err);
       }
     }
+
+    // 3. Fallback: Google Sheets Cloud Backend (solo si el servidor central y Firestore no responden)
+    if (!fetchedFromServer) {
+      const url = getGsheetUrl();
+      if (url) {
+        try {
+          const gRes = await fetch(`${url}?accion=export`);
+          if (gRes.ok) {
+            const gJson = await gRes.json();
+            if (gJson && gJson.status === 'ok' && gJson.data) {
+              const gData = gJson.data;
+              applyServerData(gData, silent);
+              syncToServerRef.current(gData);
+            }
+          }
+        } catch {
+          // Offline fallback
+        }
+      }
+    }
   }, [applyServerData]);
 
   // Network Online/Offline Detection (Paso 1)
@@ -477,12 +485,17 @@ export default function App() {
       const activeSession = session || getSession();
       const currentRole = activeSession?.rol || 'Administrador';
       const currentName = activeSession?.nombre || 'Administrador';
-      const isAdmin = currentRole === 'Administrador' || currentRole === 'admin';
+      const isAdmin = currentRole === 'Administrador';
+
+      // SEGURIDAD CRÍTICA: NUNCA incluir trabajadores en un sync ordinario a menos que:
+      // 1. El usuario sea Administrador
+      // 2. Se haya pasado expresamente en payloadOverride (ej. al importar o editar trabajadores)
+      // Esto impide totalmente que cualquier usuario que no sea Administrador sobrescriba o restablezca la nómina.
+      const shouldSendWorkers = isAdmin && payloadOverride && Array.isArray(payloadOverride.trabajadores);
 
       const basePayload: Record<string, any> = {
         userRole: currentRole,
         userName: currentName,
-        isAdmin,
         programas: getProgramas(),
         programaGeneral: getProgramaGeneral(),
         detalleJabas: getDetalleJabas(),
@@ -493,14 +506,18 @@ export default function App() {
         reservas: getReservas()
       };
 
-      // Exclusivo Administrador: La nómina maestra solo puede ser mutada por el Administrador
-      if (isAdmin) {
-        basePayload.trabajadores = getTrabajadores();
+      if (shouldSendWorkers) {
+        basePayload.trabajadores = payloadOverride.trabajadores;
       }
 
       const payload = payloadOverride
-        ? { ...basePayload, ...payloadOverride, userRole: payloadOverride.userRole || currentRole, isAdmin: payloadOverride.isAdmin ?? isAdmin }
+        ? { ...basePayload, ...payloadOverride, userRole: payloadOverride.userRole || currentRole }
         : basePayload;
+
+      // Blindaje adicional: si el rol NO es Administrador, eliminar cualquier campo 'trabajadores'
+      if (!isAdmin) {
+        delete payload.trabajadores;
+      }
 
       // Broadcast to all tabs on this machine instantly
       try {
@@ -552,7 +569,7 @@ export default function App() {
       es.onmessage = (event) => {
         try {
           const parsed = JSON.parse(event.data);
-          if (parsed && (parsed.type === 'sync' || parsed.type === 'usuarios_updated' || parsed.type === 'init')) {
+          if (parsed && (parsed.type === 'sync' || parsed.type === 'usuarios_updated')) {
             if (parsed.data) {
               applyServerData(parsed.data, true);
             } else {
@@ -601,12 +618,40 @@ export default function App() {
 
   const autoPullDoneRef = useRef(false);
 
-  // Background Auto-fetch: La base de datos central (Firebase / Servidor) es la única fuente de verdad autoritativa.
-  // No se sobreescribe la nómina con Google Sheets para evitar desincronización y corrupción.
+  // Background Auto-fetch from Google Sheets if configured and server not authoritative (ejecutado 1 sola vez al inicio)
   useEffect(() => {
     if (autoPullDoneRef.current) return;
     autoPullDoneRef.current = true;
-  }, []);
+
+    const autoPullOnStart = async () => {
+      const url = getGsheetUrl();
+      if (!url) return;
+      try {
+        // Verificar si el servidor ya tiene datos de trabajadores
+        const sRes = await fetch('/api/data').catch(() => null);
+        if (sRes && sRes.ok) {
+          const sJson = await sRes.json().catch(() => null);
+          if (sJson && sJson.status === 'ok' && sJson.data && (sJson.data.trabajadores || []).length > 0) {
+            // El servidor central ya cuenta con la nómina autoritativa más reciente
+            return;
+          }
+        }
+
+        const res = await fetch(`${url}?accion=export`);
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json && json.status === 'ok' && json.data) {
+          const d = json.data;
+          applyServerData(d, true);
+          addLog('☁️ Datos sincronizados automáticamente con Google Sheets', 'ok');
+          syncToServer(d);
+        }
+      } catch {
+        // Silently use offline cache
+      }
+    };
+    autoPullOnStart();
+  }, [addLog, syncToServer, applyServerData]);
 
   // Background Auto-Sync Trigger
   const triggerAutoSync = useCallback(async (actionName: string, updatedPayload?: any) => {
@@ -617,7 +662,7 @@ export default function App() {
     try {
       const activeSession = session || getSession();
       const currentRole = activeSession?.rol || 'Administrador';
-      const isAdmin = currentRole === 'Administrador' || currentRole === 'admin';
+      const isAdmin = currentRole === 'Administrador';
 
       const firestoreData: Record<string, any> = {
         programas: getProgramas(),
@@ -627,16 +672,13 @@ export default function App() {
         validaciones: getValidaciones(),
         lideres: getLideres(),
         grupos: getGrupos(),
-        userRole: currentRole,
-        isAdmin,
+        reservas: getReservas(),
         ...updatedPayload
       };
-
-      // Regla estricta: Solo el Administrador sincroniza la nómina de trabajadores a Firestore
-      if (isAdmin) {
-        firestoreData.trabajadores = getTrabajadores();
+      // Únicamente el Administrador puede enviar nómina de trabajadores a Firestore
+      if (!isAdmin || !updatedPayload?.trabajadores) {
+        delete firestoreData.trabajadores;
       }
-
       syncAllDataToFirestore(firestoreData).catch(() => {});
     } catch {
       // Offline fallback
@@ -648,22 +690,30 @@ export default function App() {
     if (!url) return;
 
     try {
+      const activeSession = session || getSession();
+      const currentRole = activeSession?.rol || 'Administrador';
+      const isAdmin = currentRole === 'Administrador';
+
       addLog(`⚡ Auto-guardado en curso (${actionName})...`, 'info');
+      const gSheetData: Record<string, any> = {
+        programas: getProgramas(),
+        programaGeneral: getProgramaGeneral(),
+        detalleJabas: getDetalleJabas(),
+        usuarios: getUsuarios(),
+        validaciones: getValidaciones(),
+        lideres: getLideres(),
+        grupos: getGrupos(),
+        reservas: getReservas()
+      };
+      if (isAdmin && updatedPayload?.trabajadores) {
+        gSheetData.trabajadores = updatedPayload.trabajadores;
+      }
       await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({
           accion: 'sync',
-          data: {
-            programas: getProgramas(),
-            programaGeneral: getProgramaGeneral(),
-            trabajadores: getTrabajadores(),
-            detalleJabas: getDetalleJabas(),
-            usuarios: getUsuarios(),
-            validaciones: getValidaciones(),
-            lideres: getLideres(),
-            grupos: getGrupos()
-          }
+          data: gSheetData
         })
       });
 
@@ -1281,6 +1331,10 @@ export default function App() {
     setTrabajadoresState(mergedList);
     saveTrabajadores(mergedList);
 
+    // PASO 2: Activar Modo Offline con los trabajadores cargados para que no se vuelva a sincronizar la nómina
+    setOfflineNominaLocked(true);
+    setOfflineNomina(true);
+
     const descModo =
       effectiveModo === 'reemplazar_fecha'
         ? `Nómina de fecha ${fechaFinal} actualizada (${workersWithFecha.length} trabajadores)`
@@ -1288,8 +1342,8 @@ export default function App() {
         ? `Trabajadores añadidos a fecha ${fechaFinal} (${workersWithFecha.length} trabajadores)`
         : `Nómina global reemplazada (${workersWithFecha.length} trabajadores)`;
 
-    addLog(`📥 ${descModo}. Total en sistema: ${mergedList.length}. Sincronizado con el servidor central.`, 'ok');
-    addToast(`✅ ${descModo}. Total en sistema: ${mergedList.length}.`, 'success');
+    addLog(`📥 ${descModo}. Total histórico en sistema: ${mergedList.length}. 🔒 Modo Offline activo: nómina asegurada en el dispositivo.`, 'ok');
+    addToast(`🔒 ${descModo}. Total en sistema: ${mergedList.length}.`, 'success');
 
     // Fast-path direct push to dedicated trabajadores endpoint
     fetch('/api/trabajadores', {
@@ -1381,6 +1435,30 @@ export default function App() {
     }
   };
 
+  const handleRecargarNominaServidor = useCallback(async () => {
+    try {
+      addLog('🔄 Sincronizando nómina completa desde el servidor central...', 'info');
+      const res = await fetch('/api/data?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.data?.trabajadores && Array.isArray(json.data.trabajadores)) {
+          const serverList: Trabajador[] = json.data.trabajadores;
+          // Desactivar cualquier bloqueo offline anterior que impida ver la nómina completa
+          setOfflineNominaLocked(false);
+          setOfflineNomina(false);
+          setTrabajadoresState(serverList);
+          saveTrabajadores(serverList);
+          addToast(`✅ Nómina sincronizada: ${serverList.length} trabajadores cargados desde el servidor central.`, 'success');
+          addLog(`✅ Nómina de trabajadores actualizada con éxito (${serverList.length} trabajadores totales).`, 'ok');
+          return;
+        }
+      }
+      addToast('⚠️ No se pudo obtener la nómina desde el servidor.', 'warning');
+    } catch (err: any) {
+      addToast('❌ Error de conexión con el servidor central.', 'error');
+    }
+  }, [addToast, addLog]);
+
   const handleManualSyncPush = async () => {
     const url = getGsheetUrl();
     if (!url) {
@@ -1390,27 +1468,11 @@ export default function App() {
 
     addLog('📤 Iniciando subida manual completa a Google Sheets...', 'info');
     try {
-      const todayIso = new Date().toISOString().slice(0, 10);
       const payload = {
         accion: 'sync',
         data: {
           programas,
           programaGeneral,
-          nominaGeneral: trabajadores.map((t) => ({
-            dni: t.dni || '',
-            nombres: t.nombres || '',
-            fundo: t.fundo || '',
-            modulo: t.modulo || '',
-            supervisor: t.supervisor || '',
-            tipo: t.tipo || 'Cosechador'
-          })),
-          asignaciones: trabajadores.map((t) => ({
-            dni: t.dni || '',
-            nombres: t.nombres || '',
-            grupo: t.grupo || '',
-            lider: t.lider || '',
-            fecha: t.fecha || todayIso
-          })),
           trabajadores,
           detalleJabas,
           usuarios,
@@ -1743,6 +1805,7 @@ export default function App() {
             onCargarNominaDesdeSheet={handleCargarNominaDesdeSheet}
             onCargarAvanceDesdeSheet={handleCargarAvanceDesdeSheet}
             onUpdateDetalleJabas={handleUpdateDetalleJabas}
+            onRecargarNominaServidor={handleRecargarNominaServidor}
           />
         )}
 
