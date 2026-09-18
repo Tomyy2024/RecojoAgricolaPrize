@@ -53,6 +53,7 @@ import {
   History,
   CheckCircle2,
   Clock,
+  BookOpen,
   RotateCcw,
   SlidersHorizontal,
   Filter,
@@ -121,6 +122,7 @@ interface TrabajadoresTabProps {
   onCargarAvanceDesdeSheet?: (customUrl?: string, avanceRows?: any[]) => Promise<{ success: boolean; totalRegistros?: number; personasConJabasEnFecha?: number; jabasEnFecha?: number; fechaConsultada?: string; error?: string }>;
   onUpdateDetalleJabas?: (updated: DetalleJaba[]) => void;
   onRecargarNominaServidor?: () => Promise<void>;
+  onOpenInstructivo?: () => void;
 }
 
 export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
@@ -154,7 +156,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   onCargarNominaDesdeSheet,
   onCargarAvanceDesdeSheet,
   onUpdateDetalleJabas,
-  onRecargarNominaServidor
+  onRecargarNominaServidor,
+  onOpenInstructivo
 }) => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
@@ -3621,6 +3624,17 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     >
                       <UploadCloud className="w-3.5 h-3.5" />
                       <span>Cargar Avance</span>
+                    </button>
+                  )}
+                  {onOpenInstructivo && (
+                    <button
+                      type="button"
+                      onClick={onOpenInstructivo}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-gray-950 font-extrabold text-xs shadow-xs cursor-pointer transition-all active:scale-95 border border-amber-500/50"
+                      title="Abrir instructivo de uso paso a paso para supervisores"
+                    >
+                      <BookOpen className="w-3.5 h-3.5 text-emerald-950" />
+                      <span>Instructivo</span>
                     </button>
                   )}
                 </div>

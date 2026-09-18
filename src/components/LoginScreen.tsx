@@ -2,15 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { UserSession, Usuario, AuditoriaIngreso } from '../types';
 import { getUsuarios, saveUsuarios, getGsheetUrl, addAuditoriaIngreso } from '../utils/storage';
 import { fetchAllDataFromFirestore } from '../lib/firebase';
-import { Sprout, Lock, User, KeyRound, Wifi, RefreshCw, Clock } from 'lucide-react';
+import { Sprout, Lock, User, KeyRound, Wifi, RefreshCw, Clock, BookOpen } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface LoginScreenProps {
   onLogin: (session: UserSession) => void;
   onToast: (msg: string) => void;
+  onOpenInstructivo?: () => void;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onToast }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onToast, onOpenInstructivo }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -318,6 +319,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onToast }) =>
           <p className="text-[11px] text-gray-400 mt-1">
             Para registrar nuevos supervisores o trabajadores, accede con la cuenta de <b>Administrador</b>.
           </p>
+
+          {onOpenInstructivo && (
+            <div className="mt-3 pt-3 border-t border-gray-100 flex justify-center">
+              <button
+                type="button"
+                onClick={onOpenInstructivo}
+                className="w-full text-xs font-bold text-[#1b5e20] hover:text-[#0d3311] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-all cursor-pointer shadow-2xs"
+              >
+                <BookOpen className="w-4 h-4 text-[#2e7d32]" />
+                <span>📖 Instructivo de Uso para Supervisores</span>
+              </button>
+            </div>
+          )}
         </div>
       </motion.div>
     </div>

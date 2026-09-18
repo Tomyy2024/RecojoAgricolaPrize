@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserSession, DeviceViewMode } from '../types';
-import { LogOut, User, Sprout, Cloud, RefreshCw, QrCode, Smartphone, Monitor, Clock, ShieldCheck, Lock, Wifi, WifiOff, Users } from 'lucide-react';
+import { LogOut, User, Sprout, Cloud, RefreshCw, QrCode, Smartphone, Monitor, Clock, ShieldCheck, Lock, Wifi, WifiOff, Users, BookOpen } from 'lucide-react';
 
 interface HeaderProps {
   session: UserSession;
@@ -10,6 +10,7 @@ interface HeaderProps {
   autoSyncActive?: boolean;
   onRefresh?: () => Promise<void> | void;
   onOpenShareModal?: () => void;
+  onOpenInstructivo?: () => void;
   deviceMode?: DeviceViewMode;
   onChangeDeviceMode?: (mode: DeviceViewMode) => void;
   offlineNomina?: boolean;
@@ -26,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   autoSyncActive,
   onRefresh,
   onOpenShareModal,
+  onOpenInstructivo,
   deviceMode = 'pc',
   onChangeDeviceMode,
   offlineNomina,
@@ -211,6 +213,18 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         <div className="flex items-center gap-2 text-right">
+          {onOpenInstructivo && (
+            <button
+              onClick={onOpenInstructivo}
+              className="bg-amber-400 hover:bg-amber-300 text-gray-950 px-3 py-1.5 rounded-xl font-extrabold text-xs flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer border border-amber-500/50"
+              title="Ver Instructivo de Uso de la Aplicación paso a paso"
+            >
+              <BookOpen className="w-4 h-4 text-emerald-950" />
+              <span className="hidden xs:inline">Instructivo de Uso</span>
+              <span className="xs:hidden">Instructivo</span>
+            </button>
+          )}
+
           {onOpenShareModal && (
             <button
               onClick={onOpenShareModal}

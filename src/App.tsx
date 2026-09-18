@@ -82,6 +82,7 @@ import { ImportarTab } from './components/ImportarTab';
 import { GruposLideresTab } from './components/GruposLideresTab';
 import { ConexionTab } from './components/ConexionTab';
 import { ShareAppModal } from './components/ShareAppModal';
+import { InstructivoModal } from './components/InstructivoModal';
 import { Toast, ToastMessage } from './components/Toast';
 import { 
   subscribeToFirestoreMasterData, 
@@ -121,6 +122,7 @@ export default function App() {
   });
 
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
+  const [showInstructivoModal, setShowInstructivoModal] = useState<boolean>(false);
   const [deviceMode, setDeviceMode] = useState<DeviceViewMode>(() => {
     const saved = localStorage.getItem('app_device_view_mode');
     return (saved === 'celular' || saved === 'pc') ? saved : 'pc';
@@ -1720,7 +1722,16 @@ export default function App() {
   if (!session) {
     return (
       <>
-        <LoginScreen onLogin={handleLogin} onToast={addToast} />
+        <LoginScreen 
+          onLogin={handleLogin} 
+          onToast={addToast} 
+          onOpenInstructivo={() => setShowInstructivoModal(true)} 
+        />
+        <InstructivoModal
+          isOpen={showInstructivoModal}
+          onClose={() => setShowInstructivoModal(false)}
+          onToast={addToast}
+        />
         <Toast toasts={toasts} onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
       </>
     );
@@ -1741,6 +1752,7 @@ export default function App() {
         autoSyncActive={isAutoSyncEnabled()}
         onRefresh={session.rol === 'Administrador' ? () => fetchCentralizedData(false) : undefined}
         onOpenShareModal={() => setIsShareModalOpen(true)}
+        onOpenInstructivo={() => setShowInstructivoModal(true)}
         deviceMode={deviceMode}
         onChangeDeviceMode={handleDeviceModeChange}
         offlineNomina={offlineNomina}
@@ -1829,6 +1841,7 @@ export default function App() {
             onCargarNominaDesdeSheet={handleCargarNominaDesdeSheet}
             onCargarAvanceDesdeSheet={handleCargarAvanceDesdeSheet}
             onRecargarNominaServidor={handleRecargarNominaServidor}
+            onOpenInstructivo={() => setShowInstructivoModal(true)}
           />
         )}
 
@@ -1932,6 +1945,13 @@ export default function App() {
       <ShareAppModal
         isOpen={isShareModalOpen}
         onClose={() => setIsShareModalOpen(false)}
+        onToast={addToast}
+      />
+
+      {/* Instructivo Modal */}
+      <InstructivoModal
+        isOpen={showInstructivoModal}
+        onClose={() => setShowInstructivoModal(false)}
         onToast={addToast}
       />
 
