@@ -220,6 +220,17 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     return diasDesglose.find((d) => d.fecha === diaSeleccionado) || null;
   }, [diaSeleccionado, diasDesglose]);
 
+  // Suma total calculada a partir del desglose de todos los días disponibles
+  const totalSumaJabasRecogidas = useMemo(() => {
+    const sumFromDays = diasDesglose.reduce((acc, d) => acc + (Number(d.recogidas) || 0), 0);
+    return sumFromDays;
+  }, [diasDesglose]);
+
+  const totalSumaJabasValidadas = useMemo(() => {
+    const sumFromDays = diasDesglose.reduce((acc, d) => acc + (Number(d.validadas) || 0), 0);
+    return sumFromDays;
+  }, [diasDesglose]);
+
   // Comprehensive General Metrics Aggregations
   const metrics = useMemo(() => {
     // 1. Programas & Lotes
@@ -301,8 +312,13 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       }
     });
 
-    // Grand total: if tareo records exist use jabasTareo, otherwise use jabasEjecucionPartes
-    const totalJabas = jabasTareo > 0 ? jabasTareo : jabasEjecucionPartes;
+    // Suma total de días en el desglose
+    const sumRecogidasDias = diasDesglose.reduce((acc, d) => acc + (Number(d.recogidas) || 0), 0);
+    const sumValidadasDias = diasDesglose.reduce((acc, d) => acc + (Number(d.validadas) || 0), 0);
+
+    // Grand total: suma total de jabas recogidas a través de los días con fallback a tareo/partes
+    const totalJabas = sumRecogidasDias > 0 ? sumRecogidasDias : (jabasTareo > 0 ? jabasTareo : jabasEjecucionPartes);
+    const finalJabasValidadas = sumValidadasDias > 0 ? sumValidadasDias : jabasValidadas;
 
     // Fundo list sorted
     const sortedFundos = Object.entries(fundoMap)
@@ -320,12 +336,12 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       totalJabas,
       jabasTareo,
       jabasEjecucionPartes,
-      jabasValidadas,
+      jabasValidadas: finalJabasValidadas,
       uniqueTrabajadores: Math.max(trabSet.size, trabajadores.length),
       jabasByFundo: sortedFundos,
       jabasByGrupo: sortedGrupos
     };
-  }, [filteredProgramas, filteredProgramaGeneral, filteredDetalleJabas, filteredValidaciones, trabajadores, diaSeleccionado]);
+  }, [filteredProgramas, filteredProgramaGeneral, filteredDetalleJabas, filteredValidaciones, trabajadores, diaSeleccionado, diasDesglose]);
 
   // ----------------------------------------------------------------------------------
   // PASO 2: CÁLCULO DE BONIFICACIÓN DIARIA DE TRABAJADORES (FILTRAR POR DÍA)
@@ -1061,40 +1077,48 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   <span className="font-semibold uppercase tracking-wider">Jabas Recogidas</span>
                   <Package className="w-4 h-4" />
                 </div>
-                <div className="text-3xl sm:text-4xl font-black leading-none mb-1">
-                  {(diaSeleccionadoData ? diaSeleccionadoData.recogidas : metrics.totalJabas).toLocaleString()}
+                <div className="text-3xl sm:text-4xl font-black leading-none mb-1 flex items-baseline gap-2">
+                  <span>{(diaSeleccionadoData ? diaSeleccionadoData.recogidas : totalSumaJabasRecogidas).toLocaleString()}</span>
+                  <span className="text-xs font-bold text-emerald-100 uppercase tracking-wide">
+                    {diaSeleccionadoData ? 'del día' : 'total'}
+                  </span>
                 </div>
                 <div className="text-[11px] text-emerald-100 pt-1 border-t border-emerald-700/50 flex items-center justify-between">
                   {diaSeleccionadoData ? (
                     <>
                       <span>Día {diaSeleccionadoData.fechaFormateada}</span>
-                      <span className="font-bold">Total período: {metrics.totalJabas.toLocaleString()}</span>
+                      <span className="font-bold">Total período: {totalSumaJabasRecogidas.toLocaleString()}</span>
                     </>
                   ) : (
                     <>
-                      <span>Tareo: {metrics.jabasTareo}</span>
-                      <span>Partes: {metrics.jabasEjecucionPartes}</span>
+                      <span>Tareo: {metrics.jabasTareo.toLocaleString()}</span>
+                      <span>Partes: {metrics.jabasEjecucionPartes.toLocaleString()}</span>
                     </>
                   )}
                 </div>
               </div>
 
-              {/* Mini desglose de días recogidos si hay varios */}
-              {diasDesglose.length > 1 && (
+              {/* Desglose de días recogidos */}
+              {diasDesglose.length > 0 && (
                 <div className="mt-2.5 pt-2 border-t border-white/20">
                   <div className="text-[10px] font-semibold text-emerald-100 mb-1 flex items-center justify-between">
                     <span>Recogidas por día:</span>
-                    {diaSeleccionado && (
+                    {diaSeleccionado ? (
                       <button
                         type="button"
                         onClick={() => setDiaSeleccionado('')}
-                        className="text-[10px] underline font-bold hover:text-white"
+                        className="text-[10px] bg-white text-[#1b5e20] px-1.5 py-0.5 rounded font-extrabold shadow-xs hover:bg-emerald-50 cursor-pointer transition-colors"
+                        title="Ver suma total de todos los días"
                       >
-                        Ver total
+                        Ver total ({totalSumaJabasRecogidas.toLocaleString()})
                       </button>
+                    ) : (
+                      <span className="text-[10px] bg-white/20 text-white font-extrabold px-1.5 py-0.5 rounded">
+                        Total: {totalSumaJabasRecogidas.toLocaleString()}
+                      </span>
                     )}
                   </div>
-                  <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto pr-0.5">
+                  <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-0.5">
                     {diasDesglose.map((d) => {
                       const isSel = diaSeleccionado === d.fecha;
                       return (
@@ -1102,13 +1126,20 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                           key={d.fecha}
                           type="button"
                           onClick={() => setDiaSeleccionado(isSel ? '' : d.fecha)}
-                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded border transition-all cursor-pointer ${
+                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded border transition-all cursor-pointer flex items-center gap-1 ${
                             isSel
-                              ? 'bg-white text-[#1b5e20] border-white'
+                              ? 'bg-white text-[#1b5e20] border-white shadow-xs'
                               : 'bg-white/10 hover:bg-white/20 text-white border-white/20'
                           }`}
+                          title={`Click para ver solo el día ${d.fechaFormateada}`}
                         >
-                          {d.fechaFormateada.slice(0, 5)}: {d.recogidas}
+                          <span>{d.fechaFormateada.slice(0, 5)}:</span>
+                          <span className="font-extrabold">{d.recogidas.toLocaleString()}</span>
+                          {d.isToday && (
+                            <span className={`text-[9px] px-1 rounded font-black ${isSel ? 'bg-[#1b5e20] text-white' : 'bg-emerald-200 text-emerald-950'}`}>
+                              Hoy
+                            </span>
+                          )}
                         </button>
                       );
                     })}
@@ -1217,8 +1248,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   <span className="font-semibold text-[#40493d] uppercase tracking-wider">Jabas Validadas</span>
                   <ShieldCheck className="w-4 h-4 text-[#2e7d32]" />
                 </div>
-                <div className="text-2xl sm:text-3xl font-extrabold text-[#ff8f00] leading-none mb-1">
-                  {(diaSeleccionadoData ? diaSeleccionadoData.validadas : metrics.jabasValidadas).toLocaleString()}
+                <div className="text-2xl sm:text-3xl font-extrabold text-[#ff8f00] leading-none mb-1 flex items-baseline gap-2">
+                  <span>{(diaSeleccionadoData ? diaSeleccionadoData.validadas : totalSumaJabasValidadas).toLocaleString()}</span>
                   <span className="text-xs font-bold text-gray-500 ml-1.5">
                     {diaSeleccionadoData ? 'del día' : 'total'}
                   </span>
@@ -1227,12 +1258,12 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   {diaSeleccionadoData ? (
                     <div className="flex items-center justify-between">
                       <span>Día {diaSeleccionadoData.fechaFormateada}</span>
-                      <span className="font-bold text-amber-800">Total período: {metrics.jabasValidadas.toLocaleString()}</span>
+                      <span className="font-bold text-amber-800">Total período: {totalSumaJabasValidadas.toLocaleString()}</span>
                     </div>
                   ) : (
                     <span>
-                      {metrics.totalJabas > 0
-                        ? `${Math.min(100, Math.round((metrics.jabasValidadas / metrics.totalJabas) * 100))}% de avance validado`
+                      {totalSumaJabasRecogidas > 0
+                        ? `${Math.min(100, Math.round((totalSumaJabasValidadas / totalSumaJabasRecogidas) * 100))}% de avance validado`
                         : 'Control de supervisión'}
                     </span>
                   )}
@@ -1248,13 +1279,14 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       <button
                         type="button"
                         onClick={() => setDiaSeleccionado('')}
-                        className="text-[10px] text-amber-700 hover:text-amber-900 font-bold underline cursor-pointer"
+                        className="text-[10px] bg-amber-500 hover:bg-amber-600 text-white px-2 py-0.5 rounded font-bold shadow-xs cursor-pointer transition-colors"
+                        title="Ver suma total de todos los días"
                       >
-                        Ver total
+                        Ver total ({totalSumaJabasValidadas.toLocaleString()})
                       </button>
                     ) : (
-                      <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                        Total: {metrics.jabasValidadas.toLocaleString()}
+                      <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 font-extrabold">
+                        Total: {totalSumaJabasValidadas.toLocaleString()}
                       </span>
                     )}
                   </div>
