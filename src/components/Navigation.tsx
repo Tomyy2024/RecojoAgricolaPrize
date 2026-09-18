@@ -56,7 +56,7 @@ const TABS: TabConfig[] = [
     id: 'dashboard',
     label: 'Panel',
     icon: <LayoutDashboard className="w-5 h-5" />,
-    roles: ['Administrador']
+    roles: ['Administrador', 'Jefe']
   },
   {
     id: 'reportes',

@@ -7,7 +7,8 @@ const DB_FILE = path.join(process.cwd(), 'data_store.json');
 
 // Master default users & catalogs
 const DEFAULT_USUARIOS = [
-  { user: 'admin', pass: 'prize2026', nombre: 'Administrador General', rol: 'Administrador', creado: '2026-08-18' }
+  { user: 'admin', pass: 'prize2026', nombre: 'Administrador General', rol: 'Administrador', creado: '2026-08-18' },
+  { user: 'jefe', pass: 'jefe2026', nombre: 'Jefe de Operaciones', rol: 'Jefe', creado: '2026-09-18' }
 ];
 
 const DEFAULT_FUNDOS = [
@@ -1413,6 +1414,140 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error('Error en eliminar-registro-avance:', err);
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
+  // Endpoint exclusivo para Administrador: Eliminar personal con jabas asignadas o sus registros de jabas
+  app.post('/api/eliminar-personal-con-jabas', async (req, res) => {
+    try {
+      const { dnis, ids, fecha, eliminarDeNomina, todasFechas, userRole, url } = req.body || {};
+      const isAdmin = userRole === 'Administrador' || !userRole || userRole === 'admin';
+      if (!isAdmin) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Acceso denegado: sólo el Administrador puede eliminar personal con jabas asignadas.'
+        });
+      }
+
+      const dniSet = new Set<string>();
+      if (Array.isArray(dnis)) {
+        dnis.forEach((d: any) => {
+          const s = String(d || '').replace(/\s+/g, '').trim();
+          if (s) dniSet.add(s);
+        });
+      }
+
+      const idSet = new Set<string>();
+      if (Array.isArray(ids)) {
+        ids.forEach((i: any) => {
+          const s = String(i || '').trim();
+          if (s) idSet.add(s);
+        });
+      }
+
+      if (dniSet.size === 0 && idSet.size === 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Debes especificar al menos un DNI o ID de trabajador.'
+        });
+      }
+
+      const targetFechaNorm = fecha ? normalizeDateServer(fecha) : null;
+
+      // 1. Filtrar registros de detalleJabas
+      const currentJabas = db.detalleJabas || [];
+      const prevJabasCount = currentJabas.length;
+
+      const remainingJabas = currentJabas.filter((item: any) => {
+        const itemDni = String(item.dni || '').replace(/\s+/g, '').trim();
+        const rawItemDni = String(item.dni || '').trim();
+        const itemId = String(item.id || '').trim();
+        const matchesWorker = dniSet.has(itemDni) || dniSet.has(rawItemDni) || idSet.has(itemId);
+
+        if (!matchesWorker) return true;
+
+        if (todasFechas || !targetFechaNorm) {
+          return false;
+        }
+        const itemFecha = item.fecha ? normalizeDateServer(item.fecha) : (item.timestamp ? normalizeDateServer(item.timestamp) : '');
+        if (itemFecha === targetFechaNorm) {
+          return false;
+        }
+        return true;
+      });
+
+      const deletedJabasCount = prevJabasCount - remainingJabas.length;
+      db.detalleJabas = sanitizeAndDeduplicateDetalleJabas(remainingJabas);
+
+      // 2. Si eliminarDeNomina es true, quitar al trabajador de db.trabajadores y db.reservas
+      let deletedWorkersCount = 0;
+      if (eliminarDeNomina) {
+        const prevWorkersCount = (db.trabajadores || []).length;
+        db.trabajadores = (db.trabajadores || []).filter((w: any) => {
+          const wDni = String(w.dni || '').replace(/\s+/g, '').trim();
+          const rawWDni = String(w.dni || '').trim();
+          const wId = String(w.id || '').trim();
+          const matches = dniSet.has(wDni) || dniSet.has(rawWDni) || idSet.has(wId);
+          return !matches;
+        });
+        deletedWorkersCount = prevWorkersCount - db.trabajadores.length;
+
+        if (Array.isArray(db.reservas)) {
+          db.reservas = db.reservas.map((r: any) => ({
+            ...r,
+            trabajadores: (r.trabajadores || []).filter((w: any) => {
+              const wDni = String(w.dni || '').replace(/\s+/g, '').trim();
+              const rawWDni = String(w.dni || '').trim();
+              const wId = String(w.id || '').trim();
+              return !(dniSet.has(wDni) || dniSet.has(rawWDni) || idSet.has(wId));
+            })
+          }));
+        }
+      } else {
+        db.trabajadores = (db.trabajadores || []).map((w: any) => {
+          const wDni = String(w.dni || '').replace(/\s+/g, '').trim();
+          const rawWDni = String(w.dni || '').trim();
+          const wId = String(w.id || '').trim();
+          const matches = dniSet.has(wDni) || dniSet.has(rawWDni) || idSet.has(wId);
+          if (matches) {
+            return { ...w, jabas: 0 };
+          }
+          return w;
+        });
+      }
+
+      db.version = (db.version || 1) + 1;
+      db.lastUpdated = new Date().toISOString();
+      saveDatabase(db);
+
+      await syncToCloudFirestore({
+        detalleJabas: db.detalleJabas,
+        trabajadores: db.trabajadores,
+        reservas: db.reservas
+      });
+
+      if (url) {
+        await pushDetalleJabasToGoogleSheet(url, db.detalleJabas);
+      }
+
+      notifyClients({ type: 'sync', version: db.version, data: db });
+
+      const msg = eliminarDeNomina
+        ? `Se eliminaron ${deletedWorkersCount} trabajador(es) y ${deletedJabasCount} registro(s) de jabas con éxito.`
+        : `Se eliminaron ${deletedJabasCount} registro(s) de jabas asignadas con éxito.`;
+
+      res.json({
+        status: 'ok',
+        message: msg,
+        deletedJabasCount,
+        deletedWorkersCount,
+        detalleJabas: db.detalleJabas,
+        trabajadores: db.trabajadores,
+        reservas: db.reservas
+      });
+    } catch (err: any) {
+      console.error('Error en eliminar-personal-con-jabas:', err);
       res.status(500).json({ status: 'error', message: err.message });
     }
   });

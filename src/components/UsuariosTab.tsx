@@ -405,6 +405,7 @@ export const UsuariosTab: React.FC<UsuariosTabProps> = ({
                   >
                     <option value="Supervisor">Supervisor</option>
                     <option value="Administrador">Administrador</option>
+                    <option value="Jefe">Jefe (Solo Panel)</option>
                     <option value="Trabajador">Trabajador</option>
                   </select>
                 </div>
@@ -497,6 +498,8 @@ export const UsuariosTab: React.FC<UsuariosTabProps> = ({
                                 ? 'bg-[#ffe082] text-[#e65100] border border-[#ffd54f]'
                                 : u.rol === 'Supervisor'
                                 ? 'bg-[#c8e6c9] text-[#1b5e20] border border-[#a5d6a7]'
+                                : u.rol === 'Jefe'
+                                ? 'bg-purple-100 text-purple-800 border border-purple-300'
                                 : 'bg-blue-50 text-blue-700 border border-blue-200'
                             }`}
                           >
@@ -624,6 +627,7 @@ export const UsuariosTab: React.FC<UsuariosTabProps> = ({
                   <option value="todos">Todos los Roles</option>
                   <option value="Supervisor">Supervisores</option>
                   <option value="Administrador">Administradores</option>
+                  <option value="Jefe">Jefes</option>
                   <option value="Trabajador">Trabajadores</option>
                 </select>
               </div>
@@ -687,6 +691,8 @@ export const UsuariosTab: React.FC<UsuariosTabProps> = ({
                                 ? 'bg-[#ffe082] text-[#e65100]'
                                 : a.rol === 'Supervisor'
                                 ? 'bg-[#c8e6c9] text-[#1b5e20]'
+                                : a.rol === 'Jefe'
+                                ? 'bg-purple-100 text-purple-800 border border-purple-200'
                                 : 'bg-blue-50 text-blue-700'
                             }`}
                           >
@@ -760,6 +766,7 @@ export const UsuariosTab: React.FC<UsuariosTabProps> = ({
                 >
                   <option value="Administrador">Administrador</option>
                   <option value="Supervisor">Supervisor</option>
+                  <option value="Jefe">Jefe (Solo Panel)</option>
                   <option value="Trabajador">Trabajador</option>
                 </select>
               </div>

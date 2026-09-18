@@ -23,7 +23,8 @@ export const INITIAL_GRUPOS: string[] = [];
 export const INITIAL_LOTES: LoteItem[] = PARSED_INITIAL_LOTES;
 
 export const INITIAL_USUARIOS: Usuario[] = [
-  { user: 'admin', pass: 'prize2026', nombre: 'Administrador General', rol: 'Administrador', creado: '2026-08-18' }
+  { user: 'admin', pass: 'prize2026', nombre: 'Administrador General', rol: 'Administrador', creado: '2026-08-18' },
+  { user: 'jefe', pass: 'jefe2026', nombre: 'Jefe de Operaciones', rol: 'Jefe', creado: '2026-09-18' }
 ];
 
 export const INITIAL_TRABAJADORES: Trabajador[] = NOMINA_MAESTRA;

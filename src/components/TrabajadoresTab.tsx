@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Trabajador, Lider, UserSession, DetalleJaba, Usuario, ReservaCuadrilla } from '../types';
 import { ScannerModal } from './ScannerModal';
+import { EliminarPersonalConJabasModal } from './EliminarPersonalConJabasModal';
 import { 
   getLocalToday, 
   getLocalISO, 
@@ -13,6 +14,9 @@ import {
   getFechasDisponiblesTrabajadores, 
   getTrabajadoresPorFecha,
   getTrabajadores,
+  saveTrabajadores,
+  getDetalleJabas,
+  saveDetalleJabas,
   parsePastedWorkers,
   ParsedWorkerResult,
   replicarTrabajadoresAlSheet,
@@ -289,6 +293,19 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     sheetReplicated?: boolean;
     sheetError?: string;
   } | null>(null);
+
+  // Modal Eliminar Personal con Jabas (Exclusivo para Administrador)
+  const [modalEliminarConJabas, setModalEliminarConJabas] = useState<{
+    isOpen: boolean;
+    modo: 'individual' | 'masivo' | 'seleccionados';
+    worker?: Trabajador;
+    loading: boolean;
+  }>({
+    isOpen: false,
+    modo: 'individual',
+    worker: undefined,
+    loading: false
+  });
 
   // Derive unique lists for dropdowns
   const supervisoresList = useMemo(() => {
@@ -1568,6 +1585,205 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     onToast(`✅ Se desasignaron ${prevCount} trabajadores. Quedan como "Sin Grupo ni Líder" (Solo Pendientes).`, 'success');
   };
 
+  // Handlers para Eliminar Personal con Jabas Asignadas (Exclusivo Administrador)
+  const handleOpenEliminarJabasWorkerModal = (w: Trabajador) => {
+    if (!isAdmin) return;
+    setModalEliminarConJabas({
+      isOpen: true,
+      modo: 'individual',
+      worker: w,
+      loading: false
+    });
+  };
+
+  const handleOpenEliminarMasivoConJabasModal = () => {
+    if (!isAdmin) return;
+    setModalEliminarConJabas({
+      isOpen: true,
+      modo: 'masivo',
+      worker: undefined,
+      loading: false
+    });
+  };
+
+  const handleOpenEliminarSeleccionadosConJabasModal = () => {
+    if (!isAdmin) return;
+    setModalEliminarConJabas({
+      isOpen: true,
+      modo: 'seleccionados',
+      worker: undefined,
+      loading: false
+    });
+  };
+
+  const handleConfirmarEliminarConJabas = async (
+    tipoAccion: 'solo_jabas' | 'eliminar_nomina_y_jabas',
+    todasFechas: boolean
+  ) => {
+    if (!isAdmin) {
+      onToast('⚠️ Acción restringida: solo el Administrador puede eliminar personal con jabas.', 'error');
+      return;
+    }
+
+    const { modo, worker } = modalEliminarConJabas;
+    let targetWorkers: Trabajador[] = [];
+    if (modo === 'individual' && worker) {
+      targetWorkers = [worker];
+    } else if (modo === 'seleccionados') {
+      targetWorkers = selectedWorkersList.filter((w) => getWorkerJabasCount(w) > 0);
+    } else {
+      targetWorkers = trabajadores.filter((w) => getWorkerJabasCount(w) > 0);
+    }
+
+    if (targetWorkers.length === 0) {
+      onToast('⚠️ No hay trabajadores con jabas para procesar.', 'warning');
+      setModalEliminarConJabas((prev) => ({ ...prev, isOpen: false }));
+      return;
+    }
+
+    setModalEliminarConJabas((prev) => ({ ...prev, loading: true }));
+
+    try {
+      const targetDnis = targetWorkers
+        .map((w) => normalizeDni(w.dni) || String(w.dni || '').trim())
+        .filter(Boolean);
+      const targetDniSet = new Set(targetDnis);
+      const targetIdSet = new Set(targetWorkers.map((w) => String(w.id || '').trim()).filter(Boolean));
+      const targetNameKeys = new Set(
+        targetWorkers.map((w) => (w.nombres ? `NAME_${normalizeStr(w.nombres)}` : '')).filter(Boolean)
+      );
+      const targetDate = fechaPersonal || getLocalToday();
+
+      // 1. Filtrar registros de detalleJabas
+      const currentDetalle = Array.isArray(detalleJabas) ? detalleJabas : getDetalleJabas();
+      const updatedDetalle = currentDetalle.filter((d) => {
+        const normD = normalizeDni(d.dni);
+        const rawD = String(d.dni || '').trim();
+        const itemId = String(d.id || '').trim();
+        const nameKey = d.trabajador ? `NAME_${normalizeStr(d.trabajador)}` : '';
+
+        const matches =
+          (normD && targetDniSet.has(normD)) ||
+          (rawD && targetDniSet.has(rawD)) ||
+          (itemId && targetIdSet.has(itemId)) ||
+          (nameKey && targetNameKeys.has(nameKey));
+
+        if (!matches) return true;
+
+        if (todasFechas) return false;
+
+        const dFecha = d.fecha ? normalizeDateString(d.fecha) : (d.timestamp ? normalizeDateString(d.timestamp) : '');
+        if (dFecha === targetDate) {
+          return false;
+        }
+        return true;
+      });
+
+      const cleanDetalle = sanitizeAndDeduplicateDetalleJabas(updatedDetalle);
+      if (onUpdateDetalleJabas) {
+        onUpdateDetalleJabas(cleanDetalle);
+      }
+      saveDetalleJabas(cleanDetalle);
+
+      // 2. Modificar o eliminar de trabajadores
+      let updatedTrabajadores = trabajadores;
+      if (tipoAccion === 'eliminar_nomina_y_jabas') {
+        updatedTrabajadores = trabajadores.filter((w) => {
+          const normD = normalizeDni(w.dni);
+          const rawD = String(w.dni || '').trim();
+          const targetId = String(w.id || '').trim();
+          const matches =
+            (normD && targetDniSet.has(normD)) ||
+            (rawD && targetDniSet.has(rawD)) ||
+            (targetId && targetIdSet.has(targetId));
+          return !matches;
+        });
+      } else {
+        updatedTrabajadores = trabajadores.map((w) => {
+          const normD = normalizeDni(w.dni);
+          const rawD = String(w.dni || '').trim();
+          const targetId = String(w.id || '').trim();
+          const matches =
+            (normD && targetDniSet.has(normD)) ||
+            (rawD && targetDniSet.has(rawD)) ||
+            (targetId && targetIdSet.has(targetId));
+          if (matches) {
+            return { ...w, jabas: 0 };
+          }
+          return w;
+        });
+      }
+
+      if (onUpdateTrabajadores) {
+        onUpdateTrabajadores(updatedTrabajadores);
+      }
+      saveTrabajadores(updatedTrabajadores);
+
+      // 3. Limpiar reservas si se eliminó de nómina
+      if (tipoAccion === 'eliminar_nomina_y_jabas') {
+        const updatedReservas = reservasState.map((r) => ({
+          ...r,
+          trabajadores: (r.trabajadores || []).filter((w) => {
+            const normD = normalizeDni(w.dni);
+            const rawD = String(w.dni || '').trim();
+            const targetId = String(w.id || '').trim();
+            return !(
+              (normD && targetDniSet.has(normD)) ||
+              (rawD && targetDniSet.has(rawD)) ||
+              (targetId && targetIdSet.has(targetId))
+            );
+          })
+        }));
+        setReservasState(updatedReservas);
+        saveReservas(updatedReservas);
+      }
+
+      // 4. Deseleccionar si estaban seleccionados
+      setSelectedDnis((prev) => {
+        const next = new Set(prev);
+        targetDnis.forEach((d) => next.delete(d));
+        return next;
+      });
+
+      // 5. Notificar al servidor backend
+      try {
+        const gUrl = getGsheetUrl();
+        await fetch('/api/eliminar-personal-con-jabas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dnis: targetDnis,
+            ids: targetWorkers.map((w) => w.id).filter(Boolean),
+            fecha: targetDate,
+            todasFechas,
+            eliminarDeNomina: tipoAccion === 'eliminar_nomina_y_jabas',
+            userRole: session?.rol,
+            url: gUrl
+          })
+        });
+      } catch (err) {
+        console.warn('Sincronización de eliminación al servidor con fallback:', err);
+      }
+
+      const successMsg =
+        tipoAccion === 'eliminar_nomina_y_jabas'
+          ? `✅ Se eliminó a ${targetWorkers.length} trabajador(es) de la nómina y todas sus jabas asignadas.`
+          : `✅ Se eliminaron las jabas asignadas de ${targetWorkers.length} trabajador(es) con éxito.`;
+      onToast(successMsg, 'success');
+
+      setModalEliminarConJabas({
+        isOpen: false,
+        modo: 'individual',
+        worker: undefined,
+        loading: false
+      });
+    } catch (err: any) {
+      console.error('Error al eliminar personal con jabas:', err);
+      onToast(`❌ Error: ${err.message || 'No se pudo completar la eliminación'}`, 'error');
+      setModalEliminarConJabas((prev) => ({ ...prev, loading: false }));
+    }
+  };
+
   // Ejecuta la conexión y descarga directa desde la hoja 'Trabajadores' del Google Sheet
   const handleEjecutarCargaNominaSheet = async () => {
     setIsCargandoSheet(true);
@@ -2269,6 +2485,11 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     });
     return list.sort((a, b) => a.nombres.localeCompare(b.nombres));
   }, [trabajadores, selectedDnis, isDniSelected, normalizeDni]);
+
+  // Número de trabajadores seleccionados que actualmente tienen jabas asignadas
+  const selectedConJabasCount = useMemo(() => {
+    return selectedWorkersList.filter((w) => getWorkerJabasCount(w) > 0).length;
+  }, [selectedWorkersList, getWorkerJabasCount]);
 
   // Trabajadores efectivos para el Paso 2: si selectedWorkersList tiene trabajadores, los usa;
   // si estuviera vacío por alguna razón, recurre a la reserva activa de hoy o a los trabajadores ya asignados al supervisor
@@ -3637,17 +3858,31 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 </span>
               </button>
 
-              {countAsignados > 0 && (
-                <button
-                  type="button"
-                  onClick={handleDesasignarTodos}
-                  className="px-2.5 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 cursor-pointer ml-auto transition-all active:scale-95 whitespace-nowrap"
-                  title="Quitar grupo y líder a todos los asignados para reiniciar la nómina a 'Sin Grupo ni Líder'"
-                >
-                  <RotateCcw className="w-3 h-3 text-red-600" />
-                  <span>Desasignar Todos ({countAsignados})</span>
-                </button>
-              )}
+              <div className="flex items-center gap-1.5 ml-auto">
+                {isAdmin && countConJabasTotal > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleOpenEliminarMasivoConJabasModal}
+                    className="px-2.5 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white shadow-xs cursor-pointer transition-all active:scale-95 whitespace-nowrap"
+                    title="Eliminar personal con jabas asignadas o limpiar sus registros de avance (Solo Administrador)"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-white" />
+                    <span>Eliminar Personal con Jabas ({countConJabasTotal})</span>
+                  </button>
+                )}
+
+                {countAsignados > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleDesasignarTodos}
+                    className="px-2.5 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 cursor-pointer transition-all active:scale-95 whitespace-nowrap"
+                    title="Quitar grupo y líder a todos los asignados para reiniciar la nómina a 'Sin Grupo ni Líder'"
+                  >
+                    <RotateCcw className="w-3 h-3 text-red-600" />
+                    <span>Desasignar Todos ({countAsignados})</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Listado de Tarjetas de Trabajadores con renderizado de alto rendimiento */}
@@ -3935,6 +4170,20 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                               <span>Desasignar</span>
                             </button>
                           )}
+                          {tieneJabas && isAdmin && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenEliminarJabasWorkerModal(t);
+                              }}
+                              className="text-[10px] sm:text-[11px] text-red-700 hover:text-red-900 bg-red-50 hover:bg-red-100 border border-red-200 hover:border-red-300 px-2 sm:px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 cursor-pointer transition-all shadow-xs shrink-0"
+                              title={`Eliminar jabas asignadas o eliminar personal (${t.nombres})`}
+                            >
+                              <Trash2 className="w-3 h-3 text-red-600 shrink-0" />
+                              <span>Eliminar con Jabas</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -4102,6 +4351,18 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 <BookmarkCheck className="w-4 h-4 text-[#2e7d32]" />
                 <span>Guardar Reserva ({selectedWorkersList.length})</span>
               </button>
+
+              {isAdmin && selectedConJabasCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleOpenEliminarSeleccionadosConJabasModal}
+                  className="bg-red-50 hover:bg-red-100 text-red-700 border-2 border-red-300 py-3 px-4 rounded-xl font-bold text-sm shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+                  title="Eliminar personal seleccionado con jabas o limpiar sus registros de avance"
+                >
+                  <Trash2 className="w-4 h-4 text-red-600" />
+                  <span>Eliminar con Jabas ({selectedConJabasCount})</span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -6108,6 +6369,33 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal Eliminar Personal con Jabas (Exclusivo Administrador) */}
+      {isAdmin && modalEliminarConJabas.isOpen && (
+        <EliminarPersonalConJabasModal
+          isOpen={modalEliminarConJabas.isOpen}
+          onClose={() => setModalEliminarConJabas((prev) => ({ ...prev, isOpen: false }))}
+          modo={modalEliminarConJabas.modo}
+          worker={modalEliminarConJabas.worker}
+          targetWorkersCount={
+            modalEliminarConJabas.modo === 'individual'
+              ? 1
+              : modalEliminarConJabas.modo === 'seleccionados'
+              ? selectedConJabasCount
+              : countConJabasTotal
+          }
+          jabasTotalCount={
+            modalEliminarConJabas.modo === 'individual' && modalEliminarConJabas.worker
+              ? getWorkerJabasCount(modalEliminarConJabas.worker)
+              : modalEliminarConJabas.modo === 'seleccionados'
+              ? selectedWorkersList.reduce((acc, w) => acc + getWorkerJabasCount(w), 0)
+              : jabasTotalDisplay
+          }
+          fechaPersonal={fechaPersonal}
+          loading={modalEliminarConJabas.loading}
+          onConfirm={handleConfirmarEliminarConJabas}
+        />
       )}
 
       {/* Scanner Modal Component */}

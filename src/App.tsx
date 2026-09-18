@@ -116,6 +116,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>(() => {
     const initialSession = getSession();
     if (initialSession?.rol === 'Trabajador') return 'trabajadores';
+    if (initialSession?.rol === 'Jefe') return 'dashboard';
     return 'programaGeneral';
   });
 
@@ -136,6 +137,8 @@ export default function App() {
     if (!session) return;
     if (session.rol === 'Trabajador' && activeTab !== 'trabajadores') {
       setActiveTab('trabajadores');
+    } else if (session.rol === 'Jefe' && activeTab !== 'dashboard') {
+      setActiveTab('dashboard');
     } else if (
       session.rol === 'Supervisor' &&
       !['programaGeneral', 'programa', 'trabajadores', 'validacion', 'gruposLideres'].includes(activeTab)
@@ -776,6 +779,8 @@ export default function App() {
     setSession(userSession);
     if (userSession.rol === 'Trabajador') {
       setActiveTab('trabajadores');
+    } else if (userSession.rol === 'Jefe') {
+      setActiveTab('dashboard');
     } else {
       setActiveTab('programaGeneral');
     }
@@ -1797,6 +1802,7 @@ export default function App() {
             onSaveGrupo={handleSaveGrupo}
             onSaveAvance={handleSaveAvance}
             detalleJabas={detalleJabas}
+            onUpdateDetalleJabas={handleUpdateDetalleJabas}
             reservas={reservas}
             onSaveReserva={handleSaveReserva}
             onDeleteReserva={handleDeleteReserva}
@@ -1808,7 +1814,6 @@ export default function App() {
             onDepurarTrabajadoresAyer={handleDepurarTrabajadoresAyer}
             onCargarNominaDesdeSheet={handleCargarNominaDesdeSheet}
             onCargarAvanceDesdeSheet={handleCargarAvanceDesdeSheet}
-            onUpdateDetalleJabas={handleUpdateDetalleJabas}
             onRecargarNominaServidor={handleRecargarNominaServidor}
           />
         )}
