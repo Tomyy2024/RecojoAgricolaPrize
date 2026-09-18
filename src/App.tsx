@@ -289,7 +289,8 @@ export default function App() {
         rawList.forEach((t: Trabajador, i: number) => {
           const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
           const rawDni = String(t.dni || '').trim();
-          const key = t.id || (cleanDni ? `${cleanDni}__${t.nombres}` : `idx_${i}__${t.nombres}`);
+          const tFecha = t.fecha ? (normalizeDateString(t.fecha) || t.fecha) : '';
+          const key = cleanDni ? `${cleanDni}__${tFecha || 's_f'}` : (t.id ? `${t.id}__${tFecha}` : `idx_${i}__${tFecha}__${t.nombres}`);
 
           const existingLocal = (cleanDni ? localWorkersMap.get(cleanDni) : null) || (t.id ? localWorkersMap.get(t.id) : null);
           const grupoFinal = t.grupo !== undefined && t.grupo !== null
@@ -313,7 +314,7 @@ export default function App() {
               modulo: t.modulo ? String(t.modulo).trim() : (existingLocal?.modulo || ''),
               grupo: grupoFinal,
               lider: liderFinal,
-              fecha: t.fecha || (existingLocal?.fecha || '')
+              fecha: tFecha || (existingLocal?.fecha ? normalizeDateString(existingLocal.fecha) : '')
             });
           }
         });
@@ -678,6 +679,9 @@ export default function App() {
         lideres: getLideres(),
         grupos: getGrupos(),
         reservas: getReservas(),
+        userRole: currentRole,
+        isAdmin: isAdmin,
+        userEmail: activeSession?.email || activeSession?.user || 'admin',
         ...updatedPayload
       };
       // Únicamente el Administrador puede enviar nómina de trabajadores a Firestore
@@ -1273,7 +1277,7 @@ export default function App() {
     addToast(`🗑️ Reserva eliminada del sistema`);
   };
 
-  const handleImportTrabajadores = (
+  const handleImportTrabajadores = async (
     newWorkers: Trabajador[],
     mode: 'reemplazar_fecha' | 'append' | 'reemplazar_todo' | boolean = 'reemplazar_fecha',
     targetDate?: string
@@ -1354,19 +1358,29 @@ export default function App() {
     addToast(`🔒 ${descModo}. Total en sistema: ${mergedList.length}.`, 'success');
 
     // Fast-path direct push to dedicated trabajadores endpoint
-    fetch('/api/trabajadores', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        trabajadores: mergedList,
-        modo: effectiveModo,
-        fechaTarget: fechaFinal,
-        userRole: session?.rol || 'Administrador',
-        userName: session?.nombre || 'Administrador'
-      })
-    }).catch(() => {});
+    try {
+      await fetch('/api/trabajadores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          trabajadores: mergedList,
+          modo: effectiveModo,
+          fechaTarget: fechaFinal,
+          userRole: session?.rol || 'Administrador',
+          userName: session?.nombre || 'Administrador'
+        })
+      });
+    } catch (err) {
+      console.warn('Direct trabajadores sync error:', err);
+    }
 
-    triggerAutoSync('Importar Trabajadores', { trabajadores: mergedList });
+    triggerAutoSync('Importar Trabajadores', {
+      trabajadores: mergedList,
+      forceNominaUpdate: true,
+      depurado: effectiveModo === 'reemplazar_todo',
+      modo: effectiveModo,
+      fechaTarget: fechaFinal
+    });
   };
 
   const handleReplicarTrabajadoresSheet = async (

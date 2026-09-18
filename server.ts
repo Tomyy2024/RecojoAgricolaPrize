@@ -790,12 +790,23 @@ async function startServer() {
         });
 
         if (effectiveModo === 'reemplazar_fecha' && targetFechaNorm) {
-          // Mantener trabajadores de otras fechas intactos
+          // Mantener trabajadores de otras fechas intactos y deduplicar
           const otrasFechas = (db.trabajadores || []).filter((w: any) => {
             const wf = normalizeDateServer(w.fecha);
             return wf && wf !== targetFechaNorm;
           });
-          db.trabajadores = [...otrasFechas, ...incomingClean];
+          const mapWorkers = new Map<string, any>();
+          otrasFechas.forEach((w: any, idx: number) => {
+            const dni = String(w.dni || '').trim();
+            const wf = normalizeDateServer(w.fecha) || '';
+            mapWorkers.set(dni ? `${dni}__${wf}` : (w.id || `idx_${idx}`), w);
+          });
+          incomingClean.forEach((w: any, idx: number) => {
+            const dni = String(w.dni || '').trim();
+            const wf = normalizeDateServer(w.fecha) || targetFechaNorm;
+            mapWorkers.set(dni ? `${dni}__${wf}` : (w.id || `idx_in_${idx}`), { ...w, fecha: wf });
+          });
+          db.trabajadores = Array.from(mapWorkers.values());
         } else if (effectiveModo === 'append' || effectiveModo === 'append_date') {
           const existingMap = new Map<string, any>();
           (db.trabajadores || []).forEach((t: any, i: number) => {
@@ -806,9 +817,9 @@ async function startServer() {
           });
           incomingClean.forEach((t: any) => {
             const dni = String(t.dni || '').replace(/\s+/g, '').trim();
-            const tFecha = t.fecha ? normalizeDateServer(t.fecha) : '';
+            const tFecha = t.fecha ? normalizeDateServer(t.fecha) : (targetFechaNorm || '');
             const key = dni ? `${dni}__${tFecha || 's_f'}` : `${t.id}__${tFecha}`;
-            existingMap.set(key, t);
+            existingMap.set(key, { ...t, fecha: tFecha });
           });
           db.trabajadores = Array.from(existingMap.values());
         } else {
@@ -1704,13 +1715,30 @@ async function startServer() {
         // Si un Supervisor, Digitador o usuario no verificado envía trabajadores, el servidor NUNCA sobrescribe la nómina central.
         if (isAdmin && Array.isArray(incoming.trabajadores) && incoming.trabajadores.length > 0) {
           const isExplicitPurge = incoming.depurado === true || incoming.forceNominaUpdate === true || incoming.action === 'reset';
-          const currentCount = (db.trabajadores || []).length;
-          // Si el servidor ya cuenta con una nómina mayor (ej. 446 trabajadores), no permitir que un cliente con datos viejos o incompletos (ej. 410)
-          // la rebaje a menos que venga expresamente con la bandera forceNominaUpdate
-          if (incoming.trabajadores.length >= currentCount || isExplicitPurge || currentCount === 0) {
+          const targetFechaNorm = incoming.fechaTarget ? normalizeDateServer(incoming.fechaTarget) : '';
+
+          if (incoming.modo === 'reemplazar_todo' || isExplicitPurge) {
             db.trabajadores = incoming.trabajadores;
+          } else if (incoming.modo === 'reemplazar_fecha' && targetFechaNorm) {
+            const otrasFechas = (db.trabajadores || []).filter((w: any) => {
+              const wf = normalizeDateServer(w.fecha);
+              return wf && wf !== targetFechaNorm;
+            });
+            const mapWorkers = new Map<string, any>();
+            otrasFechas.forEach((w: any, idx: number) => {
+              const dni = String(w.dni || '').trim();
+              const wf = normalizeDateServer(w.fecha) || '';
+              mapWorkers.set(dni ? `${dni}__${wf}` : (w.id || `idx_${idx}`), w);
+            });
+            incoming.trabajadores.forEach((w: any, idx: number) => {
+              const dni = String(w.dni || '').trim();
+              const wf = normalizeDateServer(w.fecha) || targetFechaNorm;
+              mapWorkers.set(dni ? `${dni}__${wf}` : (w.id || `idx_in_${idx}`), { ...w, fecha: wf });
+            });
+            db.trabajadores = Array.from(mapWorkers.values());
           } else {
-            console.warn(`[Seguridad Nómina] Rechazada reducción no autorizada de nómina: Servidor=${currentCount}, Recibido=${incoming.trabajadores.length}`);
+            // El Administrador autoriza la nómina enviada
+            db.trabajadores = incoming.trabajadores;
           }
         }
         if (Array.isArray(incoming.detalleJabas)) {

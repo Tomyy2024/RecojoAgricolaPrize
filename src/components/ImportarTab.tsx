@@ -10,7 +10,7 @@ interface ImportarTabProps {
     nuevos: Trabajador[],
     replaceExisting?: boolean | 'reemplazar_fecha' | 'append' | 'reemplazar_todo',
     fechaTarget?: string
-  ) => void;
+  ) => void | Promise<void>;
   onToast: (msg: string) => void;
   offlineNomina?: boolean;
   onToggleOfflineNomina?: (val?: boolean) => void;
@@ -126,7 +126,7 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
     reader.readAsText(file);
   };
 
-  const handleConfirmImport = () => {
+  const handleConfirmImport = async () => {
     if (!isAdmin) {
       onToast('🚫 Permiso denegado: El único que puede cargar la nómina es el rol de Administrador.');
       return;
@@ -169,7 +169,7 @@ export const ImportarTab: React.FC<ImportarTabProps> = ({
       return;
     }
 
-    onImportTrabajadores(newWorkers, modoImportacion, targetFechaStr);
+    await onImportTrabajadores(newWorkers, modoImportacion, targetFechaStr);
 
     const desc =
       modoImportacion === 'reemplazar_fecha'

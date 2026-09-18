@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { Trabajador, Lider, UserSession, DetalleJaba, Usuario, ReservaCuadrilla } from '../types';
 import { ScannerModal } from './ScannerModal';
 import { EliminarPersonalConJabasModal } from './EliminarPersonalConJabasModal';
@@ -591,10 +591,21 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         return fn === target || (!fn && target === hoyStr);
       }).length;
       if (matchCount === 0 && fechasDisponiblesTrabajadores.length > 0) {
-        setFechaPersonal(fechasDisponiblesTrabajadores[0].fecha);
+        const hasHoy = fechasDisponiblesTrabajadores.find((f) => f.fecha === hoyStr);
+        setFechaPersonal(hasHoy ? hoyStr : fechasDisponiblesTrabajadores[0].fecha);
       }
     }
   }, [fullTrabajadores, fechasDisponiblesTrabajadores, fechaPersonal, hoyStr]);
+
+  // Si hoy tiene trabajadores y el usuario estaba en una fecha anterior porque antes no había registros de hoy, auto-seleccionar hoy
+  const prevCountHoyRef = useRef<number>(0);
+  useEffect(() => {
+    const countHoy = fullTrabajadores.filter((t) => (t.fecha ? normalizeDateString(t.fecha) : '') === hoyStr).length;
+    if (countHoy > 0 && prevCountHoyRef.current === 0 && fechaPersonal !== hoyStr) {
+      setFechaPersonal(hoyStr);
+    }
+    prevCountHoyRef.current = countHoy;
+  }, [fullTrabajadores, hoyStr, fechaPersonal]);
 
   // Pre-indexed workers for sub-millisecond search and strict binding
   const indexedTrabajadores = useMemo(() => {

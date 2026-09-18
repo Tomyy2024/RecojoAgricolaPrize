@@ -515,20 +515,6 @@ export function getTrabajadores(): Trabajador[] {
 
     if (!Array.isArray(list) || list.length === 0) {
       list = INITIAL_TRABAJADORES;
-    } else if (INITIAL_TRABAJADORES.length > 0 && list.length < INITIAL_TRABAJADORES.length) {
-      // Si la lista guardada en el cliente tiene menos trabajadores que la nómina maestra (ej. 410 vs 446),
-      // rellenar con los faltantes sin perder asignaciones locales
-      const existingMap = new Map<string, Trabajador>();
-      list.forEach(w => {
-        if (w && w.dni) existingMap.set(String(w.dni).trim(), w);
-      });
-      const missing = INITIAL_TRABAJADORES.filter(w => !existingMap.has(String(w.dni).trim()));
-      if (missing.length > 0) {
-        list = [...list, ...missing];
-        try {
-          localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(list));
-        } catch {}
-      }
     }
 
     const seen = new Set<string>();
