@@ -302,24 +302,72 @@ function sanitizeAndDeduplicateDetalleJabas(list: any[]): any[] {
 
 const DEFAULT_GSHEET_URL = process.env.GSHEET_URL || 'https://script.google.com/macros/s/AKfycbwUwC4PwsVrEGdGItPkAwu8-k8lJePnEIwitNhakUGqHEKWLZLr_i49FMMDh-fog0y2/exec';
 
-async function pushDetalleJabasToGoogleSheet(sheetUrl?: string, cleanDetalle: any[] = []) {
+async function pushDetalleJabasToGoogleSheet(sheetUrl?: string, cleanDetalle: any[] = [], cleanTrabajadores: any[] = []) {
   const targetUrl = sheetUrl || DEFAULT_GSHEET_URL;
-  if (!targetUrl) return;
+  if (!targetUrl) return { success: false, error: 'URL de Google Sheets no configurada' };
   try {
-    const payload = {
+    const payload: any = {
       accion: 'sync',
       data: {
-        detalleJabas: Array.isArray(cleanDetalle) ? cleanDetalle : []
+        detalleJabas: Array.isArray(cleanDetalle)
+          ? cleanDetalle.map((item: any) => ({
+              id: item.id || '',
+              fecha: item.fecha || '',
+              timestamp: item.timestamp || new Date().toISOString(),
+              supervisor: item.supervisor || '',
+              fundo: item.fundo || '',
+              modulo: item.modulo || '',
+              grupo: item.grupo || '',
+              lider: item.lider || '',
+              dni: item.dni || '',
+              trabajador: item.trabajador || '',
+              jabas: Number(item.jabas) || 0
+            }))
+          : []
       }
     };
-    await fetch(targetUrl, {
+
+    if (Array.isArray(cleanTrabajadores) && cleanTrabajadores.length > 0) {
+      payload.data.trabajadores = cleanTrabajadores.map((t: any) => ({
+        dni: t.dni || '',
+        nombres: t.nombres || '',
+        fundo: t.fundo || '',
+        modulo: t.modulo || '',
+        grupo: t.grupo || '',
+        supervisor: t.supervisor || '',
+        lider: t.lider || '',
+        tipo: t.tipo || 'Cosechador',
+        jabas: Number(t.jabas) || 0
+      }));
+      payload.data.asignaciones = cleanTrabajadores.map((t: any) => ({
+        dni: t.dni || '',
+        nombres: t.nombres || '',
+        grupo: t.grupo || '',
+        lider: t.lider || '',
+        fecha: t.fecha || new Date().toISOString().slice(0, 10)
+      }));
+    }
+
+    const response = await fetch(targetUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload)
     });
-    console.log(`[Google Sheet] Sincronizados ${cleanDetalle.length} registros limpios a la hoja Registro_Avance.`);
+    const resText = await response.text().catch(() => '');
+    let resJson: any = null;
+    try {
+      resJson = JSON.parse(resText);
+    } catch {}
+    const ok = response.ok || (resJson && resJson.status === 'ok');
+    console.log(`[Google Sheet] Sincronizados ${cleanDetalle.length} registros a Registro_Avance y ${cleanTrabajadores.length} a Trabajadores. Status: ${response.status}`);
+    return {
+      success: ok,
+      response: resJson || resText,
+      error: ok ? undefined : (resJson?.message || resText.slice(0, 120) || `HTTP ${response.status}`)
+    };
   } catch (e: any) {
     console.warn('[Google Sheet] Error al sincronizar con sheet:', e?.message || e);
+    return { success: false, error: e?.message || 'Error de conexión con Google Sheets' };
   }
 }
 
@@ -404,17 +452,35 @@ async function startServer() {
       const app = getApps().length > 0 ? getApps()[0] : initializeApp(config, 'backend-cloud-sync');
       const cloudDb = getFirestore(app, config.firestoreDatabaseId);
       const snap = await getDoc(doc(cloudDb, 'app_state', 'master_data'));
-      if (snap.exists()) {
-        const data = snap.data();
+      const snapNomina = await getDoc(doc(cloudDb, 'app_state', 'nomina')).catch(() => null);
+      if (snap.exists() || snapNomina?.exists()) {
+        const data = snap.exists() ? snap.data() : {};
+        const dataNomina = snapNomina?.exists() ? snapNomina.data() : null;
         let changed = false;
 
-        // 1. Trabajadores (sincronizar nómina exacta desde la nube sin borrar accidentalmente)
-        if (Array.isArray(data.trabajadores)) {
+        // 1. Trabajadores (sincronizar nómina exacta desde la nube sin borrar accidentalmente y respetando timestamp)
+        const cloudTrabajadores = (dataNomina && Array.isArray(dataNomina.trabajadores))
+          ? dataNomina.trabajadores
+          : (Array.isArray(data.trabajadores) ? data.trabajadores : null);
+        const cloudNominaTimestamp = (dataNomina && typeof dataNomina.nominaTimestamp === 'number')
+          ? dataNomina.nominaTimestamp
+          : (typeof data.nominaTimestamp === 'number' ? data.nominaTimestamp : 0);
+        const cloudNominaVersion = (dataNomina && typeof dataNomina.nominaVersion === 'number')
+          ? dataNomina.nominaVersion
+          : (typeof data.nominaVersion === 'number' ? data.nominaVersion : 0);
+
+        if (Array.isArray(cloudTrabajadores)) {
           const isExplicitPurge = data.depurado === true || data.forceNominaUpdate === true;
-          if (data.trabajadores.length > 0 || isExplicitPurge || !(db.trabajadores && db.trabajadores.length > 0)) {
-            db.trabajadores = data.trabajadores;
+          const currentTimestamp = db.nominaTimestamp || 0;
+          // Solo actualizar si la nube tiene un timestamp igual o superior, o si el servidor local está vacío
+          const isCloudNewer = !currentTimestamp || cloudNominaTimestamp >= currentTimestamp;
+
+          if ((cloudTrabajadores.length > 0 && isCloudNewer) || isExplicitPurge || !(db.trabajadores && db.trabajadores.length > 0)) {
+            db.trabajadores = cloudTrabajadores;
+            if (cloudNominaTimestamp) db.nominaTimestamp = cloudNominaTimestamp;
+            if (cloudNominaVersion) db.nominaVersion = cloudNominaVersion;
             changed = true;
-          } else if ((db.trabajadores || []).length > 0 && data.trabajadores.length === 0) {
+          } else if ((db.trabajadores || []).length > 0 && cloudTrabajadores.length === 0) {
             // El servidor local ya tiene trabajadores pero Firestore está vacío: sincronizar a la nube
             syncToCloudFirestore({ trabajadores: db.trabajadores });
           }
@@ -507,7 +573,18 @@ async function startServer() {
         lastUpdated: new Date().toISOString(),
         version: db.version || 1
       };
-      if (Array.isArray(updateData.trabajadores)) payload.trabajadores = updateData.trabajadores;
+      if (Array.isArray(updateData.trabajadores)) {
+        await setDoc(doc(cloudDb, 'app_state', 'nomina'), {
+          trabajadores: updateData.trabajadores,
+          nominaVersion: db.nominaVersion || 1,
+          nominaTimestamp: db.nominaTimestamp || Date.now(),
+          totalTrabajadores: updateData.trabajadores.length,
+          lastUpdated: new Date().toISOString()
+        }, { merge: true }).catch((e) => console.warn('[Backend] Error guardando app_state/nomina:', e?.message));
+        payload.nominaVersion = db.nominaVersion || 1;
+        payload.nominaTimestamp = db.nominaTimestamp || Date.now();
+        payload.totalTrabajadores = updateData.trabajadores.length;
+      }
       if (Array.isArray(updateData.usuarios)) payload.usuarios = updateData.usuarios;
       if (Array.isArray(updateData.programas)) payload.programas = updateData.programas;
       if (Array.isArray(updateData.programaGeneral)) payload.programaGeneral = updateData.programaGeneral;
@@ -867,6 +944,7 @@ async function startServer() {
 
         db.version = (db.version || 1) + 1;
         db.nominaVersion = (db.nominaVersion || 1) + 1;
+        db.nominaTimestamp = req.body.nominaTimestamp || Date.now();
         db.nominaLastUpdated = new Date().toISOString();
         db.lastUpdated = new Date().toISOString();
         saveDatabase(db);
@@ -876,6 +954,7 @@ async function startServer() {
           action: 'trabajadores_updated',
           version: db.version,
           nominaVersion: db.nominaVersion,
+          nominaTimestamp: db.nominaTimestamp,
           data: db
         });
         return res.json({
@@ -883,6 +962,7 @@ async function startServer() {
           count: db.trabajadores.length,
           data: db.trabajadores,
           nominaVersion: db.nominaVersion,
+          nominaTimestamp: db.nominaTimestamp,
           nominaLastUpdated: db.nominaLastUpdated
         });
       }
@@ -1076,6 +1156,94 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error('Error en /api/replicar-trabajadores-sheet:', err);
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
+  // Endpoint para registrar/actualizar avance de jabas y trabajadores asignados y subirlos DIRECTO a Google Sheets
+  app.post('/api/replicar-avance-sheet', async (req, res) => {
+    try {
+      const { detalleJabas, trabajadores, url, userRole, userName } = req.body || {};
+
+      let mergedDetalle = db.detalleJabas || [];
+      if (Array.isArray(detalleJabas) && detalleJabas.length > 0) {
+        mergedDetalle = sanitizeAndDeduplicateDetalleJabas([...detalleJabas, ...mergedDetalle]);
+        db.detalleJabas = mergedDetalle;
+      }
+
+      // Actualizar información de trabajadores asignados (supervisor, fundo, modulo, grupo, lider, jabas)
+      if (Array.isArray(trabajadores) && trabajadores.length > 0) {
+        const workerMap = new Map<string, any>();
+        (db.trabajadores || []).forEach((w: any) => {
+          const dni = String(w.dni || '').trim();
+          const mod = String(w.modulo || '').trim().toUpperCase();
+          const key = dni && mod ? `${dni}__${mod}` : (dni || w.id);
+          workerMap.set(key, w);
+          if (dni && !workerMap.has(dni)) workerMap.set(dni, w);
+        });
+
+        trabajadores.forEach((incomingW: any) => {
+          const dni = String(incomingW.dni || '').trim();
+          const mod = String(incomingW.modulo || '').trim().toUpperCase();
+          const key = dni && mod ? `${dni}__${mod}` : (dni || incomingW.id);
+          const existing = workerMap.get(key) || (dni ? workerMap.get(dni) : null);
+          if (existing) {
+            const merged = {
+              ...existing,
+              supervisor: incomingW.supervisor || existing.supervisor,
+              fundo: incomingW.fundo || existing.fundo,
+              modulo: incomingW.modulo || existing.modulo,
+              grupo: incomingW.grupo || existing.grupo,
+              lider: incomingW.lider || existing.lider,
+              jabas: incomingW.jabas !== undefined ? Number(incomingW.jabas) : Number(existing.jabas || 0),
+              fecha: incomingW.fecha || existing.fecha
+            };
+            workerMap.set(key, merged);
+            if (dni) workerMap.set(dni, merged);
+          } else {
+            workerMap.set(key, incomingW);
+          }
+        });
+
+        db.trabajadores = Array.from(workerMap.values());
+        db.nominaVersion = (db.nominaVersion || 1) + 1;
+        db.nominaTimestamp = Date.now();
+        db.nominaLastUpdated = new Date().toISOString();
+      }
+
+      db.version = (db.version || 1) + 1;
+      db.lastUpdated = new Date().toISOString();
+      saveDatabase(db);
+
+      // Sincronizar a Cloud Firestore
+      await syncToCloudFirestore({
+        detalleJabas: db.detalleJabas,
+        trabajadores: db.trabajadores,
+        nominaVersion: db.nominaVersion,
+        nominaTimestamp: db.nominaTimestamp
+      });
+
+      // Notificar a clientes conectados
+      notifyClients({ type: 'sync', version: db.version, data: db });
+
+      // Subir directamente a Google Sheets ('Registro_Avance' y 'Trabajadores')
+      const targetUrl = url || DEFAULT_GSHEET_URL;
+      const sheetResult = await pushDetalleJabasToGoogleSheet(targetUrl, db.detalleJabas, db.trabajadores);
+
+      return res.json({
+        status: 'ok',
+        sheetOk: sheetResult.success,
+        sheetError: sheetResult.error,
+        message: sheetResult.success
+          ? `Avance (${mergedDetalle.length} registros) y trabajadores asignados subidos directamente a Google Sheets ('Registro_Avance' y 'Trabajadores').`
+          : `Avance guardado en base de datos central y Firestore.${sheetResult.error ? ` Aviso Google Sheet: ${sheetResult.error}` : ''}`,
+        countDetalle: mergedDetalle.length,
+        totalTrabajadores: db.trabajadores.length,
+        detalleJabas: db.detalleJabas,
+        trabajadores: db.trabajadores
+      });
+    } catch (err: any) {
+      console.error('Error en /api/replicar-avance-sheet:', err);
       res.status(500).json({ status: 'error', message: err.message });
     }
   });
@@ -1838,10 +2006,14 @@ async function startServer() {
             db.trabajadores = incoming.trabajadores;
           }
           db.nominaVersion = (db.nominaVersion || 1) + 1;
+          db.nominaTimestamp = incoming.nominaTimestamp || Date.now();
           db.nominaLastUpdated = new Date().toISOString();
         }
         if (Array.isArray(incoming.detalleJabas)) {
           db.detalleJabas = sanitizeAndDeduplicateDetalleJabas(incoming.detalleJabas);
+          if (incoming.detalleJabas.length > 0) {
+            pushDetalleJabasToGoogleSheet(incoming.gsheetUrl || undefined, db.detalleJabas, db.trabajadores).catch(() => {});
+          }
         }
         if (Array.isArray(incoming.validaciones)) {
           db.validaciones = sanitizeValidaciones(incoming.validaciones);

@@ -52,7 +52,8 @@ import {
   CheckCircle2,
   Clock,
   Zap,
-  Lock
+  Lock,
+  Unlock
 } from 'lucide-react';
 
 interface ValidacionTabProps {
@@ -91,19 +92,22 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
   // Active sub-tab: 'nueva' (Formulario 4 Pasos), 'monitor' (Verificación de Estado) o 'historial'
   const [activeSubTab, setActiveSubTab] = useState<'nueva' | 'monitor' | 'historial'>('nueva');
 
-  // Paso 1: Filtros de Validación
+  // Modo de Filtrado: Por solicitud expresa ("En la parte de validación no necesito que este filtrado"),
+  // el modo sin filtrar (mostrar nómina completa) está ACTIVO POR DEFECTO.
+  const [aplicarFiltrosCuadrilla, setAplicarFiltrosCuadrilla] = useState<boolean>(false);
+  const [verTodasLasFechas, setVerTodasLasFechas] = useState<boolean>(false);
+
+  // Paso 1: Filtros de Validación (Opcionales o Metadatos de Cuadrilla)
   const [filtroFecha, setFiltroFecha] = useState<string>(getLocalToday());
-  const [filtroSupervisor, setFiltroSupervisor] = useState<string>(
-    isSupervisor ? sessionSupervisorName : ''
-  );
+  const [filtroSupervisor, setFiltroSupervisor] = useState<string>('');
   const [filtroFundo, setFiltroFundo] = useState<string>('');
   const [filtroModulo, setFiltroModulo] = useState<string>('');
   const [filtroGrupo, setFiltroGrupo] = useState<string>('');
   const [filtroLider, setFiltroLider] = useState<string>('');
   const [showManageLeadersModal, setShowManageLeadersModal] = useState<boolean>(false);
 
-  // Filtro de Estado de Validación en Paso 2: 'pendientes' (default), 'validados', 'todos'
-  const [estadoFiltro, setEstadoFiltro] = useState<'pendientes' | 'validados' | 'todos'>('pendientes');
+  // Filtro de Estado de Validación en Paso 2: 'todos' (default para ver nómina completa sin ocultar trabajadores), 'pendientes', 'validados'
+  const [estadoFiltro, setEstadoFiltro] = useState<'pendientes' | 'validados' | 'todos'>('todos');
 
   // Normalization Helpers
   const normalizeStr = (text?: string) =>
@@ -324,21 +328,16 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     return null;
   }, [reservas, detalleJabas, trabajadores, filtroFecha, filtroSupervisor, isSupervisor, sessionSupervisorName]);
 
-  // Auto-filtrar por el nuevo módulo si filtroModulo está vacío y se detectó actividad reciente
+  // NOTA: Se desactiva la imposición automática de filtros para cumplir con la petición del usuario:
+  // "En la parte de validación no necesito que este filtrado". El usuario podrá seleccionar módulos
+  // o cuadrillas solo si explícitamente lo desea.
+  /*
   useEffect(() => {
-    if (!filtroModulo && detectedNewModuloInfo?.modulo) {
+    if (aplicarFiltrosCuadrilla && !filtroModulo && detectedNewModuloInfo?.modulo) {
       setFiltroModulo(detectedNewModuloInfo.modulo);
-      if (!filtroFundo && detectedNewModuloInfo.fundo) {
-        setFiltroFundo(detectedNewModuloInfo.fundo);
-      }
-      if (!filtroGrupo && detectedNewModuloInfo.grupo) {
-        setFiltroGrupo(detectedNewModuloInfo.grupo);
-      }
-      if (!filtroLider && detectedNewModuloInfo.lider) {
-        setFiltroLider(detectedNewModuloInfo.lider);
-      }
     }
-  }, [detectedNewModuloInfo, filtroModulo, filtroFundo, filtroGrupo, filtroLider]);
+  }, [detectedNewModuloInfo, aplicarFiltrosCuadrilla, filtroModulo]);
+  */
 
   // Dynamic modules per fundo
   const modulosList = useMemo(() => {
@@ -506,7 +505,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     return map;
   }, [validValidaciones, filtroFecha, detalleJabas]);
 
-  // Derive candidate workers based on selected filters (STRICTLY ONLY WORKERS WITH JABAS > 0)
+  // Derive candidate workers based on selected filters (or ALL workers when no filtering is required)
   const allCandidateWorkers = useMemo(() => {
     const map = new Map<
       string,
@@ -527,37 +526,41 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
       }
     >();
 
-    const normFilterMod = filtroModulo ? normalizeModulo(filtroModulo) : '';
+    const normFilterMod = (aplicarFiltrosCuadrilla && filtroModulo) ? normalizeModulo(filtroModulo) : '';
 
-    // 1. Calculate and accumulate jabas from DetalleJabas matching the filters
+    // 1. Calculate and accumulate jabas from DetalleJabas matching the filters (or all if aplicarFiltrosCuadrilla is false)
     const matchingDetalle = detalleJabas.filter((dj) => {
-      if (filtroFecha) {
+      // Date filter (unless verTodasLasFechas is active)
+      if (!verTodasLasFechas && filtroFecha && filtroFecha !== 'todas') {
         const djDate = normalizeDate(dj.fecha);
         const fDate = normalizeDate(filtroFecha);
         if (djDate && fDate && djDate !== fDate) return false;
       }
 
-      if (filtroFundo) {
-        const djFundo = normalizeStr(dj.fundo);
-        const fFundo = normalizeStr(filtroFundo);
-        if (djFundo && fFundo && djFundo !== fFundo && !djFundo.includes(fFundo) && !fFundo.includes(djFundo)) {
-          return false;
+      // Si el usuario activó explícitamente el filtrado por cuadrilla:
+      if (aplicarFiltrosCuadrilla) {
+        if (filtroFundo) {
+          const djFundo = normalizeStr(dj.fundo);
+          const fFundo = normalizeStr(filtroFundo);
+          if (djFundo && fFundo && djFundo !== fFundo && !djFundo.includes(fFundo) && !fFundo.includes(djFundo)) {
+            return false;
+          }
         }
-      }
 
-      if (normFilterMod) {
-        const djMod = normalizeModulo(dj.modulo);
-        if (djMod && djMod !== normFilterMod) return false;
-      }
+        if (normFilterMod) {
+          const djMod = normalizeModulo(dj.modulo);
+          if (djMod && djMod !== normFilterMod) return false;
+        }
 
-      if (filtroGrupo) {
-        const djGrp = normalizeGrupo(dj.grupo);
-        const fGrp = normalizeGrupo(filtroGrupo);
-        if (djGrp && fGrp && djGrp !== fGrp) return false;
-      }
+        if (filtroGrupo) {
+          const djGrp = normalizeGrupo(dj.grupo);
+          const fGrp = normalizeGrupo(filtroGrupo);
+          if (djGrp && fGrp && djGrp !== fGrp) return false;
+        }
 
-      if (filtroSupervisor) {
-        if (!isMatchingSupervisor(dj.supervisor, filtroSupervisor)) return false;
+        if (filtroSupervisor) {
+          if (!isMatchingSupervisor(dj.supervisor, filtroSupervisor)) return false;
+        }
       }
 
       return Number(dj.jabas) > 0;
@@ -582,10 +585,12 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     // 2. Also check programas.avance if any match the active filters
     if (programas && programas.length > 0) {
       programas.forEach((p) => {
-        if (filtroFecha && normalizeDate(p.fecha) !== normalizeDate(filtroFecha)) return;
-        if (filtroFundo && normalizeStr(p.fundo) !== normalizeStr(filtroFundo)) return;
-        if (normFilterMod && normalizeModulo(p.modulo) !== normFilterMod) return;
-        if (filtroSupervisor && !isMatchingSupervisor(p.supervisor, filtroSupervisor)) return;
+        if (!verTodasLasFechas && filtroFecha && normalizeDate(p.fecha) !== normalizeDate(filtroFecha)) return;
+        if (aplicarFiltrosCuadrilla) {
+          if (filtroFundo && normalizeStr(p.fundo) !== normalizeStr(filtroFundo)) return;
+          if (normFilterMod && normalizeModulo(p.modulo) !== normFilterMod) return;
+          if (filtroSupervisor && !isMatchingSupervisor(p.supervisor, filtroSupervisor)) return;
+        }
 
         const pMod = normalizeModulo(p.modulo);
         if (p.avance) {
@@ -602,7 +607,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
       });
     }
 
-    // 3. For workers in master list, attach their calculated jabas ONLY IF > 0
+    // 3. For workers in master list:
     trabajadores.forEach((t) => {
       if (!t.dni) return;
       const cleanDni = String(t.dni || '').trim();
@@ -611,21 +616,13 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
       const personModKey = `${cleanDni}__${tMod}`;
 
       // When filtering by a specific module:
-      if (normFilterMod) {
-        // If worker has a declared module and it DOES NOT match the filter:
+      if (aplicarFiltrosCuadrilla && normFilterMod) {
         if (tMod && tMod !== normFilterMod) {
-          // Does this worker have jabas registered in this module?
           const jInThisMod = jabasByDniMod[`${cleanDni}__${normFilterMod}`] || 0;
-          if (jInThisMod === 0) {
-            // Not in this module -> do NOT include!
-            return;
-          }
+          if (jInThisMod === 0) return;
         } else if (!tMod) {
-          // If worker has no module specified, only include if they have jabas in this module
           const jInThisMod = jabasByDniMod[`${cleanDni}__${normFilterMod}`] || 0;
-          if (jInThisMod === 0) {
-            return;
-          }
+          if (jInThisMod === 0) return;
         }
       }
 
@@ -634,23 +631,26 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
         ? (jabasByDniMod[`${cleanDni}__${normFilterMod}`] || 0)
         : (jabasByDniMod[personModKey] || jabasByDni[cleanDni] || 0);
 
-      // If no advance in detalleJabas, check if worker had jabas in master record matching current filter
-      if (jCount === 0 && t.jabas && t.jabas > 0) {
-        const matchesDate = !filtroFecha || !t.fecha || normalizeDate(t.fecha) === normalizeDate(filtroFecha);
-        const matchesFundo = !filtroFundo || !t.fundo || normalizeStr(t.fundo) === normalizeStr(filtroFundo);
-        const matchesModulo = !normFilterMod || (tMod && tMod === normFilterMod);
-        const matchesGrupo = !filtroGrupo || !t.grupo || normalizeGrupo(t.grupo) === normalizeGrupo(filtroGrupo);
-        const matchesSup = isMatchingSupervisor(t.supervisor, filtroSupervisor);
+      const matchesDate = verTodasLasFechas || !filtroFecha || filtroFecha === 'todas' || !t.fecha || normalizeDate(t.fecha) === normalizeDate(filtroFecha);
+      const matchesFundo = !aplicarFiltrosCuadrilla || !filtroFundo || !t.fundo || normalizeStr(t.fundo) === normalizeStr(filtroFundo);
+      const matchesModulo = !aplicarFiltrosCuadrilla || !normFilterMod || (tMod && tMod === normFilterMod);
+      const matchesGrupo = !aplicarFiltrosCuadrilla || !filtroGrupo || !t.grupo || normalizeGrupo(t.grupo) === normalizeGrupo(filtroGrupo);
+      const matchesSup = !aplicarFiltrosCuadrilla || !filtroSupervisor || isMatchingSupervisor(t.supervisor, filtroSupervisor);
 
-        if (matchesDate && matchesFundo && matchesModulo && matchesGrupo && matchesSup) {
+      // If no advance in detalleJabas, check if worker had jabas in master record
+      if (jCount === 0 && t.jabas && t.jabas > 0) {
+        if (!aplicarFiltrosCuadrilla || (matchesDate && matchesFundo && matchesModulo && matchesGrupo && matchesSup)) {
           jCount = t.jabas;
         }
       }
 
-      // STRICT CHECK: Only include workers who have jabas > 0!
-      if (jCount > 0) {
-        // Candidate key: when a module filter is active, DEDUPLICATE STRICTLY BY cleanDni
-        const candidateKey = normFilterMod ? cleanDni : `${cleanDni}__${tMod || 'gen'}`;
+      const isFilterMatch = matchesDate && matchesFundo && matchesModulo && matchesGrupo && matchesSup;
+
+      // Modo Sin Filtrar: Incluir a TODOS los trabajadores
+      // Modo Con Filtros: Incluir si tiene jabas o coincide con los filtros
+      if (!aplicarFiltrosCuadrilla || jCount > 0 || isFilterMatch) {
+        // En modo sin filtrar, deduplicar estrictamente por cleanDni para evitar repeticiones
+        const candidateKey = (!aplicarFiltrosCuadrilla || normFilterMod) ? cleanDni : `${cleanDni}__${tMod || 'gen'}`;
 
         const assignedLider =
           metaByDniMod[`${cleanDni}__${normFilterMod || tMod}`]?.lider ||
@@ -659,21 +659,17 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
           filtroLider ||
           (availableLideres.length > 0 ? availableLideres[0].nombre : 'Antony Cerron');
 
-        const vInfo = normFilterMod
-          ? alreadyValidatedMap.get(`${cleanDni}__${normFilterMod}`)
+        const vInfo = (!aplicarFiltrosCuadrilla || normFilterMod)
+          ? (alreadyValidatedMap.get(`${cleanDni}__${normFilterMod}`) || alreadyValidatedMap.get(cleanDni))
           : ((tMod && alreadyValidatedMap.get(personModKey)) || alreadyValidatedMap.get(cleanDni));
 
         if (map.has(candidateKey)) {
-          // Worker already present: keep maximum jabas and merge metadata without duplicating!
           const existing = map.get(candidateKey)!;
           if (jCount > existing.jabas) {
             existing.jabas = jCount;
           }
           if (!existing.worker.lider && assignedLider) {
             existing.worker.lider = assignedLider;
-          }
-          if (normFilterMod) {
-            existing.worker.modulo = filtroModulo;
           }
           return;
         }
@@ -682,9 +678,10 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
           worker: {
             ...t,
             dni: cleanDni,
-            modulo: normFilterMod ? filtroModulo : (t.modulo || filtroModulo),
-            grupo: t.grupo || filtroGrupo,
-            supervisor: t.supervisor || filtroSupervisor,
+            modulo: t.modulo || filtroModulo || 'M01',
+            grupo: t.grupo || filtroGrupo || 'Grupo 01',
+            supervisor: t.supervisor || filtroSupervisor || sessionSupervisorName || 'Carlos Solar',
+            fundo: t.fundo || filtroFundo || 'Arena Azul',
             lider: assignedLider
           },
           jabas: jCount,
@@ -694,16 +691,16 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
       }
     });
 
-    // 4. Also include any workers that have DetalleJabas registered under these filters even if not in master list
+    // 4. Also include any workers that have DetalleJabas registered even if not in master list
     matchingDetalle.forEach((dj) => {
       const cleanDni = String(dj.dni || '').trim();
       const djMod = normalizeModulo(dj.modulo);
-      const candidateKey = normFilterMod ? cleanDni : `${cleanDni}__${djMod}`;
+      const candidateKey = (!aplicarFiltrosCuadrilla || normFilterMod) ? cleanDni : `${cleanDni}__${djMod}`;
       if (cleanDni && !map.has(candidateKey)) {
         const jCount = jabasByDniMod[`${cleanDni}__${djMod}`] || dj.jabas;
-        if (jCount > 0) {
+        if (jCount > 0 || !aplicarFiltrosCuadrilla) {
           const syntheticWorker: Trabajador = {
-            id: `T_DET_${cleanDni}_${djMod}`,
+            id: `T_DET_${cleanDni}_${djMod || 'gen'}`,
             fecha: dj.fecha,
             dni: cleanDni,
             nombres: dj.trabajador,
@@ -715,8 +712,8 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
             tipo: 'Cosechador',
             jabas: jCount
           };
-          const vInfo = normFilterMod
-            ? alreadyValidatedMap.get(`${cleanDni}__${normFilterMod}`)
+          const vInfo = (!aplicarFiltrosCuadrilla || normFilterMod)
+            ? (alreadyValidatedMap.get(`${cleanDni}__${normFilterMod}`) || alreadyValidatedMap.get(cleanDni))
             : ((djMod && alreadyValidatedMap.get(`${cleanDni}__${djMod}`)) || alreadyValidatedMap.get(cleanDni));
           map.set(candidateKey, { 
             worker: syntheticWorker, 
@@ -729,7 +726,22 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     });
 
     return Array.from(map.values()).sort((a, b) => a.worker.nombres.localeCompare(b.worker.nombres));
-  }, [trabajadores, detalleJabas, programas, availableLideres, alreadyValidatedMap, filtroFecha, filtroSupervisor, filtroFundo, filtroModulo, filtroGrupo, filtroLider]);
+  }, [
+    trabajadores, 
+    detalleJabas, 
+    programas, 
+    availableLideres, 
+    alreadyValidatedMap, 
+    filtroFecha, 
+    filtroSupervisor, 
+    filtroFundo, 
+    filtroModulo, 
+    filtroGrupo, 
+    filtroLider, 
+    aplicarFiltrosCuadrilla, 
+    verTodasLasFechas,
+    sessionSupervisorName
+  ]);
 
   // Counts of pending vs validated candidates
   const totalCandidateCount = allCandidateWorkers.length;
@@ -1087,17 +1099,100 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-500 font-medium">
-                  Fecha seleccionada: <strong className="text-[#1b5e20]">{formatDateDDMMAAAA(filtroFecha)}</strong>
-                </span>
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <label className="text-[11px] font-semibold text-gray-600 flex items-center gap-1 cursor-pointer bg-gray-50 hover:bg-gray-100 px-2 py-0.5 rounded border border-gray-200">
+                  <input
+                    type="checkbox"
+                    checked={verTodasLasFechas}
+                    onChange={(e) => setVerTodasLasFechas(e.target.checked)}
+                    className="rounded text-[#2e7d32] focus:ring-[#2e7d32]"
+                  />
+                  <span>Ver todas las fechas</span>
+                </label>
+                {!verTodasLasFechas && (
+                  <>
+                    <span className="text-xs text-gray-500 font-medium">
+                      Fecha: <strong className="text-[#1b5e20]">{formatDateDDMMAAAA(filtroFecha)}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setFiltroFecha(getLocalToday())}
+                      className="text-[11px] text-[#2e7d32] bg-[#e8f5e9] hover:bg-[#c8e6c9] px-2 py-0.5 rounded-md font-semibold cursor-pointer"
+                    >
+                      Hoy
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Banner de Modo de Validación (Sin Filtrar vs Filtrado por Cuadrilla) */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-200 rounded-xl mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${!aplicarFiltrosCuadrilla ? 'bg-[#2e7d32] text-white shadow-xs' : 'bg-gray-200 text-gray-700'}`}>
+                  {!aplicarFiltrosCuadrilla ? <Unlock className="w-4 h-4" /> : <Filter className="w-4 h-4" />}
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-gray-900 flex items-center gap-2 flex-wrap">
+                    <span>Modo de Validación:</span>
+                    {!aplicarFiltrosCuadrilla ? (
+                      <span className="text-[#1b5e20] bg-emerald-100 px-2 py-0.5 rounded-full font-black border border-emerald-300 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#2e7d32] animate-pulse"></span>
+                        <span>🔓 Sin Filtrar (Nómina Completa de Trabajadores)</span>
+                      </span>
+                    ) : (
+                      <span className="text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full font-bold border border-amber-300">
+                        🔍 Filtrado por Cuadrilla Específica
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-gray-600 mt-0.5">
+                    {!aplicarFiltrosCuadrilla 
+                      ? 'Todos los trabajadores están visibles en la lista inferior para validar libremente sin bloqueos de fundo, módulo, grupo o supervisor.'
+                      : 'La lista de trabajadores está restringida estrictamente a los criterios seleccionados en las casillas inferiores.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
                 <button
                   type="button"
-                  onClick={() => setFiltroFecha(getLocalToday())}
-                  className="text-[11px] text-[#2e7d32] bg-[#e8f5e9] hover:bg-[#c8e6c9] px-2 py-0.5 rounded-md font-semibold cursor-pointer"
+                  onClick={() => setAplicarFiltrosCuadrilla(!aplicarFiltrosCuadrilla)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs flex items-center gap-1.5 ${
+                    !aplicarFiltrosCuadrilla
+                      ? 'bg-[#2e7d32] text-white hover:bg-[#1b5e20]'
+                      : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100'
+                  }`}
+                  title={!aplicarFiltrosCuadrilla ? 'Modo sin restricciones activo' : 'Hacer clic para ver todos los trabajadores sin filtros'}
                 >
-                  Hoy
+                  {!aplicarFiltrosCuadrilla ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Modo Sin Filtrar Activo</span>
+                    </>
+                  ) : (
+                    <>
+                      <Unlock className="w-3.5 h-3.5" />
+                      <span>Quitar Filtros (Ver Todos)</span>
+                    </>
+                  )}
                 </button>
+                {aplicarFiltrosCuadrilla && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFiltroSupervisor('');
+                      setFiltroFundo('');
+                      setFiltroModulo('');
+                      setFiltroGrupo('');
+                      setFiltroLider('');
+                      setAplicarFiltrosCuadrilla(false);
+                    }}
+                    className="px-2.5 py-1.5 text-xs font-semibold text-gray-600 bg-white hover:bg-gray-100 border border-gray-300 rounded-lg cursor-pointer"
+                  >
+                    Restablecer
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1268,13 +1363,26 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                     Paso 2 y 3: Lista de Trabajadores y Validación Individual
                   </h2>
                   <p className="text-[11px] text-[#757575]">
-                    Verifica las jabas de cada personal. Los ya validados se ocultan automáticamente para evitar duplicados.
+                    Verifica las jabas de cada trabajador. Puedes validar individualmente o de manera masiva.
                   </p>
                 </div>
               </div>
 
-              {/* Filtro de Estado: Pendientes (Default) vs Validados vs Todos */}
+              {/* Filtro de Estado: Todos (Default) vs Pendientes vs Validados */}
               <div className="flex bg-[#f5f5f5] p-1 rounded-xl border border-gray-200 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setEstadoFiltro('todos')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    estadoFiltro === 'todos'
+                      ? 'bg-gray-800 text-white shadow-2xs'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                  }`}
+                  title="Mostrar todo el personal (pendientes y validados)"
+                >
+                  Todos ({totalCandidateCount})
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setEstadoFiltro('pendientes')}
@@ -1301,19 +1409,6 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                 >
                   <ShieldCheck className="w-3.5 h-3.5" />
                   <span>Ya Validados ({validatedCount})</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setEstadoFiltro('todos')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    estadoFiltro === 'todos'
-                      ? 'bg-gray-800 text-white shadow-2xs'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                  title="Mostrar todo el personal (pendientes y validados)"
-                >
-                  Todos ({totalCandidateCount})
                 </button>
               </div>
             </div>

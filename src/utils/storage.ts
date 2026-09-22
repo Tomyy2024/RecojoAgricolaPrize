@@ -47,8 +47,39 @@ const KEYS = {
   TRABAJADORES_OFFLINE_CACHE: 'recojoFrutosTrabajadoresOfflineCache',
   FECHA_ULTIMA_DEPURACION: 'recojoFrutosFechaUltimaDepuracion',
   REAL_NOMINA_ACTIVE: 'recojoFrutosRealNominaActive',
-  NOMINA_VERSION: 'recojoFrutosNominaVersion'
+  NOMINA_VERSION: 'recojoFrutosNominaVersion',
+  NOMINA_TIMESTAMP: 'recojoFrutosNominaTimestamp'
 };
+
+export function getNominaVersion(): number {
+  try {
+    const v = localStorage.getItem(KEYS.NOMINA_VERSION);
+    return v ? parseInt(v, 10) || 1 : 1;
+  } catch {
+    return 1;
+  }
+}
+
+export function setNominaVersion(v: number): void {
+  try {
+    localStorage.setItem(KEYS.NOMINA_VERSION, String(v));
+  } catch {}
+}
+
+export function getNominaTimestamp(): number {
+  try {
+    const t = localStorage.getItem(KEYS.NOMINA_TIMESTAMP);
+    return t ? parseInt(t, 10) || 0 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function setNominaTimestamp(ts: number): void {
+  try {
+    localStorage.setItem(KEYS.NOMINA_TIMESTAMP, String(ts));
+  } catch {}
+}
 
 // Date helpers
 export function getLocalToday(): string {
@@ -556,7 +587,7 @@ export function getTrabajadores(): Trabajador[] {
   }
 }
 
-export function saveTrabajadores(trabajadores: Trabajador[]) {
+export function saveTrabajadores(trabajadores: Trabajador[], version?: number, timestamp?: number) {
   const seen = new Set<string>();
   const unique: Trabajador[] = [];
   (Array.isArray(trabajadores) ? trabajadores : []).forEach((t, i) => {
@@ -577,6 +608,12 @@ export function saveTrabajadores(trabajadores: Trabajador[]) {
     }
   });
   localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(unique));
+  if (version !== undefined) {
+    setNominaVersion(version);
+  }
+  if (timestamp !== undefined) {
+    setNominaTimestamp(timestamp);
+  }
   // Marcar que la nómina real está activa en el dispositivo
   if (unique.length > 0) {
     try {
@@ -1794,5 +1831,142 @@ export async function replicarTrabajadoresAlSheet(
     message: `Trabajadores guardados en el aplicativo (${trabajadores.length}). No hay URL de Google Sheets configurada.`,
     sheetOk: false,
     count: trabajadores.length
+  };
+}
+
+/**
+ * Replicar el avance de jabas y los trabajadores asignados hacia las hojas 'Registro_Avance' y 'Trabajadores' de Google Sheets.
+ * Envía la petición tanto al backend del servidor como fallback directo al Web App de Google Sheets.
+ */
+export async function replicarAvanceAlSheet(
+  detalleJabas: DetalleJaba[],
+  trabajadores?: Trabajador[],
+  customUrl?: string
+): Promise<{
+  success: boolean;
+  sheetOk: boolean;
+  message: string;
+  countJabas: number;
+  countTrabajadores: number;
+  error?: string;
+}> {
+  const effectiveUrl = customUrl || getGsheetUrl();
+  const countJabas = detalleJabas.reduce((sum, d) => sum + (Number(d.jabas) || 0), 0);
+  const countTrabajadores = trabajadores?.length || 0;
+
+  // 1. Intentar primero a través del endpoint backend del servidor central (resuelve CORS y maneja 302 redirects)
+  try {
+    const serverRes = await fetch('/api/replicar-avance-sheet', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        detalleJabas,
+        trabajadores,
+        url: effectiveUrl
+      })
+    });
+
+    if (serverRes.ok) {
+      const sJson = await serverRes.json();
+      if (sJson && sJson.status === 'ok') {
+        return {
+          success: true,
+          sheetOk: Boolean(sJson.sheetOk !== false),
+          message: sJson.message || `Avance (${detalleJabas.length} registros) y trabajadores asignados replicados al Google Sheet exitosamente.`,
+          countJabas,
+          countTrabajadores,
+          error: sJson.sheetError
+        };
+      }
+    }
+  } catch (backendErr) {
+    console.warn('Backend endpoint no disponible para réplica de avance, intentando conexión directa con Google Sheets...', backendErr);
+  }
+
+  // 2. Fallback de subida directa desde el cliente al Web App de Google Sheets
+  if (effectiveUrl) {
+    try {
+      const payload: any = {
+        accion: 'sync',
+        data: {
+          detalleJabas: detalleJabas.map((d) => ({
+            id: d.id || '',
+            fecha: d.fecha || '',
+            timestamp: d.timestamp || new Date().toISOString(),
+            supervisor: d.supervisor || '',
+            fundo: d.fundo || '',
+            modulo: d.modulo || '',
+            grupo: d.grupo || '',
+            lider: d.lider || '',
+            dni: d.dni || '',
+            trabajador: d.trabajador || '',
+            jabas: Number(d.jabas) || 0
+          }))
+        }
+      };
+
+      if (Array.isArray(trabajadores) && trabajadores.length > 0) {
+        payload.data.trabajadores = trabajadores.map((t) => ({
+          dni: t.dni || '',
+          nombres: t.nombres || '',
+          fundo: t.fundo || '',
+          modulo: t.modulo || '',
+          grupo: t.grupo || '',
+          supervisor: t.supervisor || '',
+          lider: t.lider || '',
+          tipo: t.tipo || 'Cosechador',
+          jabas: Number(t.jabas) || 0
+        }));
+        payload.data.asignaciones = trabajadores.map((t) => ({
+          dni: t.dni || '',
+          nombres: t.nombres || '',
+          grupo: t.grupo || '',
+          lider: t.lider || '',
+          fecha: t.fecha || getLocalToday()
+        }));
+      }
+
+      const directRes = await fetch(effectiveUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+
+      const responseText = await directRes.text().catch(() => '');
+      let responseJson: any = null;
+      try {
+        responseJson = JSON.parse(responseText);
+      } catch {}
+
+      const isOk = directRes.ok || (responseJson && responseJson.status === 'ok');
+      return {
+        success: true,
+        sheetOk: isOk,
+        message: isOk
+          ? `Avance (${detalleJabas.length} registros) subido directamente a Google Sheets ('Registro_Avance' y 'Trabajadores').`
+          : `Avance guardado localmente. Aviso Google Sheet: ${responseJson?.message || responseText.slice(0, 100) || 'Verificar conexión'}`,
+        countJabas,
+        countTrabajadores,
+        error: isOk ? undefined : (responseJson?.message || responseText.slice(0, 100))
+      };
+    } catch (directErr: any) {
+      console.error('Error en subida directa de avance a Google Sheets:', directErr);
+      return {
+        success: true,
+        sheetOk: false,
+        message: `Avance guardado en el aplicativo, pero hubo un aviso al contactar Google Sheets.`,
+        countJabas,
+        countTrabajadores,
+        error: directErr?.message || 'Error de conexión con Google Sheets'
+      };
+    }
+  }
+
+  return {
+    success: true,
+    sheetOk: false,
+    message: 'Avance guardado en el aplicativo. No hay URL de Google Sheets configurada.',
+    countJabas,
+    countTrabajadores
   };
 }

@@ -70,6 +70,7 @@ import {
   Unlock,
   FileSpreadsheet,
   UploadCloud,
+  Loader2,
   Download,
   RefreshCw,
   FileText,
@@ -109,6 +110,11 @@ interface TrabajadoresTabProps {
   onDeleteSupervisor?: (supervisorName: string) => void;
   onSaveGrupo?: (grupo: string) => void;
   onSaveAvance?: (avanceMap: Record<string, number>, detalleList: DetalleJaba[]) => void;
+  onReplicarAvanceSheet?: (
+    detalleList?: DetalleJaba[],
+    workersList?: Trabajador[],
+    customUrl?: string
+  ) => Promise<{ success: boolean; sheetOk: boolean; message: string; countJabas: number; countTrabajadores: number; error?: string }>;
   detalleJabas?: DetalleJaba[];
   onToast: (msg: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
   offlineNomina?: boolean;
@@ -161,6 +167,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   onDeleteSupervisor,
   onSaveGrupo,
   onSaveAvance,
+  onReplicarAvanceSheet,
   detalleJabas = [],
   onToast,
   offlineNomina = true,
@@ -191,7 +198,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const [reservaModalSupervisorFilter, setReservaModalSupervisorFilter] = useState<string>('todos');
   const [reservaModalDateFilter, setReservaModalDateFilter] = useState<'hoy' | 'todas'>('hoy');
   const [reservaModalSearch, setReservaModalSearch] = useState<string>('');
-  const [vistaAsignacion, setVistaAsignacion] = useState<'pendientes' | 'asignados' | 'con_jabas' | 'todos' | 'sin_jabas'>('pendientes');
+  const [vistaAsignacion, setVistaAsignacion] = useState<'pendientes' | 'asignados' | 'con_jabas' | 'todos' | 'sin_jabas'>(() => {
+    return session?.rol === 'Trabajador' ? 'todos' : 'pendientes';
+  });
 
   // Role and supervisor checking
   const isAdmin = session?.rol === 'Administrador';
@@ -237,6 +246,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   // Avance values: { [dni]: jabasCount }
   const [avanceValues, setAvanceValues] = useState<Record<string, number>>({});
   const [avanceInputStrings, setAvanceInputStrings] = useState<Record<string, string>>({});
+  const [isSavingAvanceWithSheet, setIsSavingAvanceWithSheet] = useState(false);
+  const [lastAvanceSheetSync, setLastAvanceSheetSync] = useState<{ time: string; countJabas: number; countWorkers: number } | null>(null);
 
   // Supervisor registration state
   const [showSupervisorForm, setShowSupervisorForm] = useState(false);
@@ -3171,7 +3182,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     setStep(3);
   };
 
-  const handleSaveAvanceFinal = () => {
+  const handleSaveAvanceFinal = async () => {
     const fechaAvance = fechaPersonal || getLocalToday();
     const nowIso = getLocalISO();
     const detalleList: DetalleJaba[] = [];
@@ -3216,9 +3227,14 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       }
     });
 
-    onSaveAvance(avanceValues, detalleList);
+    setIsSavingAvanceWithSheet(true);
+
+    if (onSaveAvance) {
+      onSaveAvance(avanceValues, detalleList);
+    }
 
     // Actualizar inmediatamente en la nómina local de trabajadores respetando el módulo de cada registro
+    let updatedWorkersList = trabajadores;
     if (onUpdateTrabajadores) {
       const savedDniModMap = new Map<string, DetalleJaba>();
       detalleList.forEach((d) => {
@@ -3231,7 +3247,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         if (raw && !savedDniModMap.has(raw)) savedDniModMap.set(raw, d);
       });
 
-      const updated = trabajadores.map((t) => {
+      updatedWorkersList = trabajadores.map((t) => {
         const norm = normalizeDni(t.dni);
         const raw = String(t.dni || '').trim();
         const tMod = normalizeModulo(t.modulo);
@@ -3255,7 +3271,27 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         }
         return t;
       });
-      onUpdateTrabajadores(updated);
+      onUpdateTrabajadores(updatedWorkersList);
+    }
+
+    // Replicar directamente a Google Sheets ('Registro_Avance' y 'Trabajadores')
+    if (onReplicarAvanceSheet) {
+      try {
+        const sheetRes = await onReplicarAvanceSheet(detalleList, updatedWorkersList);
+        if (sheetRes && sheetRes.sheetOk) {
+          setLastAvanceSheetSync({
+            time: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            countJabas: totalJabasAvance,
+            countWorkers: detalleList.length
+          });
+        }
+      } catch (sheetErr) {
+        console.warn('Error en réplica a Google Sheets:', sheetErr);
+      } finally {
+        setIsSavingAvanceWithSheet(false);
+      }
+    } else {
+      setIsSavingAvanceWithSheet(false);
     }
 
     // Actualizar reservas del día: marcar como completada la reserva que coincida con fecha y módulo
@@ -4180,73 +4216,98 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               </div>
 
               {/* Fila 2: Filtro por Fecha + Instructivo + Barra de Estado Integrada (Solo Pendientes, Ya Asignados, Con Jabas, Ver Todos) + Acciones Centralizadas */}
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2 pt-2 border-t border-[#d0ded0]/80">
-                {/* Toggle para filtrar nómina de trabajadores por fecha */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => setFiltrarTrabajadoresPorFecha((prev) => !prev)}
-                    className={`px-2.5 py-1.5 text-xs font-bold rounded-lg border flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-2xs ${
-                      filtrarTrabajadoresPorFecha
-                        ? 'bg-emerald-700 text-white border-emerald-800'
-                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                    }`}
-                    title={filtrarTrabajadoresPorFecha ? 'Click para mostrar trabajadores de todas las fechas' : 'Click para mostrar solo trabajadores de la fecha seleccionada'}
-                  >
-                    {filtrarTrabajadoresPorFecha ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-200" />
-                        <span>Filtrar por fecha ({countEnFechaActiva} pers.)</span>
-                      </>
-                    ) : (
-                      <>
-                        <Layers className="w-3.5 h-3.5 text-gray-500" />
-                        <span>Ver todas las fechas ({fullTrabajadores.length} pers.)</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {/* Acceso Rápido y Centralizado: Instructivo + Estados de Personal + Acciones de Limpieza */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {onOpenInstructivo && (
+              <div className="flex flex-col gap-2 pt-2 border-t border-[#d0ded0]/80">
+                {/* Controles Superiores: Toggle de Fecha + Instructivo + Botones de Limpieza */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <button
                       type="button"
-                      onClick={onOpenInstructivo}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-gray-950 font-extrabold text-xs shadow-xs cursor-pointer transition-all active:scale-95 border border-amber-500/50"
-                      title="Abrir instructivo de uso paso a paso para supervisores"
+                      onClick={() => setFiltrarTrabajadoresPorFecha((prev) => !prev)}
+                      className={`px-2.5 py-1.5 text-xs font-bold rounded-lg border flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-2xs ${
+                        filtrarTrabajadoresPorFecha
+                          ? 'bg-emerald-700 text-white border-emerald-800'
+                          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                      }`}
+                      title={filtrarTrabajadoresPorFecha ? 'Click para mostrar trabajadores de todas las fechas' : 'Click para mostrar solo trabajadores de la fecha seleccionada'}
                     >
-                      <BookOpen className="w-3.5 h-3.5 text-emerald-950" />
-                      <span>Instructivo</span>
+                      {filtrarTrabajadoresPorFecha ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-200" />
+                          <span>Filtrar por fecha ({countEnFechaActiva} pers.)</span>
+                        </>
+                      ) : (
+                        <>
+                          <Layers className="w-3.5 h-3.5 text-gray-500" />
+                          <span>Ver todas las fechas ({fullTrabajadores.length} pers.)</span>
+                        </>
+                      )}
                     </button>
-                  )}
+                  </div>
 
-                  <div className="hidden md:block h-4 w-px bg-[#c0d5c0] mx-0.5" />
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {onOpenInstructivo && (
+                      <button
+                        type="button"
+                        onClick={onOpenInstructivo}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-gray-950 font-extrabold text-xs shadow-xs cursor-pointer transition-all active:scale-95 border border-amber-500/50"
+                        title="Abrir instructivo de uso paso a paso para supervisores"
+                      >
+                        <BookOpen className="w-3.5 h-3.5 text-emerald-950" />
+                        <span>Instructivo</span>
+                      </button>
+                    )}
 
-                  {/* Estado: Filtros de Personal */}
-                  <span className="text-gray-600 text-[11px] font-bold whitespace-nowrap flex items-center gap-1">
+                    {isAdmin && countConJabasTotal > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleOpenEliminarMasivoConJabasModal}
+                        className="px-2.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white shadow-xs cursor-pointer transition-all active:scale-95 whitespace-nowrap"
+                        title="Eliminar personal con jabas asignadas o limpiar sus registros de avance (Solo Administrador)"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-white" />
+                        <span>Eliminar con Jabas ({countConJabasTotal})</span>
+                      </button>
+                    )}
+
+                    {countAsignados > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleDesasignarTodos}
+                        className="px-2.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 cursor-pointer transition-all active:scale-95 whitespace-nowrap"
+                        title="Quitar grupo y líder a todos los asignados para reiniciar la nómina a 'Sin Grupo ni Líder'"
+                      >
+                        <RotateCcw className="w-3 h-3 text-red-600" />
+                        <span>Desasignar Todos ({countAsignados})</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Barra Principal de Estados de Personal: Solo Pendientes, Ya Asignados, Con Jabas, Ver Todos */}
+                <div className="flex items-center gap-2 flex-wrap p-2 bg-[#f0f7f0] rounded-xl border border-[#c8e6c9]">
+                  <span className="text-gray-700 text-xs font-bold whitespace-nowrap flex items-center gap-1 px-1">
                     <Filter className="w-3.5 h-3.5 text-[#2e7d32]" />
                     <span>Estado:</span>
                   </span>
 
-                  {/* 1. Solo Pendientes por Asignar (DEFAULT) */}
+                  {/* 1. Solo Pendientes */}
                   <button
                     type="button"
                     onClick={() => setVistaAsignacion('pendientes')}
-                    className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                    className={`px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs ${
                       vistaAsignacion === 'pendientes' || (vistaAsignacion as string) === 'sin_jabas'
-                        ? 'bg-[#2e7d32] text-white shadow-xs ring-1 ring-[#1b5e20]'
-                        : 'bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100'
+                        ? 'bg-[#2e7d32] text-white shadow-sm ring-2 ring-[#1b5e20]'
+                        : 'bg-white text-emerald-900 border border-emerald-200 hover:bg-emerald-50'
                     }`}
-                    title="Oculta automáticamente a los trabajadores asignados (con grupo, líder o jabas hoy) y muestra solo los pendientes"
+                    title="Muestra solo los trabajadores pendientes por asignar a cuadrilla"
                   >
                     <Clock className="w-3.5 h-3.5" />
                     <span>Solo Pendientes</span>
                     <span
-                      className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
+                      className={`px-2 py-0.5 text-[11px] rounded-full font-extrabold ${
                         vistaAsignacion === 'pendientes' || (vistaAsignacion as string) === 'sin_jabas'
                           ? 'bg-[#1b5e20] text-white'
-                          : 'bg-emerald-200 text-emerald-900'
+                          : 'bg-emerald-100 text-emerald-900'
                       }`}
                     >
                       {countPendientes}
@@ -4257,18 +4318,18 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   <button
                     type="button"
                     onClick={() => setVistaAsignacion('asignados')}
-                    className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                    className={`px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs ${
                       vistaAsignacion === 'asignados'
-                        ? 'bg-purple-600 text-white shadow-xs ring-1 ring-purple-700'
-                        : 'bg-purple-50 text-purple-900 border border-purple-200 hover:bg-purple-100'
+                        ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-700'
+                        : 'bg-white text-purple-900 border border-purple-200 hover:bg-purple-50'
                     }`}
-                    title="Mostrar los trabajadores que ya cuentan con Grupo o Líder asignado en la cuadrilla"
+                    title="Muestra los trabajadores que ya tienen Grupo o Líder asignado"
                   >
                     <Users className="w-3.5 h-3.5" />
                     <span>Ya Asignados</span>
                     <span
-                      className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
-                        vistaAsignacion === 'asignados' ? 'bg-purple-800 text-white' : 'bg-purple-200 text-purple-900'
+                      className={`px-2 py-0.5 text-[11px] rounded-full font-extrabold ${
+                        vistaAsignacion === 'asignados' ? 'bg-purple-800 text-white' : 'bg-purple-100 text-purple-900'
                       }`}
                     >
                       {countAsignados}
@@ -4279,18 +4340,18 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   <button
                     type="button"
                     onClick={() => setVistaAsignacion('con_jabas')}
-                    className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                    className={`px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs ${
                       vistaAsignacion === 'con_jabas'
-                        ? 'bg-amber-600 text-white shadow-xs ring-1 ring-amber-700'
-                        : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
+                        ? 'bg-amber-600 text-white shadow-sm ring-2 ring-amber-700'
+                        : 'bg-white text-amber-900 border border-amber-200 hover:bg-amber-50'
                     }`}
-                    title="Mostrar los trabajadores que tienen avance registrado en la fecha consultada"
+                    title="Muestra los trabajadores que tienen avance de jabas registrado"
                   >
                     <Package className="w-3.5 h-3.5" />
                     <span>Con Jabas</span>
                     <span
-                      className={`px-2 py-0.5 text-[10px] rounded-full font-extrabold ${
-                        vistaAsignacion === 'con_jabas' ? 'bg-amber-800 text-white' : 'bg-amber-200 text-amber-900'
+                      className={`px-2 py-0.5 text-[11px] rounded-full font-extrabold ${
+                        vistaAsignacion === 'con_jabas' ? 'bg-amber-800 text-white' : 'bg-amber-100 text-amber-900'
                       }`}
                     >
                       {countConJabasTotal} pers. · {jabasTotalDisplay} jabas
@@ -4301,48 +4362,23 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                   <button
                     type="button"
                     onClick={() => setVistaAsignacion('todos')}
-                    className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                    className={`px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs ${
                       vistaAsignacion === 'todos'
-                        ? 'bg-[#1b5e20] text-white shadow-xs ring-1 ring-[#1b5e20]'
-                        : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                        ? 'bg-[#1b5e20] text-white shadow-sm ring-2 ring-[#1b5e20]'
+                        : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100'
                     }`}
-                    title="Mostrar la nómina completa sin ocultar a ningún trabajador"
+                    title="Muestra toda la nómina completa sin ningún filtro"
                   >
                     <ListFilter className="w-3.5 h-3.5" />
                     <span>Ver Todos</span>
                     <span
-                      className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
+                      className={`px-2 py-0.5 text-[11px] rounded-full font-extrabold ${
                         vistaAsignacion === 'todos' ? 'bg-emerald-800 text-white' : 'bg-gray-100 text-gray-700'
                       }`}
                     >
                       {countTodos}
                     </span>
                   </button>
-
-                  {/* Acciones de Limpieza y Desasignación integradas en el mismo bloque */}
-                  {isAdmin && countConJabasTotal > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleOpenEliminarMasivoConJabasModal}
-                      className="px-2.5 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white shadow-xs cursor-pointer transition-all active:scale-95 whitespace-nowrap"
-                      title="Eliminar personal con jabas asignadas o limpiar sus registros de avance (Solo Administrador)"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-white" />
-                      <span>Eliminar con Jabas ({countConJabasTotal})</span>
-                    </button>
-                  )}
-
-                  {countAsignados > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleDesasignarTodos}
-                      className="px-2.5 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 cursor-pointer transition-all active:scale-95 whitespace-nowrap"
-                      title="Quitar grupo y líder a todos los asignados para reiniciar la nómina a 'Sin Grupo ni Líder'"
-                    >
-                      <RotateCcw className="w-3 h-3 text-red-600" />
-                      <span>Desasignar Todos ({countAsignados})</span>
-                    </button>
-                  )}
                 </div>
               </div>
 
@@ -5038,6 +5074,67 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             </div>
           </div>
 
+          {/* Banner de Sincronización Directa de Jabas y Trabajadores con Google Sheets */}
+          <div className="bg-gradient-to-r from-[#e8f5e9] to-[#f1f8e9] p-3.5 rounded-2xl border border-[#a5d6a7] shadow-2xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#2e7d32] text-white flex items-center justify-center shrink-0 shadow-xs">
+                <FileSpreadsheet className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-extrabold text-xs sm:text-sm text-[#1b5e20]">
+                    Sincronización Directa con Google Sheets
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#c8e6c9] text-[#1b5e20] border border-[#a5d6a7] flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#2e7d32] animate-pulse"></span>
+                    <span>Hojas 'Registro_Avance' y 'Trabajadores'</span>
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#33691e] mt-0.5">
+                  Cada avance guardado sube de inmediato las jabas y el personal asignado (DNI, Nombres, Supervisor, Fundo, Módulo, Grupo y Líder) al Google Sheet.
+                </p>
+                {lastAvanceSheetSync && (
+                  <div className="text-[10px] text-[#2e7d32] font-semibold mt-0.5 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-[#2e7d32]" />
+                    <span>Última subida exitosa: {lastAvanceSheetSync.time} ({lastAvanceSheetSync.countJabas} jabas, {lastAvanceSheetSync.countWorkers} trabajadores)</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+              <div className="text-right px-3 py-1.5 bg-white/90 rounded-xl border border-[#c8e6c9]">
+                <div className="text-[10px] font-bold text-gray-500 uppercase">Avance Total</div>
+                <div className="text-base font-black text-[#1b5e20] leading-none mt-0.5">
+                  {totalJabasAvance} <span className="text-[11px] font-semibold text-gray-600">jabas</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={totalJabasAvance === 0 || isSavingAvanceWithSheet}
+                onClick={handleSaveAvanceFinal}
+                className={`py-2 px-3.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all ${
+                  totalJabasAvance === 0 || isSavingAvanceWithSheet
+                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'bg-[#ff8f00] hover:bg-[#e65100] text-white cursor-pointer active:scale-95'
+                }`}
+                title="Guardar y subir directo a las hojas de Google Sheets"
+              >
+                {isSavingAvanceWithSheet ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Subiendo...</span>
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud className="w-3.5 h-3.5" />
+                    <span>Subir al Sheet Ahora</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
           {/* Barra de Búsqueda y Escáner en Paso 2 */}
           <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2 bg-[#fcf9f8] p-3 rounded-xl border border-[#e0e0e0]">
             <div className="relative flex-1">
@@ -5222,7 +5319,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
           </div>
 
           {/* Botones de Navegación */}
-          <div className="flex gap-3 pt-4 border-t border-[#e0e0e0]">
+          <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-[#e0e0e0]">
             <button
               type="button"
               onClick={() => setStep(1)}
@@ -5234,10 +5331,32 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             <button
               type="button"
               onClick={handleConfirmAvance}
-              className="flex-2 bg-[#2e7d32] hover:bg-[#1b5e20] text-white py-3 rounded-xl font-bold text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+              className="flex-1 bg-white hover:bg-[#f1f8e9] text-[#1b5e20] border-2 border-[#2e7d32] py-3 rounded-xl font-bold text-xs sm:text-sm shadow-2xs flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
             >
               <Check className="w-4 h-4" />
-              <span>Confirmar Avance ({totalJabasAvance} jabas)</span>
+              <span>Ver Resumen (Paso 3)</span>
+            </button>
+            <button
+              type="button"
+              disabled={totalJabasAvance === 0 || isSavingAvanceWithSheet}
+              onClick={handleSaveAvanceFinal}
+              className={`flex-2 py-3 rounded-xl font-bold text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 transition-all ${
+                totalJabasAvance === 0 || isSavingAvanceWithSheet
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : 'bg-[#ff8f00] hover:bg-[#e65100] text-white cursor-pointer active:scale-[0.99]'
+              }`}
+            >
+              {isSavingAvanceWithSheet ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Subiendo directo a Google Sheets...</span>
+                </>
+              ) : (
+                <>
+                  <UploadCloud className="w-4 h-4" />
+                  <span>💾 Guardar y Subir Directo al Sheet ({totalJabasAvance} jabas)</span>
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -5423,11 +5542,25 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             </button>
             <button
               type="button"
+              disabled={isSavingAvanceWithSheet}
               onClick={handleSaveAvanceFinal}
-              className="flex-2 bg-[#ff8f00] hover:bg-[#e65100] text-white py-3 rounded-xl font-bold text-xs sm:text-sm shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+              className={`flex-2 py-3 rounded-xl font-bold text-xs sm:text-sm shadow-lg flex items-center justify-center gap-2 transition-all ${
+                isSavingAvanceWithSheet
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : 'bg-[#ff8f00] hover:bg-[#e65100] text-white cursor-pointer active:scale-[0.99]'
+              }`}
             >
-              <Save className="w-4 h-4" />
-              <span>💾 Guardar Avance en el Sistema</span>
+              {isSavingAvanceWithSheet ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Subiendo directo a Google Sheets ('Registro_Avance' y 'Trabajadores')...</span>
+                </>
+              ) : (
+                <>
+                  <UploadCloud className="w-4 h-4" />
+                  <span>💾 Guardar y Subir Directo a Google Sheets</span>
+                </>
+              )}
             </button>
           </div>
         </div>

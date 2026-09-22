@@ -136,6 +136,8 @@ export interface DetalleJaba {
   supervisor: string;
   grupo?: string;
   lider?: string;
+  tipo?: string;
+  validado?: boolean;
   timestamp?: string;
 }
 

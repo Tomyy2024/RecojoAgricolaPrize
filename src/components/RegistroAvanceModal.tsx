@@ -2,10 +2,11 @@ import React, { useState, useMemo } from 'react';
 import { 
   X, Trash2, Search, Filter, RefreshCw, Download, 
   AlertTriangle, Check, Layers, User, Calendar, 
-  CheckSquare, Square, FileSpreadsheet, ShieldAlert
+  CheckSquare, Square, FileSpreadsheet, ShieldAlert,
+  UploadCloud, Loader2
 } from 'lucide-react';
 import { DetalleJaba, UserRole } from '../types';
-import { deleteDetalleJabaFromStorage, deleteDetalleJabasFromStorage, saveDetalleJabas, getGsheetUrl } from '../utils/storage';
+import { deleteDetalleJabaFromStorage, deleteDetalleJabasFromStorage, saveDetalleJabas, getGsheetUrl, replicarAvanceAlSheet } from '../utils/storage';
 
 interface RegistroAvanceModalProps {
   isOpen: boolean;
@@ -33,6 +34,7 @@ export const RegistroAvanceModal: React.FC<RegistroAvanceModalProps> = ({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDepurando, setIsDepurando] = useState(false);
+  const [isUploadingSheet, setIsUploadingSheet] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
 
@@ -235,6 +237,27 @@ export const RegistroAvanceModal: React.FC<RegistroAvanceModalProps> = ({
     }
   };
 
+  // Replicar registros de avance directo a Google Sheets
+  const handleSubirSheet = async () => {
+    if (detalleJabas.length === 0) {
+      if (onNotify) onNotify('No hay registros de avance para sincronizar.', 'warning');
+      return;
+    }
+    setIsUploadingSheet(true);
+    try {
+      const res = await replicarAvanceAlSheet(detalleJabas);
+      if (res.sheetOk) {
+        if (onNotify) onNotify(`✅ Sincronización exitosa: ${detalleJabas.length} registros y ${res.countJabas} jabas actualizados en Google Sheets ('Registro_Avance').`, 'success');
+      } else {
+        if (onNotify) onNotify(`⚠️ Registros listos en sistema. Aviso Google Sheet: ${res.error || 'Verificar conexión'}`, 'warning');
+      }
+    } catch (err: any) {
+      if (onNotify) onNotify(`Error al conectar con Google Sheets: ${err?.message || err}`, 'error');
+    } finally {
+      setIsUploadingSheet(false);
+    }
+  };
+
   // Export to CSV
   const handleExportCSV = () => {
     const headers = ['ID', 'Fecha', 'Hora_Registro', 'Supervisor', 'Fundo', 'Modulo', 'Grupo', 'Lider', 'DNI', 'Trabajador', 'Jabas'];
@@ -400,6 +423,26 @@ export const RegistroAvanceModal: React.FC<RegistroAvanceModalProps> = ({
                 )}
               </>
             )}
+
+            {/* Sincronizar directo con Google Sheets */}
+            <button
+              onClick={handleSubirSheet}
+              disabled={isUploadingSheet || detalleJabas.length === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium text-xs shadow-sm transition-colors disabled:opacity-50"
+              title="Sube y actualiza todos los registros de avance directo a Google Sheets ('Registro_Avance')"
+            >
+              {isUploadingSheet ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Subiendo al Sheet...</span>
+                </>
+              ) : (
+                <>
+                  <UploadCloud className="w-3.5 h-3.5" />
+                  <span>☁️ Subir a Google Sheets</span>
+                </>
+              )}
+            </button>
 
             {/* Export CSV */}
             <button

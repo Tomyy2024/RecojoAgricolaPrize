@@ -153,6 +153,8 @@ export async function syncAllDataToFirestore(data: {
   userEmail?: string;
   userRole?: string;
   isAdmin?: boolean;
+  nominaVersion?: number;
+  nominaTimestamp?: number;
 }) {
   const path = 'app_state/master_data';
   try {
@@ -164,7 +166,21 @@ export async function syncAllDataToFirestore(data: {
     // Regla de Oro: Solo el Administrador puede actualizar la nómina en Firebase
     const canUpdateNomina = data.isAdmin === true || data.userRole === 'Administrador' || data.userRole === 'admin';
     if (canUpdateNomina && Array.isArray(data.trabajadores)) {
-      updateObj.trabajadores = data.trabajadores;
+      const nominaTimestamp = data.nominaTimestamp || Date.now();
+      const nominaVersion = data.nominaVersion || 1;
+      const nominaObj = {
+        trabajadores: data.trabajadores,
+        nominaVersion,
+        nominaTimestamp,
+        totalTrabajadores: data.trabajadores.length,
+        lastUpdated: new Date().toISOString(),
+        updatedBy: data.userEmail || auth.currentUser?.email || 'Administrador'
+      };
+      // Almacenar la nómina en documento dedicado app_state/nomina para no exceder límite de 1MB
+      await setDoc(doc(db, 'app_state', 'nomina'), nominaObj, { merge: true }).catch(() => {});
+      updateObj.nominaVersion = nominaVersion;
+      updateObj.nominaTimestamp = nominaTimestamp;
+      updateObj.totalTrabajadores = data.trabajadores.length;
     }
     if (Array.isArray(data.programas)) updateObj.programas = data.programas;
     if (Array.isArray(data.programaGeneral)) updateObj.programaGeneral = data.programaGeneral;
@@ -188,23 +204,32 @@ export async function syncAllDataToFirestore(data: {
 export async function fetchAllDataFromFirestore() {
   const path = 'app_state/master_data';
   try {
-    const snap = await getDoc(doc(db, 'app_state', 'master_data'));
-    if (snap.exists()) {
-      return snap.data();
+    const [snapMaster, snapNomina] = await Promise.all([
+      getDoc(doc(db, 'app_state', 'master_data')),
+      getDoc(doc(db, 'app_state', 'nomina'))
+    ]);
+    const masterData: Record<string, any> = snapMaster.exists() ? snapMaster.data() : {};
+    if (snapNomina.exists()) {
+      const nomData = snapNomina.data();
+      if (nomData && Array.isArray(nomData.trabajadores)) {
+        masterData.trabajadores = nomData.trabajadores;
+        masterData.nominaVersion = nomData.nominaVersion;
+        masterData.nominaTimestamp = nomData.nominaTimestamp;
+      }
     }
-    return null;
+    return masterData;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
   }
 }
 
-// Real-time listener for Firestore master data
+// Real-time listener for Firestore master data & nomina
 export function subscribeToFirestoreMasterData(
   onData: (data: any) => void,
   onError?: (err: any) => void
 ) {
   const path = 'app_state/master_data';
-  return onSnapshot(
+  const unsubMaster = onSnapshot(
     doc(db, 'app_state', 'master_data'),
     (snapshot) => {
       if (snapshot.exists()) {
@@ -216,4 +241,28 @@ export function subscribeToFirestoreMasterData(
       handleFirestoreError(error, OperationType.GET, path);
     }
   );
+
+  const unsubNomina = onSnapshot(
+    doc(db, 'app_state', 'nomina'),
+    (snapshot) => {
+      if (snapshot.exists()) {
+        const d = snapshot.data();
+        if (d && Array.isArray(d.trabajadores)) {
+          onData({
+            trabajadores: d.trabajadores,
+            nominaVersion: d.nominaVersion,
+            nominaTimestamp: d.nominaTimestamp
+          });
+        }
+      }
+    },
+    (error) => {
+      if (onError) onError(error);
+    }
+  );
+
+  return () => {
+    unsubMaster();
+    unsubNomina();
+  };
 }

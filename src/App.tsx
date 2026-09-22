@@ -70,7 +70,12 @@ import {
   restoreTrabajadoresFromOfflineCache,
   depurarTrabajadoresDiaAnterior,
   normalizeDateString,
-  replicarTrabajadoresAlSheet
+  replicarTrabajadoresAlSheet,
+  replicarAvanceAlSheet,
+  getNominaTimestamp,
+  setNominaTimestamp,
+  getNominaVersion,
+  setNominaVersion
 } from './utils/storage';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
@@ -266,7 +271,12 @@ export default function App() {
       // La nómina cargada por el Administrador es la fuente de verdad.
       // Los usuarios con rol 'Trabajador' o 'Supervisor' SIEMPRE deben recibir y reflejar
       // la nómina autoritativa del servidor sin que queden bloqueados por caché o semillas viejas.
+      const localTimestamp = getNominaTimestamp();
+      const serverTimestamp = d.nominaTimestamp ? Number(d.nominaTimestamp) : 0;
+      const isStaleServerBroadcast = serverTimestamp > 0 && localTimestamp > 0 && serverTimestamp < localTimestamp;
+
       const shouldApplyServerWorkers =
+        !isStaleServerBroadcast &&
         d.trabajadores.length > 0 &&
         (isAdmin ||
          userRol === 'Trabajador' ||
@@ -345,7 +355,7 @@ export default function App() {
 
         if (isDifferent) {
           setTrabajadoresState(uniqueWorkers);
-          saveTrabajadores(uniqueWorkers);
+          saveTrabajadores(uniqueWorkers, d.nominaVersion, serverTimestamp || localTimestamp);
         }
       }
     }
@@ -1039,6 +1049,43 @@ export default function App() {
       trabajadores: updatedWorkers,
       programas: updatedProg
     });
+
+    // Subida directa inmediata a Google Sheets ('Registro_Avance' y 'Trabajadores')
+    try {
+      const totalJabas = newDetalleList.reduce((acc, d) => acc + (Number(d.jabas) || 0), 0);
+      addToast(`☁️ Subiendo ${totalJabas} jabas y ${newDetalleList.length} trabajadores asignados directo a Google Sheets...`, 'info');
+      replicarAvanceAlSheet(mergedDetalle, updatedWorkers).then((sheetRes) => {
+        if (sheetRes.sheetOk) {
+          addToast(`✅ Avance (${totalJabas} jabas) y trabajadores subidos directo a Google Sheets ('Registro_Avance' y 'Trabajadores')`, 'success');
+          addLog(`🌐 Avance subido a Google Sheet con éxito: ${newDetalleList.length} registros`, 'ok');
+        } else {
+          addToast(`⚠️ Avance guardado en el sistema. Aviso Google Sheet: ${sheetRes.error || 'Verificar conexión'}`, 'warning');
+          addLog(`⚠️ Aviso Google Sheets al subir avance: ${sheetRes.error || 'Verificar webhook'}`, 'warn');
+        }
+      }).catch((e: any) => {
+        console.warn('Error subiendo avance a Google Sheet:', e);
+      });
+    } catch (e: any) {
+      console.warn('Error iniciando subida de avance a Google Sheet:', e);
+    }
+  };
+
+  const handleReplicarAvanceSheet = async (
+    customDetalle?: DetalleJaba[],
+    customWorkers?: Trabajador[],
+    customUrl?: string
+  ) => {
+    const dList = customDetalle && customDetalle.length > 0 ? customDetalle : detalleJabas;
+    const wList = customWorkers && customWorkers.length > 0 ? customWorkers : trabajadores;
+    addToast('☁️ Subiendo registros de avance y asignaciones a Google Sheets...', 'info');
+    const res = await replicarAvanceAlSheet(dList, wList, customUrl);
+    if (res.sheetOk) {
+      addToast(`✅ Sincronizado directo con Google Sheet: ${res.countJabas} jabas en 'Registro_Avance' y cuadrilla actualizada.`, 'success');
+      addLog(`🌐 Subida de avance a Google Sheet exitosa (${res.countJabas} jabas, ${wList.length} trabajadores)`, 'ok');
+    } else {
+      addToast(`⚠️ Guardado en sistema. Aviso Google Sheet: ${res.error || 'Verificar conexión'}`, 'warning');
+    }
+    return res;
   };
 
   const handleSaveModulo = (fundo: string, modulo: string) => {
@@ -1054,8 +1101,10 @@ export default function App() {
   };
 
   const handleUpdateTrabajadores = (updatedWorkers: Trabajador[]) => {
+    const newTimestamp = Date.now();
+    const newVersion = getNominaVersion() + 1;
     setTrabajadoresState(updatedWorkers);
-    saveTrabajadores(updatedWorkers);
+    saveTrabajadores(updatedWorkers, newVersion, newTimestamp);
     addLog(`👥 Nómina de personal actualizada (${updatedWorkers.length} trabajadores)`, 'ok');
 
     const activeSession = session || getSession();
@@ -1070,14 +1119,18 @@ export default function App() {
         trabajadores: updatedWorkers,
         append: false,
         userRole: currentRole,
-        userName: currentName
+        userName: currentName,
+        nominaTimestamp: newTimestamp,
+        nominaVersion: newVersion
       })
     }).catch(() => {});
 
     triggerAutoSync('Actualización Personal', {
       trabajadores: updatedWorkers,
       userRole: currentRole,
-      userName: currentName
+      userName: currentName,
+      nominaTimestamp: newTimestamp,
+      nominaVersion: newVersion
     });
   };
 
@@ -1314,7 +1367,65 @@ export default function App() {
     const updated = saveSingleValidacion(newValidacion);
     setValidacionesState(updated);
     addLog(`📋 Validación oficial registrada: ${newValidacion.supervisor} - ${newValidacion.fundo} ${newValidacion.modulo} (${newValidacion.trabajadoresConformes} conformes / ${newValidacion.jabasConformes} jabas)`, 'ok');
-    triggerAutoSync('Validación por Supervisor', { validaciones: updated });
+
+    // Sincronizar también detalleJabas para que los trabajadores asignados/validados y sus jabas queden guardados en el registro de cosecha
+    const currentDetalle = getDetalleJabas();
+    const updatedDetalle = [...currentDetalle];
+    let detalleChanged = false;
+
+    if (Array.isArray(newValidacion.items) && newValidacion.items.length > 0) {
+      newValidacion.items.forEach((item) => {
+        if (!item.dni || item.conforme === false) return;
+        const cleanDni = String(item.dni).trim();
+        const normFecha = normalizeDateString(newValidacion.fecha);
+        const normMod = String(newValidacion.modulo || 'M01').trim();
+        const existingIdx = updatedDetalle.findIndex((dj) => {
+          return String(dj.dni || '').trim() === cleanDni &&
+                 normalizeDateString(dj.fecha) === normFecha &&
+                 String(dj.modulo || '').trim().toUpperCase() === normMod.toUpperCase();
+        });
+
+        const jVal = Number(item.jabas) || 0;
+        if (existingIdx >= 0) {
+          updatedDetalle[existingIdx] = {
+            ...updatedDetalle[existingIdx],
+            jabas: jVal,
+            validado: true,
+            supervisor: newValidacion.supervisor,
+            fundo: newValidacion.fundo,
+            modulo: newValidacion.modulo,
+            grupo: newValidacion.grupo,
+            lider: newValidacion.lider || updatedDetalle[existingIdx].lider
+          };
+          detalleChanged = true;
+        } else if (jVal > 0) {
+          updatedDetalle.push({
+            id: `DJ_${normFecha}_${cleanDni}_${normMod}`,
+            fecha: newValidacion.fecha,
+            fundo: newValidacion.fundo,
+            modulo: newValidacion.modulo,
+            grupo: newValidacion.grupo,
+            lider: newValidacion.lider || '',
+            dni: cleanDni,
+            trabajador: item.nombres,
+            jabas: jVal,
+            tipo: item.tipo || 'Cosechador',
+            supervisor: newValidacion.supervisor,
+            timestamp: new Date().toISOString()
+          });
+          detalleChanged = true;
+        }
+      });
+    }
+
+    if (detalleChanged) {
+      const sanitized = sanitizeAndDeduplicateDetalleJabas(updatedDetalle);
+      setDetalleJabasState(sanitized);
+      saveDetalleJabas(sanitized);
+      triggerAutoSync('Validación por Supervisor', { validaciones: updated, detalleJabas: sanitized });
+    } else {
+      triggerAutoSync('Validación por Supervisor', { validaciones: updated });
+    }
   };
 
   const handleDeleteValidacion = (valId: string) => {
@@ -1421,8 +1532,10 @@ export default function App() {
       mergedList = workersWithFecha;
     }
 
+    const newTimestamp = Date.now();
+    const newVersion = getNominaVersion() + 1;
     setTrabajadoresState(mergedList);
-    saveTrabajadores(mergedList);
+    saveTrabajadores(mergedList, newVersion, newTimestamp);
 
     // PASO 2: Activar Modo Offline con los trabajadores cargados para que no se vuelva a sincronizar la nómina
     setOfflineNominaLocked(true);
@@ -1448,7 +1561,9 @@ export default function App() {
           modo: effectiveModo,
           fechaTarget: fechaFinal,
           userRole: session?.rol || 'Administrador',
-          userName: session?.nombre || 'Administrador'
+          userName: session?.nombre || 'Administrador',
+          nominaTimestamp: newTimestamp,
+          nominaVersion: newVersion
         })
       });
     } catch (err) {
@@ -1460,7 +1575,9 @@ export default function App() {
       forceNominaUpdate: true,
       depurado: effectiveModo === 'reemplazar_todo',
       modo: effectiveModo,
-      fechaTarget: fechaFinal
+      fechaTarget: fechaFinal,
+      nominaTimestamp: newTimestamp,
+      nominaVersion: newVersion
     });
   };
 
@@ -1938,6 +2055,7 @@ export default function App() {
             onDeleteSupervisor={handleDeleteSupervisor}
             onSaveGrupo={handleSaveGrupo}
             onSaveAvance={handleSaveAvance}
+            onReplicarAvanceSheet={handleReplicarAvanceSheet}
             detalleJabas={detalleJabas}
             onUpdateDetalleJabas={handleUpdateDetalleJabas}
             reservas={reservas}
