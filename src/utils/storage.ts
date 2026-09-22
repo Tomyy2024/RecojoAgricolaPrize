@@ -45,7 +45,9 @@ const KEYS = {
   AUDITORIA_INGRESOS: 'recojoFrutosAuditoriaIngresos',
   OFFLINE_NOMINA_LOCKED: 'recojoFrutosOfflineNominaLocked',
   TRABAJADORES_OFFLINE_CACHE: 'recojoFrutosTrabajadoresOfflineCache',
-  FECHA_ULTIMA_DEPURACION: 'recojoFrutosFechaUltimaDepuracion'
+  FECHA_ULTIMA_DEPURACION: 'recojoFrutosFechaUltimaDepuracion',
+  REAL_NOMINA_ACTIVE: 'recojoFrutosRealNominaActive',
+  NOMINA_VERSION: 'recojoFrutosNominaVersion'
 };
 
 // Date helpers
@@ -501,22 +503,31 @@ export function restoreTrabajadoresFromOfflineCache(): Trabajador[] {
 export function getTrabajadores(): Trabajador[] {
   try {
     const raw = localStorage.getItem(KEYS.TRABAJADORES);
+    const hasRealNomina = localStorage.getItem(KEYS.REAL_NOMINA_ACTIVE) === 'true';
     let list: Trabajador[] = [];
 
-    if (raw === null) {
+    if (raw !== null) {
+      try {
+        list = JSON.parse(raw);
+      } catch {
+        list = [];
+      }
+    } else if (!hasRealNomina) {
       list = INITIAL_TRABAJADORES;
       try {
         localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(INITIAL_TRABAJADORES));
       } catch {}
-    } else {
-      try {
-        list = JSON.parse(raw);
-      } catch {
-        list = INITIAL_TRABAJADORES;
+    }
+
+    // Si la nómina real ya ha sido activada en el sistema, evitar resucitar la semilla de prueba inicial (446 trabajadores de 2026-09-14)
+    if (hasRealNomina && Array.isArray(list) && list.length === 446 && list[0]?.fecha === '2026-09-14') {
+      const cached = getTrabajadoresOfflineCache();
+      if (cached.length > 0 && (cached.length !== 446 || cached[0]?.fecha !== '2026-09-14')) {
+        list = cached;
       }
     }
 
-    if (!Array.isArray(list) || list.length === 0) {
+    if (!Array.isArray(list) || (list.length === 0 && !hasRealNomina)) {
       list = INITIAL_TRABAJADORES;
     }
 
@@ -566,9 +577,10 @@ export function saveTrabajadores(trabajadores: Trabajador[]) {
     }
   });
   localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(unique));
-  // Respaldo permanente offline solo si hay trabajadores cargados válidos
+  // Marcar que la nómina real está activa en el dispositivo
   if (unique.length > 0) {
     try {
+      localStorage.setItem(KEYS.REAL_NOMINA_ACTIVE, 'true');
       localStorage.setItem(KEYS.TRABAJADORES_OFFLINE_CACHE, JSON.stringify(unique));
     } catch {}
   } else {
@@ -726,20 +738,11 @@ export function depurarTrabajadoresDiaAnterior(targetDate?: string): { eliminado
 }
 
 /**
- * Filtra los trabajadores según el rol del usuario actual.
- * Para el rol 'Trabajador', NUNCA deben mostrarse trabajadores con fecha del día anterior.
+ * Obtiene la lista de trabajadores para el rol del usuario.
+ * Todos los roles tienen acceso a la nómina de la fecha activa seleccionada.
  */
-export function filterTrabajadoresParaRol(trabajadores: Trabajador[], rol?: UserRole): Trabajador[] {
+export function filterTrabajadoresParaRol(trabajadores: Trabajador[], _rol?: UserRole): Trabajador[] {
   if (!Array.isArray(trabajadores)) return [];
-  if (rol === 'Trabajador') {
-    const hoy = getLocalToday();
-    return trabajadores.filter((t) => {
-      if (!t.fecha) return true;
-      const fNorm = normalizeDateString(t.fecha);
-      // Excluir tajantemente trabajadores con fecha anterior a hoy para el rol Trabajador
-      return fNorm >= hoy;
-    });
-  }
   return trabajadores;
 }
 

@@ -259,28 +259,32 @@ export default function App() {
       const userRol = activeSession?.rol;
       const isAdmin = userRol === 'Administrador';
 
-      // REGLA CRÍTICA DE PROTECCIÓN Y ACTUALIZACIÓN:
-      // Si el servidor trae más trabajadores (ej. 446 vs 410 local), o si el usuario es Administrador,
-      // o si la lista local está vacía, o si viene forzada la nómina: SIEMPRE actualizar la nómina local.
-      // Esto previene que una máquina con 410 trabajadores se quede congelada e ignore los 446 del servidor.
-      const shouldApplyServerWorkers =
-        d.trabajadores.length > currentWorkers.length ||
-        isAdmin ||
-        isExplicitPurge ||
-        !isLocked ||
-        currentWorkers.length === 0;
+      // Detectar si la lista local contiene la semilla de prueba inicial (446 de 2026-09-14)
+      const isLocalMockSeed = currentWorkers.length === 446 && currentWorkers[0]?.fecha === '2026-09-14';
 
-      if (!shouldApplyServerWorkers && isLocked && currentWorkers.length > 0) {
-        // Nómina blindada por interruptor de usuario offline en este cliente
-      } else if (d.trabajadores.length === 0 && currentWorkers.length > 0 && !isExplicitPurge) {
+      // REGLA AUTORITATIVA DE NÓMINA CENTRAL:
+      // La nómina cargada por el Administrador es la fuente de verdad.
+      // Los usuarios con rol 'Trabajador' o 'Supervisor' SIEMPRE deben recibir y reflejar
+      // la nómina autoritativa del servidor sin que queden bloqueados por caché o semillas viejas.
+      const shouldApplyServerWorkers =
+        d.trabajadores.length > 0 &&
+        (isAdmin ||
+         userRol === 'Trabajador' ||
+         userRol === 'Supervisor' ||
+         isLocalMockSeed ||
+         isExplicitPurge ||
+         !isLocked ||
+         currentWorkers.length === 0 ||
+         d.trabajadores.length !== currentWorkers.length ||
+         Boolean(d.nominaVersion));
+
+      if (d.trabajadores.length === 0 && currentWorkers.length > 0 && !isExplicitPurge) {
         // Preservar nómina local si la respuesta es vacía no intencionada (evita parpadeo)
         // Solo el Administrador puede enviar trabajadores al servidor si estuvieran vacíos
         if (isAdmin) {
           syncToServerRef.current({ trabajadores: currentWorkers });
         }
-      } else {
-        const hoy = getLocalToday();
-
+      } else if (shouldApplyServerWorkers) {
         // Mapa de trabajadores locales existentes para preservar grupo y líder si vienen sin definir
         const localWorkersMap = new Map<string, Trabajador>();
         currentWorkers.forEach((lw) => {
@@ -289,14 +293,8 @@ export default function App() {
           if (lw.id) localWorkersMap.set(lw.id, lw);
         });
 
-        // Para rol Trabajador, filtrar registros de días anteriores
-        const rawList = userRol === 'Trabajador'
-          ? d.trabajadores.filter((t: any) => {
-              if (!t.fecha) return true;
-              const fNorm = normalizeDateString(t.fecha);
-              return !fNorm || fNorm >= hoy;
-            })
-          : d.trabajadores;
+        // NUNCA filtrar trabajadores de días anteriores para rol Trabajador: todos los roles reciben la nómina autoritativa
+        const rawList = d.trabajadores;
 
         const seen = new Set<string>();
         const uniqueWorkers: Trabajador[] = [];
@@ -1543,20 +1541,38 @@ export default function App() {
   const handleRecargarNominaServidor = useCallback(async () => {
     try {
       addLog('🔄 Sincronizando nómina completa desde el servidor central...', 'info');
-      const res = await fetch('/api/data?t=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) {
-        const json = await res.json();
-        if (json?.data?.trabajadores && Array.isArray(json.data.trabajadores)) {
-          const serverList: Trabajador[] = json.data.trabajadores;
-          // Desactivar cualquier bloqueo offline anterior que impida ver la nómina completa
-          setOfflineNominaLocked(false);
-          setOfflineNomina(false);
-          setTrabajadoresState(serverList);
-          saveTrabajadores(serverList);
-          addToast(`✅ Nómina sincronizada: ${serverList.length} trabajadores cargados desde el servidor central.`, 'success');
-          addLog(`✅ Nómina de trabajadores actualizada con éxito (${serverList.length} trabajadores totales).`, 'ok');
-          return;
+      // Intentar primero el endpoint dedicado de nómina /api/trabajadores
+      let serverList: Trabajador[] | null = null;
+      try {
+        const resTrab = await fetch('/api/trabajadores?t=' + Date.now(), { cache: 'no-store' });
+        if (resTrab.ok) {
+          const jsonTrab = await resTrab.json();
+          if (Array.isArray(jsonTrab.trabajadores)) {
+            serverList = jsonTrab.trabajadores;
+          }
         }
+      } catch {}
+
+      // Fallback a /api/data
+      if (!serverList) {
+        const res = await fetch('/api/data?t=' + Date.now(), { cache: 'no-store' });
+        if (res.ok) {
+          const json = await res.json();
+          if (json?.data?.trabajadores && Array.isArray(json.data.trabajadores)) {
+            serverList = json.data.trabajadores;
+          }
+        }
+      }
+
+      if (serverList && Array.isArray(serverList)) {
+        // Desactivar cualquier bloqueo offline anterior que impida ver la nómina completa
+        setOfflineNominaLocked(false);
+        setOfflineNomina(false);
+        setTrabajadoresState(serverList);
+        saveTrabajadores(serverList);
+        addToast(`✅ Nómina sincronizada: ${serverList.length} trabajadores cargados desde el servidor central.`, 'success');
+        addLog(`✅ Nómina de trabajadores actualizada con éxito (${serverList.length} trabajadores totales).`, 'ok');
+        return;
       }
       addToast('⚠️ No se pudo obtener la nómina desde el servidor.', 'warning');
     } catch (err: any) {

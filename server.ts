@@ -763,6 +763,18 @@ async function startServer() {
     }
   });
 
+  // Dedicated endpoint to fetch current authoritative payroll for all devices and roles
+  app.get('/api/trabajadores', (req, res) => {
+    res.json({
+      status: 'ok',
+      count: (db.trabajadores || []).length,
+      trabajadores: db.trabajadores || [],
+      nominaVersion: db.nominaVersion || 1,
+      nominaLastUpdated: db.nominaLastUpdated || db.lastUpdated,
+      version: db.version || 1
+    });
+  });
+
   // Fast bulk worker sync endpoint - Únicamente el Administrador puede actualizar la nómina central
   app.post('/api/trabajadores', (req, res) => {
     try {
@@ -854,11 +866,25 @@ async function startServer() {
         }
 
         db.version = (db.version || 1) + 1;
+        db.nominaVersion = (db.nominaVersion || 1) + 1;
+        db.nominaLastUpdated = new Date().toISOString();
         db.lastUpdated = new Date().toISOString();
         saveDatabase(db);
         syncToCloudFirestore({ trabajadores: db.trabajadores });
-        notifyClients({ type: 'sync', version: db.version, data: db });
-        return res.json({ status: 'ok', count: db.trabajadores.length, data: db.trabajadores });
+        notifyClients({
+          type: 'sync',
+          action: 'trabajadores_updated',
+          version: db.version,
+          nominaVersion: db.nominaVersion,
+          data: db
+        });
+        return res.json({
+          status: 'ok',
+          count: db.trabajadores.length,
+          data: db.trabajadores,
+          nominaVersion: db.nominaVersion,
+          nominaLastUpdated: db.nominaLastUpdated
+        });
       }
       res.status(400).json({ status: 'error', message: 'Formato de trabajadores no válido' });
     } catch (err: any) {
@@ -1811,6 +1837,8 @@ async function startServer() {
             // El Administrador autoriza la nómina enviada
             db.trabajadores = incoming.trabajadores;
           }
+          db.nominaVersion = (db.nominaVersion || 1) + 1;
+          db.nominaLastUpdated = new Date().toISOString();
         }
         if (Array.isArray(incoming.detalleJabas)) {
           db.detalleJabas = sanitizeAndDeduplicateDetalleJabas(incoming.detalleJabas);

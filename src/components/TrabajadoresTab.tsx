@@ -648,7 +648,6 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       _normModulo: string;
     })[] = [];
 
-    const isTrabajadorUser = session?.rol === 'Trabajador';
     const targetFechaNorm = normalizeDateString(fechaPersonal) || hoyStr;
 
     // Filtrar estrictamente por fecha seleccionada si el filtro está activo
@@ -661,12 +660,6 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
           return targetFechaNorm === hoyStr;
         }
         return fn === targetFechaNorm;
-      });
-    } else if (isTrabajadorUser) {
-      effectiveTrabajadores = fullTrabajadores.filter((t) => {
-        if (!t.fecha) return true;
-        const fn = normalizeDateString(t.fecha);
-        return !fn || fn >= hoyStr;
       });
     }
 
@@ -4086,8 +4079,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             </div>
 
             {/* Selector de Fecha de Consulta / Registro de Avance, Filtro de Nómina y Métricas Reales */}
-            <div className="flex flex-col gap-2.5 p-3 mb-3 bg-[#f8faf8] border border-[#d0ded0] rounded-xl shadow-xs">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex flex-col gap-2 p-3 mb-3 bg-[#f8faf8] border border-[#d0ded0] rounded-xl shadow-xs">
+              {/* Fila 1: Fecha de Trabajo y Métricas del Día */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="flex items-center gap-1.5 text-xs font-bold text-[#1b5e20]">
                     <Calendar className="w-4 h-4 text-[#2e7d32]" />
@@ -4118,30 +4112,6 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       </span>
                     )}
                   </div>
-
-                  {/* Toggle para filtrar nómina de trabajadores por fecha */}
-                  <button
-                    type="button"
-                    onClick={() => setFiltrarTrabajadoresPorFecha((prev) => !prev)}
-                    className={`px-2.5 py-1 text-xs font-bold rounded-lg border flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-2xs ${
-                      filtrarTrabajadoresPorFecha
-                        ? 'bg-emerald-700 text-white border-emerald-800'
-                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                    }`}
-                    title={filtrarTrabajadoresPorFecha ? 'Click para mostrar trabajadores de todas las fechas' : 'Click para mostrar solo trabajadores de la fecha seleccionada'}
-                  >
-                    {filtrarTrabajadoresPorFecha ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-200" />
-                        <span>Filtrar por fecha ({countEnFechaActiva} pers.)</span>
-                      </>
-                    ) : (
-                      <>
-                        <Layers className="w-3.5 h-3.5 text-gray-500" />
-                        <span>Ver todas las fechas ({fullTrabajadores.length} pers.)</span>
-                      </>
-                    )}
-                  </button>
                 </div>
 
                 {/* Métricas Reales consultadas directamente de Registro de Avance */}
@@ -4176,6 +4146,39 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       <span>Cargar Avance</span>
                     </button>
                   )}
+                </div>
+              </div>
+
+              {/* Fila 2: Filtro por Fecha + Instructivo + Barra de Estado Integrada (Solo Pendientes, Ya Asignados, Con Jabas, Ver Todos) + Acciones Centralizadas */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2 pt-2 border-t border-[#d0ded0]/80">
+                {/* Toggle para filtrar nómina de trabajadores por fecha */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setFiltrarTrabajadoresPorFecha((prev) => !prev)}
+                    className={`px-2.5 py-1.5 text-xs font-bold rounded-lg border flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-2xs ${
+                      filtrarTrabajadoresPorFecha
+                        ? 'bg-emerald-700 text-white border-emerald-800'
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                    }`}
+                    title={filtrarTrabajadoresPorFecha ? 'Click para mostrar trabajadores de todas las fechas' : 'Click para mostrar solo trabajadores de la fecha seleccionada'}
+                  >
+                    {filtrarTrabajadoresPorFecha ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-200" />
+                        <span>Filtrar por fecha ({countEnFechaActiva} pers.)</span>
+                      </>
+                    ) : (
+                      <>
+                        <Layers className="w-3.5 h-3.5 text-gray-500" />
+                        <span>Ver todas las fechas ({fullTrabajadores.length} pers.)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Acceso Rápido y Centralizado: Instructivo + Estados de Personal + Acciones de Limpieza */}
+                <div className="flex items-center gap-1.5 flex-wrap">
                   {onOpenInstructivo && (
                     <button
                       type="button"
@@ -4187,12 +4190,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       <span>Instructivo</span>
                     </button>
                   )}
-                </div>
-              </div>
 
-              {/* Selector de Vista de Asignación en Pantalla (Filtros y Tarjetas de Estado) */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-[#d0ded0]/80">
-                <div className="flex items-center gap-2 flex-wrap text-xs">
+                  <div className="hidden md:block h-4 w-px bg-[#c0d5c0] mx-0.5" />
+
+                  {/* Estado: Filtros de Personal */}
                   <span className="text-gray-600 text-[11px] font-bold whitespace-nowrap flex items-center gap-1">
                     <Filter className="w-3.5 h-3.5 text-[#2e7d32]" />
                     <span>Estado:</span>
@@ -4287,9 +4288,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       {countTodos}
                     </span>
                   </button>
-                </div>
 
-                <div className="flex items-center gap-1.5 flex-wrap ml-auto">
+                  {/* Acciones de Limpieza y Desasignación integradas en el mismo bloque */}
                   {isAdmin && countConJabasTotal > 0 && (
                     <button
                       type="button"
@@ -4298,7 +4298,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       title="Eliminar personal con jabas asignadas o limpiar sus registros de avance (Solo Administrador)"
                     >
                       <Trash2 className="w-3.5 h-3.5 text-white" />
-                      <span>Eliminar Personal con Jabas ({countConJabasTotal})</span>
+                      <span>Eliminar con Jabas ({countConJabasTotal})</span>
                     </button>
                   )}
 
@@ -4462,54 +4462,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
               </div>
             )}
 
-            {/* Listado de Tarjetas de Trabajadores con renderizado de alto rendimiento */}
-            <div className="max-h-96 overflow-y-auto space-y-2 rounded-xl border border-[#e0e0e0] p-2 bg-[#fafafa]">
-              {!cuadrillaFundo && !cuadrillaSupervisor && !cuadrillaModulo && !searchTerm && (
-                <div
-                  className={`border rounded-lg p-2 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-2 ${
-                    vistaAsignacion === 'pendientes' || (vistaAsignacion as string) === 'sin_jabas'
-                      ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950'
-                      : vistaAsignacion === 'asignados'
-                      ? 'bg-purple-50/90 border-purple-200 text-purple-950'
-                      : vistaAsignacion === 'con_jabas'
-                      ? 'bg-amber-50/90 border-amber-300 text-amber-950'
-                      : 'bg-[#e8f5e9]/70 border-[#a5d6a7] text-[#1b5e20]'
-                  }`}
-                >
-                  <span className="flex items-center gap-1.5 font-medium">
-                    {vistaAsignacion === 'pendientes' || (vistaAsignacion as string) === 'sin_jabas' ? (
-                      <Clock className="w-4 h-4 text-[#2e7d32] shrink-0" />
-                    ) : vistaAsignacion === 'con_jabas' ? (
-                      <Package className="w-4 h-4 text-amber-600 shrink-0" />
-                    ) : vistaAsignacion === 'asignados' ? (
-                      <Users className="w-4 h-4 text-purple-600 shrink-0" />
-                    ) : (
-                      <Building2 className="w-4 h-4 text-[#2e7d32] shrink-0" />
-                    )}
-                    <span>
-                      {vistaAsignacion === 'pendientes' || (vistaAsignacion as string) === 'sin_jabas'
-                        ? `Mostrando trabajadores pendientes sin Grupo ni Líder en la hoja Trabajadores (${filteredTrabajadores.length} disponibles).`
-                        : vistaAsignacion === 'asignados'
-                        ? `Mostrando trabajadores con Grupo y Líder asignados en la hoja Trabajadores (${filteredTrabajadores.length} asignados).`
-                        : vistaAsignacion === 'con_jabas'
-                        ? `Mostrando ${filteredTrabajadores.length} trabajadores con avance registrado en Registro_Avance (${fechaPersonal === hoyStr ? 'hoy' : fechaPersonal}) · Total acumulado: ${jabasTotalDisplay} jabas.`
-                        : `Nómina completa (${filteredTrabajadores.length} trabajadores). Activa filtros seleccionando Supervisor, Fundo o Módulo arriba.`}
-                    </span>
-                  </span>
-                  {(vistaAsignacion === 'pendientes' || vistaAsignacion === 'asignados') && countAsignados > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleDesasignarTodos}
-                      className="text-[10px] bg-red-600 hover:bg-red-700 text-white font-bold px-2 py-1 rounded-md shadow-2xs flex items-center gap-1 cursor-pointer shrink-0 transition-all active:scale-95 self-end sm:self-auto"
-                      title="Quitar asignación a todos los trabajadores"
-                    >
-                      <RotateCcw className="w-2.5 h-2.5" />
-                      <span>Desasignar Todos ({countAsignados})</span>
-                    </button>
-                  )}
-                </div>
-              )}
-
+            {/* Listado de Tarjetas de Trabajadores con renderizado de alto rendimiento y conexión directa */}
+            <div className="max-h-[38rem] min-h-[22rem] overflow-y-auto space-y-2 rounded-xl border border-[#e0e0e0] p-2 bg-[#fafafa]">
               {filteredTrabajadores.length === 0 ? (
                 vistaAsignacion === 'con_jabas' && countConJabas === 0 ? (
                   <div className="py-8 px-4 text-center bg-white rounded-xl border border-amber-200 my-2 shadow-xs">
