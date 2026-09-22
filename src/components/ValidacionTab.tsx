@@ -843,7 +843,9 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
   };
 
   const handleWorkerJabasChange = (dni: string, val: string) => {
-    const num = Math.max(0, parseInt(val) || 0);
+    const cleanVal = val.replace(',', '.').trim();
+    const parsed = parseFloat(cleanVal);
+    const num = isNaN(parsed) ? 0 : Math.max(0, Math.round(parsed * 100) / 100);
     setWorkerValidationState((prev) => ({
       ...prev,
       [dni]: {
@@ -860,23 +862,23 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
   ).length;
   const trabajadoresAnulados = totalTrabajadores - trabajadoresConformes;
 
-  const totalJabas = candidateWorkers.reduce((acc, c) => {
+  const totalJabas = Math.round(candidateWorkers.reduce((acc, c) => {
     const j = workerValidationState[c.worker.dni]?.jabas !== undefined
       ? workerValidationState[c.worker.dni].jabas
       : c.jabas;
-    return acc + j;
-  }, 0);
+    return acc + (Number(j) || 0);
+  }, 0) * 100) / 100;
 
-  const jabasConformes = candidateWorkers.reduce((acc, c) => {
+  const jabasConformes = Math.round(candidateWorkers.reduce((acc, c) => {
     const isConf = workerValidationState[c.worker.dni]?.conforme !== false;
     if (!isConf) return acc;
     const j = workerValidationState[c.worker.dni]?.jabas !== undefined
       ? workerValidationState[c.worker.dni].jabas
       : c.jabas;
-    return acc + j;
-  }, 0);
+    return acc + (Number(j) || 0);
+  }, 0) * 100) / 100;
 
-  const jabasAnuladas = totalJabas - jabasConformes;
+  const jabasAnuladas = Math.round((totalJabas - jabasConformes) * 100) / 100;
 
   // Quick instant validation of an individual worker
   const handleValidateSingleWorker = (worker: Trabajador, jabas: number) => {
@@ -1507,9 +1509,10 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                               <input
                                 type="number"
                                 min="0"
+                                step="any"
                                 value={currentJabas}
                                 onChange={(e) => handleWorkerJabasChange(worker.dni, e.target.value)}
-                                className="w-14 text-center font-extrabold text-xs text-[#1b5e20] bg-white border border-gray-200 rounded px-1 py-0.5 focus:outline-none focus:border-[#2e7d32]"
+                                className="w-16 text-center font-extrabold text-xs text-[#1b5e20] bg-white border border-gray-200 rounded px-1 py-0.5 focus:outline-none focus:border-[#2e7d32]"
                               />
                             )}
                           </div>

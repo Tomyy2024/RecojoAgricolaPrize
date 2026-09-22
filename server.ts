@@ -268,7 +268,7 @@ function sanitizeAndDeduplicateDetalleJabas(list: any[]): any[] {
       lider: String(item.lider || '').trim(),
       dni: cleanDni,
       trabajador: trabajador || (cleanDni ? `Trabajador ${cleanDni}` : 'Sin Nombre'),
-      jabas: Math.round(jabas)
+      jabas: Math.round(jabas * 100) / 100
     };
 
     if (map.has(primaryKey)) {

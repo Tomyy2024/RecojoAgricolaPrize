@@ -236,6 +236,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
   // Avance values: { [dni]: jabasCount }
   const [avanceValues, setAvanceValues] = useState<Record<string, number>>({});
+  const [avanceInputStrings, setAvanceInputStrings] = useState<Record<string, string>>({});
 
   // Supervisor registration state
   const [showSupervisorForm, setShowSupervisorForm] = useState(false);
@@ -2332,6 +2333,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       setSelectedDnis(new Set());
       setWorkerAssignedGrupos({});
       setAvanceValues({});
+      setAvanceInputStrings({});
       setLastSavedReserva(null);
       setVisibleLimit(60);
       setVistaAsignacion('pendientes');
@@ -2857,19 +2859,40 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     }
   };
 
-  // Step 2: Jabas Avance Handlers
+  // Step 2: Jabas Avance Handlers (con soporte completo para decimales ej: 0.5, 1.5, 2.5, 3.5)
   const handleJabasChange = (workerOrDni: any, val: string) => {
     const key =
       typeof workerOrDni === 'object'
         ? normalizeDni(workerOrDni.dni) || workerOrDni.id || String(workerOrDni.dni || '')
         : normalizeDni(workerOrDni) || String(workerOrDni);
-    const num = Math.max(0, parseInt(val) || 0);
-    setAvanceValues((prev) => {
-      const copy = { ...prev };
-      if (num > 0) copy[key] = num;
-      else delete copy[key];
-      return copy;
-    });
+
+    // Guardar el texto crudo para que el usuario pueda escribir "0.", "1.", etc. sin que el cursor pierda el punto decimal
+    setAvanceInputStrings((prev) => ({ ...prev, [key]: val }));
+
+    const cleanVal = val.replace(',', '.').trim();
+    if (cleanVal === '' || cleanVal === '.') {
+      setAvanceValues((prev) => {
+        const copy = { ...prev };
+        delete copy[key];
+        return copy;
+      });
+      return;
+    }
+
+    const parsed = parseFloat(cleanVal);
+    if (isNaN(parsed) || parsed <= 0) {
+      setAvanceValues((prev) => {
+        const copy = { ...prev };
+        delete copy[key];
+        return copy;
+      });
+    } else {
+      const num = Math.round(parsed * 100) / 100;
+      setAvanceValues((prev) => ({
+        ...prev,
+        [key]: num
+      }));
+    }
   };
 
   const adjustJabas = (workerOrDni: any, delta: number) => {
@@ -2880,9 +2903,14 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     setAvanceValues((prev) => {
       const copy = { ...prev };
       const current = Number(copy[key] ?? (typeof workerOrDni === 'string' ? copy[workerOrDni] : 0) ?? 0);
-      const nextVal = Math.max(0, current + delta);
-      if (nextVal > 0) copy[key] = nextVal;
-      else delete copy[key];
+      const nextVal = Math.max(0, Math.round((current + delta) * 100) / 100);
+      if (nextVal > 0) {
+        copy[key] = nextVal;
+        setAvanceInputStrings((s) => ({ ...s, [key]: String(nextVal) }));
+      } else {
+        delete copy[key];
+        setAvanceInputStrings((s) => ({ ...s, [key]: '' }));
+      }
       return copy;
     });
   };
@@ -3055,10 +3083,11 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   }, [step2EffectiveWorkers, step2SearchTerm, normalizeDni]);
 
   const totalJabasAvance = useMemo(() => {
-    return (Object.values(avanceValues) as number[]).reduce(
-      (sum: number, curr: number) => sum + (Number(curr) || 0),
+    const sum = (Object.values(avanceValues) as number[]).reduce(
+      (acc: number, curr: number) => acc + (Number(curr) || 0),
       0
     );
+    return Math.round(sum * 100) / 100;
   }, [avanceValues]);
 
   const handleStep1Next = () => {
@@ -3260,6 +3289,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     setSelectedDnis(new Set());
     setWorkerAssignedGrupos({});
     setAvanceValues({});
+    setAvanceInputStrings({});
     setStep2SearchTerm('');
 
     // Cambiar la vista a 'con_jabas' para que el usuario pueda ver de inmediato a sus trabajadores con sus jabas registradas
@@ -5054,10 +5084,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 const normDni = normalizeDni(t.dni);
                 const workerKey = normDni || t.id || String(t.dni || '');
                 const currentVal =
-                  avanceValues[workerKey] !== undefined
-                    ? avanceValues[workerKey]
+                  avanceInputStrings[workerKey] !== undefined
+                    ? avanceInputStrings[workerKey]
+                    : avanceValues[workerKey] !== undefined
+                    ? String(avanceValues[workerKey])
                     : avanceValues[t.dni] !== undefined
-                    ? avanceValues[t.dni]
+                    ? String(avanceValues[t.dni])
                     : '';
                 const assignedGrupo =
                   workerAssignedGrupos[workerKey] ||
@@ -5103,51 +5135,85 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       </div>
                     </div>
 
-                    {/* Controles Interactivos de Jabas (+ / - e Input) */}
-                    <div className="flex items-center gap-2 self-end md:self-auto bg-white p-1.5 rounded-xl border border-[#bfcaba] shadow-2xs">
-                      <button
-                        type="button"
-                        onClick={() => adjustJabas(workerKey, -5)}
-                        className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold flex items-center justify-center cursor-pointer transition-colors active:scale-95"
-                        title="Restar 5 jabas"
-                      >
-                        -5
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => adjustJabas(workerKey, -1)}
-                        className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 flex items-center justify-center cursor-pointer transition-colors active:scale-95"
-                        title="Restar 1 jaba"
-                      >
-                        <Minus className="w-3.5 h-3.5" />
-                      </button>
+                    {/* Controles Interactivos de Jabas (+ / - e Input con soporte de decimales ej: 0.5, 1.5, 2.5, 3.5) */}
+                    <div className="flex flex-col items-end gap-1.5 self-end md:self-auto shrink-0">
+                      <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-[#bfcaba] shadow-2xs">
+                        <button
+                          type="button"
+                          onClick={() => adjustJabas(workerKey, -1)}
+                          className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 flex items-center justify-center cursor-pointer transition-colors active:scale-95"
+                          title="Restar 1 jaba"
+                        >
+                          <Minus className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => adjustJabas(workerKey, -0.5)}
+                          className="px-1.5 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold flex items-center justify-center cursor-pointer transition-colors active:scale-95"
+                          title="Restar 0.5 jabas"
+                        >
+                          -0.5
+                        </button>
 
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        placeholder="0"
-                        value={currentVal}
-                        onChange={(e) => handleJabasChange(workerKey, e.target.value)}
-                        className="w-20 px-2 py-1 text-center font-extrabold text-sm text-[#1b5e20] rounded-md border border-gray-200 bg-white focus:outline-none focus:border-[#2e7d32]"
-                      />
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          placeholder="0.0"
+                          value={currentVal}
+                          onChange={(e) => handleJabasChange(workerKey, e.target.value)}
+                          className="w-20 px-2 py-1 text-center font-extrabold text-sm text-[#1b5e20] rounded-md border border-gray-200 bg-white focus:outline-none focus:border-[#2e7d32]"
+                          title="Ingresa jabas (permite decimales ej: 0.5, 1.5, 2.5, 3.5)"
+                        />
 
-                      <button
-                        type="button"
-                        onClick={() => adjustJabas(workerKey, 1)}
-                        className="w-7 h-7 rounded-lg bg-[#e8f5e9] hover:bg-[#c8e6c9] text-[#1b5e20] flex items-center justify-center cursor-pointer transition-colors active:scale-95"
-                        title="Sumar 1 jaba"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => adjustJabas(workerKey, 5)}
-                        className="w-7 h-7 rounded-lg bg-[#e8f5e9] hover:bg-[#c8e6c9] text-[#1b5e20] text-xs font-bold flex items-center justify-center cursor-pointer transition-colors active:scale-95"
-                        title="Sumar 5 jabas"
-                      >
-                        +5
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => adjustJabas(workerKey, 0.5)}
+                          className="px-1.5 h-7 rounded-lg bg-[#e8f5e9] hover:bg-[#c8e6c9] text-[#1b5e20] text-xs font-bold flex items-center justify-center cursor-pointer transition-colors active:scale-95"
+                          title="Sumar 0.5 jabas"
+                        >
+                          +0.5
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => adjustJabas(workerKey, 1)}
+                          className="w-7 h-7 rounded-lg bg-[#e8f5e9] hover:bg-[#c8e6c9] text-[#1b5e20] flex items-center justify-center cursor-pointer transition-colors active:scale-95"
+                          title="Sumar 1 jaba"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => adjustJabas(workerKey, 5)}
+                          className="w-7 h-7 rounded-lg bg-[#e8f5e9] hover:bg-[#c8e6c9] text-[#1b5e20] text-xs font-bold flex items-center justify-center cursor-pointer transition-colors active:scale-95"
+                          title="Sumar 5 jabas"
+                        >
+                          +5
+                        </button>
+                      </div>
+
+                      {/* Botones de acceso rápido para decimales frecuentes (0.5, 1.5, 2.5, 3.5) */}
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-gray-400 font-medium mr-0.5">Rápido:</span>
+                        {[0.5, 1.5, 2.5, 3.5].map((decVal) => {
+                          const isSelected = Number(currentVal) === decVal;
+                          return (
+                            <button
+                              key={decVal}
+                              type="button"
+                              onClick={() => handleJabasChange(workerKey, String(decVal))}
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                isSelected
+                                  ? 'bg-[#1b5e20] text-white shadow-2xs'
+                                  : 'bg-gray-100 hover:bg-[#e8f5e9] text-gray-700 hover:text-[#1b5e20] border border-gray-200'
+                              }`}
+                              title={`Fijar exactamente ${decVal} jabas`}
+                            >
+                              {decVal}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
               );

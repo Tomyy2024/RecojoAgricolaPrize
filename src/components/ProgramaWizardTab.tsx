@@ -171,7 +171,7 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
       haTotal: haTotal || '0',
       numTrab: numTrabajadores || '0',
       tipo,
-      jabas: parseInt(jabas) || 0,
+      jabas: parseFloat(jabas) || 0,
       ddc: 0,
       lotes: lotesArr,
       totalLotes: lotesArr.length,
@@ -427,7 +427,7 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
               <input
                 type="number"
                 min="0"
-                step="1"
+                step="any"
                 placeholder="0"
                 value={jabas}
                 onChange={(e) => setJabas(e.target.value)}
