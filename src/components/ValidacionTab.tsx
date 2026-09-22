@@ -6,7 +6,8 @@ import {
   ValidacionSupervisor, 
   ValidacionTrabajadorItem,
   Programa,
-  Lider
+  Lider,
+  ReservaCuadrilla
 } from '../types';
 import { 
   getLocalToday, 
@@ -62,6 +63,7 @@ interface ValidacionTabProps {
   lideres?: Lider[];
   validaciones: ValidacionSupervisor[];
   grupos: string[];
+  reservas?: ReservaCuadrilla[];
   onSaveValidacion: (validacion: ValidacionSupervisor) => void;
   onDeleteValidacion?: (valId: string) => void;
   onDeleteLider?: (liderNameOrDni: string) => void;
@@ -76,6 +78,7 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
   lideres = [],
   validaciones,
   grupos,
+  reservas = [],
   onSaveValidacion,
   onDeleteValidacion,
   onDeleteLider,
@@ -231,6 +234,112 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     return Array.from(set).sort();
   }, [trabajadores, detalleJabas]);
 
+  // 1. Detectar el módulo más reciente / activo de la cuadrilla para la fecha y supervisor seleccionados
+  const detectedNewModuloInfo = useMemo(() => {
+    const targetFechaNorm = normalizeDate(filtroFecha) || normalizeDate(getLocalToday());
+    const targetSup = filtroSupervisor || (isSupervisor ? sessionSupervisorName : '');
+
+    // 1. Buscar en reservas de hoy ordenadas por timestamp (la más reciente primero)
+    if (reservas && reservas.length > 0) {
+      const todayRes = reservas
+        .filter((r) => {
+          const matchF = !targetFechaNorm || normalizeDate(r.fecha) === targetFechaNorm;
+          const matchS = !targetSup || isMatchingSupervisor(r.supervisor, targetSup);
+          return matchF && matchS && r.modulo;
+        })
+        .sort((a, b) => {
+          const tA = new Date(a.timestamp || 0).getTime();
+          const tB = new Date(b.timestamp || 0).getTime();
+          return tB - tA;
+        });
+
+      if (todayRes.length > 0) {
+        return {
+          modulo: todayRes[0].modulo,
+          fundo: todayRes[0].fundo,
+          grupo: todayRes[0].grupo || '',
+          lider: todayRes[0].lider || '',
+          source: 'reserva'
+        };
+      }
+    }
+
+    // 2. Buscar en detalleJabas de hoy por timestamp más reciente
+    if (detalleJabas && detalleJabas.length > 0) {
+      const todayDet = detalleJabas
+        .filter((dj) => {
+          const matchF = !targetFechaNorm || normalizeDate(dj.fecha) === targetFechaNorm;
+          const matchS = !targetSup || isMatchingSupervisor(dj.supervisor, targetSup);
+          return matchF && matchS && dj.modulo && Number(dj.jabas) > 0;
+        })
+        .sort((a, b) => {
+          const tA = new Date(a.timestamp || 0).getTime();
+          const tB = new Date(b.timestamp || 0).getTime();
+          return tB - tA;
+        });
+
+      if (todayDet.length > 0) {
+        return {
+          modulo: todayDet[0].modulo,
+          fundo: todayDet[0].fundo,
+          grupo: todayDet[0].grupo || '',
+          lider: todayDet[0].lider || '',
+          source: 'detalle'
+        };
+      }
+    }
+
+    // 3. Revisar localStorage de sesión activa guardado durante el cambio de módulo o selección de cuadrilla
+    if (typeof localStorage !== 'undefined') {
+      const storedMod = localStorage.getItem('app_active_modulo') || localStorage.getItem('app_cuadrilla_modulo');
+      const storedFundo = localStorage.getItem('app_active_fundo') || localStorage.getItem('app_cuadrilla_fundo');
+      if (storedMod) {
+        return {
+          modulo: storedMod,
+          fundo: storedFundo || '',
+          grupo: localStorage.getItem('app_active_grupo') || '',
+          lider: localStorage.getItem('app_active_lider') || '',
+          source: 'storage'
+        };
+      }
+    }
+
+    // 4. Revisar último trabajador con módulo hoy
+    const recentTrab = trabajadores.filter((t) => {
+      const matchF = !targetFechaNorm || normalizeDate(t.fecha) === targetFechaNorm;
+      const matchS = !targetSup || isMatchingSupervisor(t.supervisor, targetSup);
+      return matchF && matchS && t.modulo;
+    });
+    if (recentTrab.length > 0) {
+      const lastT = recentTrab[recentTrab.length - 1];
+      return {
+        modulo: lastT.modulo,
+        fundo: lastT.fundo,
+        grupo: lastT.grupo || '',
+        lider: lastT.lider || '',
+        source: 'trabajador'
+      };
+    }
+
+    return null;
+  }, [reservas, detalleJabas, trabajadores, filtroFecha, filtroSupervisor, isSupervisor, sessionSupervisorName]);
+
+  // Auto-filtrar por el nuevo módulo si filtroModulo está vacío y se detectó actividad reciente
+  useEffect(() => {
+    if (!filtroModulo && detectedNewModuloInfo?.modulo) {
+      setFiltroModulo(detectedNewModuloInfo.modulo);
+      if (!filtroFundo && detectedNewModuloInfo.fundo) {
+        setFiltroFundo(detectedNewModuloInfo.fundo);
+      }
+      if (!filtroGrupo && detectedNewModuloInfo.grupo) {
+        setFiltroGrupo(detectedNewModuloInfo.grupo);
+      }
+      if (!filtroLider && detectedNewModuloInfo.lider) {
+        setFiltroLider(detectedNewModuloInfo.lider);
+      }
+    }
+  }, [detectedNewModuloInfo, filtroModulo, filtroFundo, filtroGrupo, filtroLider]);
+
   // Dynamic modules per fundo
   const modulosList = useMemo(() => {
     const set = new Set<string>();
@@ -255,8 +364,16 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
         set.add(dj.modulo);
       }
     });
+    reservas.forEach((r) => {
+      if ((!filtroFundo || normalizeStr(r.fundo) === normalizeStr(filtroFundo)) && r.modulo) {
+        set.add(r.modulo);
+      }
+    });
+    if (detectedNewModuloInfo?.modulo) {
+      set.add(detectedNewModuloInfo.modulo);
+    }
     return Array.from(set).sort();
-  }, [trabajadores, detalleJabas, filtroFundo]);
+  }, [trabajadores, detalleJabas, reservas, filtroFundo, detectedNewModuloInfo]);
 
   // List of groups
   const allGrupos = useMemo(() => {
@@ -307,8 +424,9 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
       if (val.items && Array.isArray(val.items) && val.items.length > 0) {
         val.items.forEach((it) => {
           const dniClean = String(it.dni || '').trim();
+          const valMod = normalizeModulo(val.modulo);
           if (dniClean) {
-            map.set(dniClean, {
+            const vData = {
               validacionId: val.id,
               supervisor: val.supervisor,
               conforme: it.conforme !== false,
@@ -317,16 +435,23 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
               fecha: val.fecha,
               modulo: val.modulo,
               fundo: val.fundo
-            });
+            };
+            if (valMod) {
+              map.set(`${dniClean}__${valMod}`, vData);
+            }
+            if (!map.has(dniClean)) {
+              map.set(dniClean, vData);
+            }
           }
         });
       } else {
         // 2. Fallback if validation row was synced without items:
         // A) If ID contains an 8-digit DNI (single worker validation)
         const idDniMatch = val.id.match(/_(\d{8})_/);
+        const valMod = normalizeModulo(val.modulo);
         if (idDniMatch && idDniMatch[1]) {
           const dniClean = idDniMatch[1].trim();
-          map.set(dniClean, {
+          const vData = {
             validacionId: val.id,
             supervisor: val.supervisor,
             conforme: true,
@@ -335,10 +460,15 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
             fecha: val.fecha,
             modulo: val.modulo,
             fundo: val.fundo
-          });
+          };
+          if (valMod) {
+            map.set(`${dniClean}__${valMod}`, vData);
+          }
+          if (!map.has(dniClean)) {
+            map.set(dniClean, vData);
+          }
         } else {
           // B) Match cuadrilla workers in detalleJabas matching fundo, modulo, grupo
-          const valMod = normalizeModulo(val.modulo);
           const valFundo = normalizeStr(val.fundo);
           const valGrp = normalizeGrupo(val.grupo);
 
@@ -351,8 +481,8 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
             if (valFundo && djFundo && valFundo !== djFundo) return;
             if (valGrp && djGrp && valGrp !== djGrp) return;
             const cleanDni = String(dj.dni || '').trim();
-            if (cleanDni && !map.has(cleanDni)) {
-              map.set(cleanDni, {
+            if (cleanDni) {
+              const vData = {
                 validacionId: val.id,
                 supervisor: val.supervisor,
                 conforme: true,
@@ -361,7 +491,13 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                 fecha: val.fecha,
                 modulo: val.modulo,
                 fundo: val.fundo
-              });
+              };
+              if (djMod) {
+                map.set(`${cleanDni}__${djMod}`, vData);
+              }
+              if (!map.has(cleanDni)) {
+                map.set(cleanDni, vData);
+              }
             }
           });
         }
@@ -391,6 +527,8 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
       }
     >();
 
+    const normFilterMod = filtroModulo ? normalizeModulo(filtroModulo) : '';
+
     // 1. Calculate and accumulate jabas from DetalleJabas matching the filters
     const matchingDetalle = detalleJabas.filter((dj) => {
       if (filtroFecha) {
@@ -407,10 +545,9 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
         }
       }
 
-      if (filtroModulo) {
+      if (normFilterMod) {
         const djMod = normalizeModulo(dj.modulo);
-        const fMod = normalizeModulo(filtroModulo);
-        if (djMod && fMod && djMod !== fMod) return false;
+        if (djMod && djMod !== normFilterMod) return false;
       }
 
       if (filtroGrupo) {
@@ -426,14 +563,19 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
       return Number(dj.jabas) > 0;
     });
 
+    const jabasByDniMod: Record<string, number> = {};
     const jabasByDni: Record<string, number> = {};
-    const metaByDni: Record<string, DetalleJaba> = {};
+    const metaByDniMod: Record<string, DetalleJaba> = {};
     matchingDetalle.forEach((dj) => {
       const num = Number(dj.jabas) || 0;
       const cleanDni = String(dj.dni || '').trim();
+      const djMod = normalizeModulo(dj.modulo);
+      const modKey = `${cleanDni}__${djMod}`;
       if (num > 0 && cleanDni) {
+        jabasByDniMod[modKey] = (jabasByDniMod[modKey] || 0) + num;
         jabasByDni[cleanDni] = (jabasByDni[cleanDni] || 0) + num;
-        metaByDni[cleanDni] = dj;
+        metaByDniMod[modKey] = dj;
+        metaByDniMod[cleanDni] = dj;
       }
     });
 
@@ -442,15 +584,18 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
       programas.forEach((p) => {
         if (filtroFecha && normalizeDate(p.fecha) !== normalizeDate(filtroFecha)) return;
         if (filtroFundo && normalizeStr(p.fundo) !== normalizeStr(filtroFundo)) return;
-        if (filtroModulo && normalizeModulo(p.modulo) !== normalizeModulo(filtroModulo)) return;
+        if (normFilterMod && normalizeModulo(p.modulo) !== normFilterMod) return;
         if (filtroSupervisor && !isMatchingSupervisor(p.supervisor, filtroSupervisor)) return;
 
+        const pMod = normalizeModulo(p.modulo);
         if (p.avance) {
           Object.entries(p.avance).forEach(([dni, jVal]) => {
             const cleanDni = String(dni || '').trim();
             const num = Number(jVal) || 0;
-            if (num > 0 && cleanDni && !jabasByDni[cleanDni]) {
-              jabasByDni[cleanDni] = num;
+            const modKey = `${cleanDni}__${pMod}`;
+            if (num > 0 && cleanDni && !jabasByDniMod[modKey]) {
+              jabasByDniMod[modKey] = num;
+              jabasByDni[cleanDni] = (jabasByDni[cleanDni] || 0) + num;
             }
           });
         }
@@ -462,14 +607,38 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
       if (!t.dni) return;
       const cleanDni = String(t.dni || '').trim();
       if (!cleanDni) return;
+      const tMod = normalizeModulo(t.modulo);
+      const personModKey = `${cleanDni}__${tMod}`;
 
-      let jCount = jabasByDni[cleanDni] || 0;
+      // When filtering by a specific module:
+      if (normFilterMod) {
+        // If worker has a declared module and it DOES NOT match the filter:
+        if (tMod && tMod !== normFilterMod) {
+          // Does this worker have jabas registered in this module?
+          const jInThisMod = jabasByDniMod[`${cleanDni}__${normFilterMod}`] || 0;
+          if (jInThisMod === 0) {
+            // Not in this module -> do NOT include!
+            return;
+          }
+        } else if (!tMod) {
+          // If worker has no module specified, only include if they have jabas in this module
+          const jInThisMod = jabasByDniMod[`${cleanDni}__${normFilterMod}`] || 0;
+          if (jInThisMod === 0) {
+            return;
+          }
+        }
+      }
+
+      // Jabas in this module (or overall if no module filter)
+      let jCount = normFilterMod
+        ? (jabasByDniMod[`${cleanDni}__${normFilterMod}`] || 0)
+        : (jabasByDniMod[personModKey] || jabasByDni[cleanDni] || 0);
 
       // If no advance in detalleJabas, check if worker had jabas in master record matching current filter
       if (jCount === 0 && t.jabas && t.jabas > 0) {
         const matchesDate = !filtroFecha || !t.fecha || normalizeDate(t.fecha) === normalizeDate(filtroFecha);
         const matchesFundo = !filtroFundo || !t.fundo || normalizeStr(t.fundo) === normalizeStr(filtroFundo);
-        const matchesModulo = !filtroModulo || !t.modulo || normalizeModulo(t.modulo) === normalizeModulo(filtroModulo);
+        const matchesModulo = !normFilterMod || (tMod && tMod === normFilterMod);
         const matchesGrupo = !filtroGrupo || !t.grupo || normalizeGrupo(t.grupo) === normalizeGrupo(filtroGrupo);
         const matchesSup = isMatchingSupervisor(t.supervisor, filtroSupervisor);
 
@@ -480,18 +649,40 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
 
       // STRICT CHECK: Only include workers who have jabas > 0!
       if (jCount > 0) {
+        // Candidate key: when a module filter is active, DEDUPLICATE STRICTLY BY cleanDni
+        const candidateKey = normFilterMod ? cleanDni : `${cleanDni}__${tMod || 'gen'}`;
+
         const assignedLider =
-          metaByDni[cleanDni]?.lider ||
+          metaByDniMod[`${cleanDni}__${normFilterMod || tMod}`]?.lider ||
+          metaByDniMod[cleanDni]?.lider ||
           t.lider ||
           filtroLider ||
           (availableLideres.length > 0 ? availableLideres[0].nombre : 'Antony Cerron');
 
-        const vInfo = alreadyValidatedMap.get(cleanDni);
+        const vInfo = normFilterMod
+          ? alreadyValidatedMap.get(`${cleanDni}__${normFilterMod}`)
+          : ((tMod && alreadyValidatedMap.get(personModKey)) || alreadyValidatedMap.get(cleanDni));
 
-        map.set(cleanDni, {
+        if (map.has(candidateKey)) {
+          // Worker already present: keep maximum jabas and merge metadata without duplicating!
+          const existing = map.get(candidateKey)!;
+          if (jCount > existing.jabas) {
+            existing.jabas = jCount;
+          }
+          if (!existing.worker.lider && assignedLider) {
+            existing.worker.lider = assignedLider;
+          }
+          if (normFilterMod) {
+            existing.worker.modulo = filtroModulo;
+          }
+          return;
+        }
+
+        map.set(candidateKey, {
           worker: {
             ...t,
             dni: cleanDni,
+            modulo: normFilterMod ? filtroModulo : (t.modulo || filtroModulo),
             grupo: t.grupo || filtroGrupo,
             supervisor: t.supervisor || filtroSupervisor,
             lider: assignedLider
@@ -506,27 +697,34 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
     // 4. Also include any workers that have DetalleJabas registered under these filters even if not in master list
     matchingDetalle.forEach((dj) => {
       const cleanDni = String(dj.dni || '').trim();
-      if (cleanDni && !map.has(cleanDni)) {
-        const syntheticWorker: Trabajador = {
-          id: `T_DET_${cleanDni}`,
-          fecha: dj.fecha,
-          dni: cleanDni,
-          nombres: dj.trabajador,
-          fundo: dj.fundo,
-          modulo: dj.modulo,
-          supervisor: dj.supervisor || filtroSupervisor,
-          grupo: dj.grupo || filtroGrupo,
-          lider: dj.lider || filtroLider || 'Antony Cerron',
-          tipo: 'Cosechador',
-          jabas: jabasByDni[cleanDni] || dj.jabas
-        };
-        const vInfo = alreadyValidatedMap.get(cleanDni);
-        map.set(cleanDni, { 
-          worker: syntheticWorker, 
-          jabas: jabasByDni[cleanDni] || dj.jabas,
-          isValidated: !!vInfo,
-          validationInfo: vInfo
-        });
+      const djMod = normalizeModulo(dj.modulo);
+      const candidateKey = normFilterMod ? cleanDni : `${cleanDni}__${djMod}`;
+      if (cleanDni && !map.has(candidateKey)) {
+        const jCount = jabasByDniMod[`${cleanDni}__${djMod}`] || dj.jabas;
+        if (jCount > 0) {
+          const syntheticWorker: Trabajador = {
+            id: `T_DET_${cleanDni}_${djMod}`,
+            fecha: dj.fecha,
+            dni: cleanDni,
+            nombres: dj.trabajador,
+            fundo: dj.fundo,
+            modulo: dj.modulo,
+            supervisor: dj.supervisor || filtroSupervisor,
+            grupo: dj.grupo || filtroGrupo,
+            lider: dj.lider || filtroLider || 'Antony Cerron',
+            tipo: 'Cosechador',
+            jabas: jCount
+          };
+          const vInfo = normFilterMod
+            ? alreadyValidatedMap.get(`${cleanDni}__${normFilterMod}`)
+            : ((djMod && alreadyValidatedMap.get(`${cleanDni}__${djMod}`)) || alreadyValidatedMap.get(cleanDni));
+          map.set(candidateKey, { 
+            worker: syntheticWorker, 
+            jabas: jCount,
+            isValidated: !!vInfo,
+            validationInfo: vInfo
+          });
+        }
       }
     });
 
@@ -683,8 +881,10 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
   // Quick instant validation of an individual worker
   const handleValidateSingleWorker = (worker: Trabajador, jabas: number) => {
     const cleanDni = String(worker.dni || '').trim();
-    if (alreadyValidatedMap.has(cleanDni)) {
-      onToast(`⚠️ El trabajador ${worker.nombres} ya fue validado anteriormente para esta fecha`, 'warning');
+    const wMod = normalizeModulo(worker.modulo);
+    const workerValKey = wMod ? `${cleanDni}__${wMod}` : cleanDni;
+    if (alreadyValidatedMap.has(workerValKey)) {
+      onToast(`⚠️ El trabajador ${worker.nombres} ya fue validado en el módulo ${worker.modulo || ''} para esta fecha`, 'warning');
       return;
     }
 
@@ -960,21 +1160,42 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
 
               {/* Módulo */}
               <div className="space-y-1">
-                <label className="flex items-center gap-1.5 text-xs font-bold text-[#2e7d32]">
-                  <MapPin className="w-3.5 h-3.5" />
-                  <span>Módulo *</span>
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-1.5 text-xs font-bold text-[#2e7d32]">
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>Módulo *</span>
+                  </label>
+                  {detectedNewModuloInfo?.modulo && filtroModulo !== detectedNewModuloInfo.modulo && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFiltroModulo(detectedNewModuloInfo.modulo);
+                        if (detectedNewModuloInfo.fundo && !filtroFundo) {
+                          setFiltroFundo(detectedNewModuloInfo.fundo);
+                        }
+                      }}
+                      className="text-[10px] text-amber-800 bg-amber-100 hover:bg-amber-200 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5 transition-colors cursor-pointer"
+                      title="Filtrar por el módulo nuevo asignado"
+                    >
+                      <Sparkles className="w-2.5 h-2.5 text-amber-600" />
+                      <span>Nuevo: {detectedNewModuloInfo.modulo}</span>
+                    </button>
+                  )}
+                </div>
                 <select
                   value={filtroModulo}
                   onChange={(e) => setFiltroModulo(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-lg border border-[#bfcaba] bg-white font-medium text-gray-900 focus:outline-none focus:border-[#2e7d32]"
                 >
                   <option value="">Todos los módulos...</option>
-                  {modulosList.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
+                  {modulosList.map((m) => {
+                    const isNew = detectedNewModuloInfo?.modulo && normalizeModulo(m) === normalizeModulo(detectedNewModuloInfo.modulo);
+                    return (
+                      <option key={m} value={m}>
+                        {m} {isNew ? '⭐ (Módulo Nuevo)' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
@@ -1138,6 +1359,27 @@ export const ValidacionTab: React.FC<ValidacionTabProps> = ({
                   <span>Desmarcar Todos</span>
                 </button>
               </div>
+            </div>
+
+            {/* Indicador de Filtro y Módulo Activo */}
+            <div className="flex items-center justify-between gap-2 px-3 py-2 mb-3 rounded-xl bg-[#e8f5e9]/70 border border-[#c8e6c9] text-xs text-gray-800 flex-wrap">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Filter className="w-3.5 h-3.5 text-[#2e7d32]" />
+                <span className="font-medium">
+                  Módulo:{' '}
+                  <strong className="text-[#1b5e20]">{filtroModulo ? filtroModulo : 'Todos los módulos'}</strong>
+                  {filtroModulo && detectedNewModuloInfo?.modulo && normalizeModulo(filtroModulo) === normalizeModulo(detectedNewModuloInfo.modulo) && (
+                    <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">
+                      ⭐ Módulo Nuevo
+                    </span>
+                  )}
+                  {filtroFundo && <span> · Fundo: <strong className="text-gray-900">{filtroFundo}</strong></span>}
+                  {filtroGrupo && <span> · Grupo: <strong className="text-gray-900">{filtroGrupo}</strong></span>}
+                </span>
+              </div>
+              <span className="text-[11px] font-bold text-[#1b5e20] bg-white px-2.5 py-0.5 rounded-full border border-[#c8e6c9] shadow-2xs">
+                {filteredList.length} trabajador{filteredList.length === 1 ? '' : 'es'} único{filteredList.length === 1 ? '' : 's'}
+              </span>
             </div>
 
             {/* Listado de Trabajadores con Jabas y Botón Individual de Conformidad */}

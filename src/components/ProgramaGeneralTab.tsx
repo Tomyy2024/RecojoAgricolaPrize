@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { ProgramaGeneral, UserSession } from '../types';
 import { INITIAL_FUNDOS, INITIAL_MODULOS_POR_FUNDO } from '../data/initialData';
+import { getLocalToday, normalizeDateString, formatDateDDMMAAAA } from '../utils/storage';
 import { 
   Sprout, 
   Plus, 
@@ -11,7 +12,8 @@ import {
   Calendar, 
   Layers, 
   Users, 
-  Search 
+  Search,
+  Filter
 } from 'lucide-react';
 
 interface ProgramaGeneralTabProps {
@@ -30,6 +32,7 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
   const isReadOnly = session.rol === 'Trabajador';
   
   // Form State
+  const [fecha, setFecha] = useState(getLocalToday());
   const [fundo, setFundo] = useState('');
   const [modulo, setModulo] = useState('');
   const [haTotal, setHaTotal] = useState('');
@@ -37,6 +40,21 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
   const [observaciones, setObservaciones] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filtroFecha, setFiltroFecha] = useState('');
+
+  // Fechas disponibles en programas generales
+  const fechasDisponibles = useMemo(() => {
+    const map = new Map<string, number>();
+    programasGenerales.forEach((pg) => {
+      const d = normalizeDateString(pg.fecha || pg.fechaRegistro || pg.createdAt || '');
+      if (d) {
+        map.set(d, (map.get(d) || 0) + 1);
+      }
+    });
+    return Array.from(map.entries())
+      .map(([f, count]) => ({ fecha: f, fechaFormateada: formatDateDDMMAAAA(f), count }))
+      .sort((a, b) => b.fecha.localeCompare(a.fecha));
+  }, [programasGenerales]);
 
   // Available modulos based on selected fundo
   const availableModulos = fundo ? INITIAL_MODULOS_POR_FUNDO[fundo] || [] : [];
@@ -65,6 +83,7 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
         if (pg.id === editingId) {
           return {
             ...pg,
+            fecha: fecha || getLocalToday(),
             fundo,
             modulo,
             haTotal,
@@ -77,11 +96,12 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
         return pg;
       });
       onSave(updated);
-      onToast(`✅ Programa General actualizado (${fundo} - ${modulo})`);
+      onToast(`✅ Programa Semanal actualizado (${fundo} - ${modulo})`);
     } else {
       // Create
       const newEntry: ProgramaGeneral = {
         id: `PG_${Date.now()}`,
+        fecha: fecha || getLocalToday(),
         fundo,
         modulo,
         haTotal,
@@ -93,7 +113,7 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
         supervisor: session.nombre
       };
       onSave([newEntry, ...programasGenerales]);
-      onToast(`✅ Programa General registrado (${fundo} - ${modulo})`);
+      onToast(`✅ Programa Semanal registrado (${fundo} - ${modulo})`);
     }
 
     resetForm();
@@ -101,6 +121,7 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
 
   const handleEdit = (item: ProgramaGeneral) => {
     setEditingId(item.id);
+    setFecha(item.fecha || (item.fechaRegistro ? item.fechaRegistro.slice(0, 10) : getLocalToday()));
     setFundo(item.fundo);
     setModulo(item.modulo);
     setHaTotal(item.haTotal);
@@ -110,7 +131,7 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
   };
 
   const handleDelete = (id: string) => {
-    if (!window.confirm('¿Estás seguro de eliminar este registro del Programa General?')) return;
+    if (!window.confirm('¿Estás seguro de eliminar este registro del Programa Semanal?')) return;
     const filtered = programasGenerales.filter((pg) => pg.id !== id);
     onSave(filtered);
     onToast('🗑️ Registro eliminado correctamente');
@@ -119,6 +140,7 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
 
   const resetForm = () => {
     setEditingId(null);
+    setFecha(getLocalToday());
     setFundo('');
     setModulo('');
     setHaTotal('');
@@ -127,16 +149,22 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
   };
 
   // Filtered list
-  const filteredList = programasGenerales.filter((pg) => {
-    if (!searchTerm) return true;
-    const term = searchTerm.toLowerCase();
-    return (
-      pg.fundo.toLowerCase().includes(term) ||
-      pg.modulo.toLowerCase().includes(term) ||
-      pg.observaciones.toLowerCase().includes(term) ||
-      (pg.supervisor && pg.supervisor.toLowerCase().includes(term))
-    );
-  });
+  const filteredList = useMemo(() => {
+    return programasGenerales.filter((pg) => {
+      if (filtroFecha) {
+        const pgDate = normalizeDateString(pg.fecha || pg.fechaRegistro || pg.createdAt || '');
+        if (pgDate !== normalizeDateString(filtroFecha)) return false;
+      }
+      if (!searchTerm) return true;
+      const term = searchTerm.toLowerCase();
+      return (
+        pg.fundo.toLowerCase().includes(term) ||
+        pg.modulo.toLowerCase().includes(term) ||
+        pg.observaciones.toLowerCase().includes(term) ||
+        (pg.supervisor && pg.supervisor.toLowerCase().includes(term))
+      );
+    });
+  }, [programasGenerales, filtroFecha, searchTerm]);
 
   return (
     <div className="space-y-4">
@@ -149,10 +177,10 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-bold text-[#1b5e20] leading-tight">
-                Programa General de Campo
+                Programa Semanal de Campo
               </h2>
               <p className="text-xs text-[#757575]">
-                Planificación maestra: fundos, módulos, hectáreas y dotación
+                Planificación semanal maestra: fundos, módulos, hectáreas y dotación
               </p>
             </div>
           </div>
@@ -176,12 +204,12 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
                 {editingId ? (
                   <>
                     <Pencil className="w-4 h-4 text-[#ff8f00]" />
-                    <span>Editando Programa General</span>
+                    <span>Editando Programa Semanal</span>
                   </>
                 ) : (
                   <>
                     <Plus className="w-4 h-4 text-[#2e7d32]" />
-                    <span>Nuevo Programa General</span>
+                    <span>Nuevo Programa Semanal</span>
                   </>
                 )}
               </h3>
@@ -197,7 +225,23 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+              <div>
+                <label className="block text-xs font-semibold text-[#40493d] mb-1">
+                  Fecha del Programa *
+                </label>
+                <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#bfcaba] bg-white">
+                  <Calendar className="w-4 h-4 text-[#2e7d32] shrink-0" />
+                  <input
+                    type="date"
+                    value={fecha}
+                    onChange={(e) => setFecha(e.target.value)}
+                    required
+                    className="w-full text-xs sm:text-sm bg-transparent font-medium text-gray-800 focus:outline-none cursor-pointer"
+                  />
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-[#40493d] mb-1">
                   Fundo *
@@ -292,7 +336,7 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
                 className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
               >
                 <Check className="w-4 h-4" />
-                <span>{editingId ? 'Actualizar Programa General' : 'Guardar Programa General'}</span>
+                <span>{editingId ? 'Actualizar Programa Semanal' : 'Guardar Programa Semanal'}</span>
               </button>
               {editingId && (
                 <button
@@ -307,21 +351,89 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
           </form>
         )}
 
-        {/* Search & Counter Bar */}
-        <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2 mb-3">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Buscar por fundo, módulo u observación..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 text-xs border border-[#bfcaba] rounded-lg focus:outline-none focus:border-[#2e7d32]"
-            />
+        {/* Search & Date Filter Bar */}
+        <div className="bg-[#fafafa] p-3 rounded-xl border border-[#e0e0e0] mb-3 space-y-2.5">
+          <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-2.5">
+            {/* Buscador de texto */}
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Buscar por fundo, módulo u observación..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-[#bfcaba] rounded-lg focus:outline-none focus:border-[#2e7d32]"
+              />
+            </div>
+
+            {/* Filtro de Fecha */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-[#bfcaba] shadow-2xs">
+                <Calendar className="w-3.5 h-3.5 text-[#2e7d32] shrink-0" />
+                <span className="text-[11px] font-bold text-gray-600">Filtrar Fecha:</span>
+                <input
+                  type="date"
+                  value={filtroFecha}
+                  onChange={(e) => setFiltroFecha(e.target.value)}
+                  className="bg-transparent text-xs font-semibold text-gray-800 focus:outline-none cursor-pointer"
+                />
+              </div>
+
+              {fechasDisponibles.length > 0 && (
+                <select
+                  value={filtroFecha}
+                  onChange={(e) => setFiltroFecha(e.target.value)}
+                  className="text-xs bg-white px-2 py-1.5 rounded-lg border border-[#bfcaba] font-medium text-gray-700 focus:outline-none cursor-pointer"
+                >
+                  <option value="">Fechas disponibles ({fechasDisponibles.length})</option>
+                  {fechasDisponibles.map((f) => (
+                    <option key={f.fecha} value={f.fecha}>
+                      {f.fechaFormateada} ({f.count} reg.)
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setFiltroFecha(getLocalToday())}
+                className={`text-xs px-2.5 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                  filtroFecha === getLocalToday()
+                    ? 'bg-[#2e7d32] text-white shadow-xs'
+                    : 'bg-white hover:bg-gray-100 text-gray-700 border border-[#bfcaba]'
+                }`}
+              >
+                Hoy
+              </button>
+
+              {filtroFecha && (
+                <button
+                  type="button"
+                  onClick={() => setFiltroFecha('')}
+                  className="text-xs px-2.5 py-1.5 rounded-lg font-bold bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 transition-all cursor-pointer flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" />
+                  <span>Ver Todas</span>
+                </button>
+              )}
+            </div>
           </div>
-          <span className="text-xs text-[#757575] font-medium self-end sm:self-center">
-            Mostrando {filteredList.length} de {programasGenerales.length}
-          </span>
+
+          <div className="flex items-center justify-between text-xs text-[#757575] pt-1 border-t border-gray-200">
+            <div className="flex items-center gap-1.5">
+              <Filter className="w-3.5 h-3.5 text-[#2e7d32]" />
+              {filtroFecha ? (
+                <span>
+                  Filtrando por fecha: <strong className="text-[#1b5e20]">{formatDateDDMMAAAA(filtroFecha)}</strong>
+                </span>
+              ) : (
+                <span>Mostrando todas las fechas</span>
+              )}
+            </div>
+            <span className="font-semibold text-gray-700">
+              Mostrando {filteredList.length} de {programasGenerales.length} registros
+            </span>
+          </div>
         </div>
 
         {/* Records Table */}
@@ -342,7 +454,7 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
               {filteredList.length === 0 ? (
                 <tr>
                   <td colSpan={isReadOnly ? 6 : 7} className="py-8 text-center text-gray-400">
-                    No se encontraron registros de Programa General.
+                    No se encontraron registros de Programa Semanal.
                   </td>
                 </tr>
               ) : (
@@ -361,7 +473,7 @@ export const ProgramaGeneralTab: React.FC<ProgramaGeneralTabProps> = ({
                       {pg.observaciones || '—'}
                     </td>
                     <td className="py-2.5 px-3 text-gray-500 whitespace-nowrap">
-                      {pg.fechaRegistro ? pg.fechaRegistro.slice(0, 10) : '—'}
+                      {pg.fecha ? formatDateDDMMAAAA(pg.fecha) : (pg.fechaRegistro ? formatDateDDMMAAAA(pg.fechaRegistro.slice(0, 10)) : '—')}
                     </td>
                     {!isReadOnly && (
                       <td className="py-2.5 px-3 text-center">

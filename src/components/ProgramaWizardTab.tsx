@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Programa, SelectedLote, UserSession } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Programa, SelectedLote, UserSession, ProgramacionDiaria } from '../types';
 import { 
   INITIAL_FUNDOS, 
   INITIAL_MODULOS_POR_FUNDO, 
@@ -17,19 +17,26 @@ import {
   Layers, 
   Calendar, 
   Box, 
-  Sparkles 
+  Sparkles,
+  CalendarCheck
 } from 'lucide-react';
 
 interface ProgramaWizardTabProps {
   session: UserSession;
   onSavePrograma: (programa: Programa) => void;
   onToast: (msg: string) => void;
+  programacionesDiarias?: ProgramacionDiaria[];
+  initialProgramacion?: ProgramacionDiaria | null;
+  onClearInitialProgramacion?: () => void;
 }
 
 export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
   session,
   onSavePrograma,
-  onToast
+  onToast,
+  programacionesDiarias = [],
+  initialProgramacion = null,
+  onClearInitialProgramacion
 }) => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
@@ -41,7 +48,6 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
   const [numTrabajadores, setNumTrabajadores] = useState('');
   const [tipo, setTipo] = useState<'Suelo' | 'Maceta'>('Suelo');
   const [jabas, setJabas] = useState('');
-  const [ddc, setDdc] = useState('');
 
   // Lotes State
   const [selectedLotes, setSelectedLotes] = useState<Set<string>>(new Set());
@@ -49,6 +55,42 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
   // Modal confirmation state
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastSavedId, setLastSavedId] = useState('');
+
+  // Load from initialProgramacion if provided
+  useEffect(() => {
+    if (initialProgramacion) {
+      setFecha(initialProgramacion.fecha || getLocalToday());
+      setFundo(initialProgramacion.fundo);
+      setModulo(initialProgramacion.modulo);
+      setHaTotal(initialProgramacion.haTotal || '');
+      setNumTrabajadores(initialProgramacion.numTrab || '');
+      setTipo(initialProgramacion.tipo === 'Maceta' ? 'Maceta' : 'Suelo');
+      setJabas(String(initialProgramacion.jabas || ''));
+      if (initialProgramacion.lotes && initialProgramacion.lotes.length > 0) {
+        const s = new Set<string>();
+        initialProgramacion.lotes.forEach(l => s.add(`${l.turno}|${l.lote}`));
+        setSelectedLotes(s);
+      }
+      onToast(`⚡ Ejecución precargada desde Programación ${initialProgramacion.id}`);
+      if (onClearInitialProgramacion) onClearInitialProgramacion();
+    }
+  }, [initialProgramacion]);
+
+  const handleLoadProgramacion = (prog: ProgramacionDiaria) => {
+    setFecha(prog.fecha || getLocalToday());
+    setFundo(prog.fundo);
+    setModulo(prog.modulo);
+    setHaTotal(prog.haTotal || '');
+    setNumTrabajadores(prog.numTrab || '');
+    setTipo(prog.tipo === 'Maceta' ? 'Maceta' : 'Suelo');
+    setJabas(String(prog.jabas || ''));
+    if (prog.lotes && prog.lotes.length > 0) {
+      const s = new Set<string>();
+      prog.lotes.forEach(l => s.add(`${l.turno}|${l.lote}`));
+      setSelectedLotes(s);
+    }
+    onToast(`⚡ Datos cargados desde Programación Diaria ${prog.id}`);
+  };
 
   const availableModulos = fundo ? INITIAL_MODULOS_POR_FUNDO[fundo] || [] : [];
   
@@ -130,7 +172,7 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
       numTrab: numTrabajadores || '0',
       tipo,
       jabas: parseInt(jabas) || 0,
-      ddc: parseFloat(ddc) || 0,
+      ddc: 0,
       lotes: lotesArr,
       totalLotes: lotesArr.length,
       fechaRegistro: getLocalISO(),
@@ -153,7 +195,6 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
     setNumTrabajadores('');
     setTipo('Suelo');
     setJabas('');
-    setDdc('');
     setSelectedLotes(new Set());
   };
 
@@ -243,6 +284,38 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
               Paso 1: Parámetros de la Ejecución
             </h2>
           </div>
+
+          {/* Quick load from ProgramacionDiaria */}
+          {programacionesDiarias && programacionesDiarias.length > 0 && (
+            <div className="mb-5 p-3 sm:p-4 bg-[#f9fbe7] rounded-xl border border-[#dcedc8] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2">
+                <CalendarCheck className="w-5 h-5 text-[#2e7d32] shrink-0" />
+                <div>
+                  <span className="text-xs font-bold text-[#1b5e20] block">
+                    Importar desde Programación Diaria
+                  </span>
+                  <span className="text-[11px] text-gray-600">
+                    Puedes cargar fundo, módulo y lotes programados para agilizar el registro.
+                  </span>
+                </div>
+              </div>
+              <select
+                onChange={(e) => {
+                  const found = programacionesDiarias.find(p => p.id === e.target.value);
+                  if (found) handleLoadProgramacion(found);
+                }}
+                defaultValue=""
+                className="text-xs px-3 py-1.5 rounded-lg border border-[#a5d6a7] bg-white font-semibold text-[#1b5e20] focus:outline-none cursor-pointer"
+              >
+                <option value="" disabled>Seleccionar para cargar...</option>
+                {programacionesDiarias.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.fecha} · {p.fundo} ({p.modulo}) - {p.totalLotes} lotes
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <form onSubmit={handleStep1Next} className="space-y-4">
             <div>
@@ -347,36 +420,19 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
               </select>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-[#40493d] mb-1">
-                  Jabas Ejecutadas
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  placeholder="0"
-                  value={jabas}
-                  onChange={(e) => setJabas(e.target.value)}
-                  className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-[#bfcaba] bg-white focus:outline-none focus:border-[#2e7d32]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#40493d] mb-1">
-                  Días de Cosecha (DDC)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  placeholder="0.0"
-                  value={ddc}
-                  onChange={(e) => setDdc(e.target.value)}
-                  className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-[#bfcaba] bg-white focus:outline-none focus:border-[#2e7d32]"
-                />
-              </div>
+            <div>
+              <label className="block text-xs font-semibold text-[#40493d] mb-1">
+                Jabas Ejecutadas
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                placeholder="0"
+                value={jabas}
+                onChange={(e) => setJabas(e.target.value)}
+                className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-[#bfcaba] bg-white focus:outline-none focus:border-[#2e7d32]"
+              />
             </div>
 
             <button
@@ -551,11 +607,7 @@ export const ProgramaWizardTab: React.FC<ProgramaWizardTabProps> = ({
             </div>
             <div>
               <span className="block text-[11px] text-[#757575] font-medium">Jabas Ejecutadas</span>
-              <span className="font-bold text-xs sm:text-sm text-[#ff8f00]">{jabas || '0'}</span>
-            </div>
-            <div>
-              <span className="block text-[11px] text-[#757575] font-medium">DDC</span>
-              <span className="font-bold text-xs sm:text-sm text-gray-800">{ddc || '0'}</span>
+              <span className="font-bold text-xs sm:text-sm text-[#ff8f00]">{jabas || '0'} jabas</span>
             </div>
           </div>
 

@@ -3,6 +3,7 @@ import {
   Trabajador, 
   Programa, 
   ProgramaGeneral, 
+  ProgramacionDiaria,
   DetalleJaba, 
   Lider, 
   UserSession, 
@@ -26,6 +27,7 @@ const KEYS = {
   SESSION: 'recojoFrutosSesion',
   USUARIOS: 'recojoFrutosUsuarios',
   PROGRAMAS: 'recojoFrutosProgramas',
+  PROGRAMACION_DIARIA: 'recojoFrutosProgramacionDiaria',
   PROGRAMA_GENERAL: 'recojoFrutosProgramaGeneral',
   TRABAJADORES: 'recojoFrutosTrabajadores',
   AVANCE: 'recojoFrutosAvance',
@@ -284,6 +286,7 @@ export function wipeAllBackupData(clearAuth: boolean = false) {
     // 1. Reset standard app datasets to clean empty arrays
     localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(INITIAL_TRABAJADORES));
     localStorage.setItem(KEYS.PROGRAMAS, JSON.stringify([]));
+    localStorage.setItem(KEYS.PROGRAMACION_DIARIA, JSON.stringify([]));
     localStorage.setItem(KEYS.PROGRAMA_GENERAL, JSON.stringify([]));
     localStorage.setItem(KEYS.DETALLE_JABAS, JSON.stringify([]));
     localStorage.setItem(KEYS.AVANCE, JSON.stringify({}));
@@ -522,7 +525,12 @@ export function getTrabajadores(): Trabajador[] {
     (Array.isArray(list) ? list : []).forEach((t, i) => {
       const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
       const tFecha = t.fecha ? normalizeDateString(t.fecha) : '';
-      const key = cleanDni ? `${cleanDni}__${tFecha || 's_f'}` : (t.id ? `${t.id}__${tFecha}` : `idx_${i}__${tFecha}__${t.nombres}`);
+      const tModulo = String(t.modulo || 'SM').trim().toUpperCase();
+      const key = cleanDni
+        ? `${cleanDni}__${tFecha || 's_f'}__${tModulo}`
+        : t.id
+        ? `${t.id}__${tFecha}__${tModulo}`
+        : `idx_${i}__${tFecha}__${tModulo}__${t.nombres}`;
       if (!seen.has(key)) {
         seen.add(key);
         unique.push({
@@ -543,7 +551,12 @@ export function saveTrabajadores(trabajadores: Trabajador[]) {
   (Array.isArray(trabajadores) ? trabajadores : []).forEach((t, i) => {
     const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
     const tFecha = t.fecha ? normalizeDateString(t.fecha) : '';
-    const key = cleanDni ? `${cleanDni}__${tFecha || 's_f'}` : (t.id ? `${t.id}__${tFecha}` : `idx_${i}__${tFecha}__${t.nombres}`);
+    const tModulo = String(t.modulo || 'SM').trim().toUpperCase();
+    const key = cleanDni
+      ? `${cleanDni}__${tFecha || 's_f'}__${tModulo}`
+      : t.id
+      ? `${t.id}__${tFecha}__${tModulo}`
+      : `idx_${i}__${tFecha}__${tModulo}__${t.nombres}`;
     if (!seen.has(key)) {
       seen.add(key);
       unique.push({
@@ -824,11 +837,28 @@ export function deleteProgramaFromStorage(id: string): Programa[] {
   return updated;
 }
 
-// Programa General
+// Programa General (Programa Semanal)
 export function getProgramaGeneral(): ProgramaGeneral[] {
   try {
     const raw = localStorage.getItem(KEYS.PROGRAMA_GENERAL);
-    return raw ? JSON.parse(raw) : INITIAL_PROGRAMA_GENERAL;
+    const list: ProgramaGeneral[] = raw ? JSON.parse(raw) : INITIAL_PROGRAMA_GENERAL;
+    let modified = false;
+    const sanitized = list.map((item) => {
+      if (!item.fecha) {
+        modified = true;
+        const derivedFecha = item.fechaRegistro
+          ? item.fechaRegistro.slice(0, 10)
+          : item.createdAt
+          ? item.createdAt.slice(0, 10)
+          : getLocalToday();
+        return { ...item, fecha: derivedFecha };
+      }
+      return item;
+    });
+    if (modified) {
+      localStorage.setItem(KEYS.PROGRAMA_GENERAL, JSON.stringify(sanitized));
+    }
+    return sanitized;
   } catch {
     return INITIAL_PROGRAMA_GENERAL;
   }
@@ -836,6 +866,27 @@ export function getProgramaGeneral(): ProgramaGeneral[] {
 
 export function saveProgramaGeneral(list: ProgramaGeneral[]) {
   localStorage.setItem(KEYS.PROGRAMA_GENERAL, JSON.stringify(list));
+}
+
+// Programación Diaria
+export function getProgramacionesDiarias(): ProgramacionDiaria[] {
+  try {
+    const raw = localStorage.getItem(KEYS.PROGRAMACION_DIARIA);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveProgramacionesDiarias(list: ProgramacionDiaria[]) {
+  localStorage.setItem(KEYS.PROGRAMACION_DIARIA, JSON.stringify(list));
+}
+
+export function deleteProgramacionDiariaFromStorage(id: string): ProgramacionDiaria[] {
+  const current = getProgramacionesDiarias();
+  const updated = current.filter(p => p.id !== id);
+  localStorage.setItem(KEYS.PROGRAMACION_DIARIA, JSON.stringify(updated));
+  return updated;
 }
 
 // Detalle Jabas - Sanitización, deduplicación y persistencia limpia
@@ -1349,6 +1400,7 @@ export function generateBackupJson(): string {
     usuarios: getUsuarios(),
     trabajadores: getTrabajadores(),
     programas: getProgramas(),
+    programacionesDiarias: getProgramacionesDiarias(),
     programaGeneral: getProgramaGeneral(),
     detalleJabas: getDetalleJabas(),
     avance: getAvanceMap(),

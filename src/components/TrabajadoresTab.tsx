@@ -37,6 +37,8 @@ import {
   Building2,
   MapPin,
   Layers,
+  Shuffle,
+  Pencil,
   UserCheck,
   UserCog,
   Plus,
@@ -124,6 +126,19 @@ interface TrabajadoresTabProps {
   onRecargarNominaServidor?: () => Promise<void>;
   onOpenInstructivo?: () => void;
 }
+
+export const normalizeGrupo = (g?: string | null): string => {
+  if (!g) return '';
+  const clean = String(g).toLowerCase().replace(/\s+/g, ' ').trim();
+  const match = clean.match(/grupo\s*0*(\d+)/i);
+  if (match) return `grupo ${parseInt(match[1], 10)}`;
+  return clean;
+};
+
+export const isMatchingGrupo = (g1?: string | null, g2?: string | null): boolean => {
+  if (!g1 || !g2) return false;
+  return normalizeGrupo(g1) === normalizeGrupo(g2);
+};
 
 export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   session,
@@ -310,6 +325,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     loading: false
   });
 
+  // Modal y estado para Cambio Masivo de Módulo de Cuadrilla
+  const [reservaParaCambioModulo, setReservaParaCambioModulo] = useState<ReservaCuadrilla | null>(null);
+  const [nuevoModuloSeleccionado, setNuevoModuloSeleccionado] = useState<string>('');
+  const [otroModuloManual, setOtroModuloManual] = useState<string>('');
+  const [isSavingCambioModulo, setIsSavingCambioModulo] = useState<boolean>(false);
+
   // Derive unique lists for dropdowns
   const supervisoresList = useMemo(() => {
     const set = new Set<string>();
@@ -381,18 +402,24 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   }, [trabajadores, cuadrillaFundo, modulosPorFundo]);
 
   const allGrupos = useMemo(() => {
-    const set = new Set<string>();
-    grupos.forEach((g) => {
-      if (g && g.trim()) set.add(g.trim());
-    });
-    trabajadores.forEach((t) => {
-      if (t.grupo && t.grupo.trim()) set.add(t.grupo.trim());
-    });
-    lideres.forEach((l) => {
-      if (l.grupo && l.grupo.trim()) set.add(l.grupo.trim());
-    });
-    return Array.from(set).sort();
-  }, [grupos, trabajadores, lideres]);
+    const map = new Map<string, string>();
+    const addGrupo = (g?: string) => {
+      if (!g || !g.trim()) return;
+      const clean = g.trim();
+      const norm = normalizeGrupo(clean);
+      if (!map.has(norm)) {
+        const match = clean.match(/grupo\s*0*(\d+)/i);
+        const pretty = match ? `Grupo ${match[1].padStart(2, '0')}` : clean;
+        map.set(norm, pretty);
+      }
+    };
+    grupos.forEach(addGrupo);
+    trabajadores.forEach((t) => addGrupo(t.grupo));
+    lideres.forEach((l) => addGrupo(l.grupo));
+    reservasState.forEach((r) => addGrupo(r.grupo));
+    if (detalleJabas) detalleJabas.forEach((d) => addGrupo(d.grupo));
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [grupos, trabajadores, lideres, reservasState, detalleJabas]);
 
   // Combined leaders list (from state + real records) - strictly deduplicated
   const availableLideres = useMemo(() => {
@@ -647,8 +674,9 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       const t = effectiveTrabajadores[i];
       const cleanDni = normalizeDni(t.dni);
       const tFecha = t.fecha ? normalizeDateString(t.fecha) : '';
-      // Clave única compuesta para evitar colisión de DNIs si se visualizan múltiples fechas
-      const uniqueKey = cleanDni ? `${cleanDni}__${tFecha || 'sf'}` : (t.id || `idx_${i}__${t.nombres}`);
+      const tMod = normalizeModulo(t.modulo) || 'SM';
+      // Clave única compuesta incluyendo módulo para permitir ingresos adicionales en módulos distintos sin considerarlos duplicados
+      const uniqueKey = t.id ? `${t.id}__${tMod}` : (cleanDni ? `${cleanDni}__${tFecha || 'sf'}__${tMod}` : `idx_${i}__${t.nombres}__${tMod}`);
       if (!seenKey.has(uniqueKey)) {
         seenKey.add(uniqueKey);
         list.push({
@@ -727,11 +755,19 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         if (jabas > 0) {
           const norm = normalizeDni(d.dni);
           const raw = String(d.dni || '').trim();
+          const dMod = normalizeModulo(d.modulo);
+
+          // Claves específicas por módulo
+          if (norm && dMod) map[`${norm}__${dMod}`] = (map[`${norm}__${dMod}`] || 0) + jabas;
+          if (raw && dMod) map[`${raw}__${dMod}`] = (map[`${raw}__${dMod}`] || 0) + jabas;
+
+          // Claves generales acumuladas
           if (norm) map[norm] = (map[norm] || 0) + jabas;
           if (raw && raw !== norm) map[raw] = (map[raw] || 0) + jabas;
           if (d.id) map[d.id] = (map[d.id] || 0) + jabas;
           if (d.trabajador) {
             const normName = normalizeStr(d.trabajador);
+            if (dMod) map[`NAME_${normName}__${dMod}`] = (map[`NAME_${normName}__${dMod}`] || 0) + jabas;
             map[`NAME_${normName}`] = (map[`NAME_${normName}`] || 0) + jabas;
           }
         }
@@ -739,7 +775,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     });
 
     return map;
-  }, [detalleJabas, fechaPersonal, normalizeDni, normalizeStr]);
+  }, [detalleJabas, fechaPersonal, normalizeDni, normalizeStr, normalizeModulo]);
 
   // Consulta directa y estricta a la hoja Registro de Avance (detalleJabas) considerando los filtros de días
   // Cuenta a todos los trabajadores con jabas asignadas (> 0) y el total acumulado de jabas
@@ -784,6 +820,18 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       const raw = String(worker.dni ?? '').trim();
       const id = worker.id || '';
       const nameKey = worker.nombres ? `NAME_${normalizeStr(worker.nombres)}` : '';
+      const wMod = normalizeModulo(worker.modulo);
+
+      // Si el trabajador tiene módulo específico, priorizar el conteo de ese módulo
+      if (wMod) {
+        const specific =
+          (norm && workerJabasTodayMap[`${norm}__${wMod}`]) ||
+          (raw && workerJabasTodayMap[`${raw}__${wMod}`]) ||
+          (nameKey && workerJabasTodayMap[`${nameKey}__${wMod}`]);
+        if (specific !== undefined && specific >= 0) {
+          return specific;
+        }
+      }
 
       const fromMap =
         (norm && workerJabasTodayMap[norm]) ||
@@ -800,7 +848,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       }
       return 0;
     },
-    [workerJabasTodayMap, fechaPersonal, normalizeDni, normalizeStr]
+    [workerJabasTodayMap, fechaPersonal, normalizeDni, normalizeStr, normalizeModulo]
   );
 
   const hasWorkerJabas = useCallback(
@@ -834,7 +882,19 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   const currentSupervisorReservaHoy = useMemo(() => {
     if (currentSupervisorReservasHoy.length === 0) return null;
     const targetMod = cuadrillaModulo ? normalizeModulo(cuadrillaModulo) : '';
-    const targetGrp = cuadrillaGrupo ? cuadrillaGrupo.trim().toLowerCase() : '';
+    const targetGrp = cuadrillaGrupo ? normalizeGrupo(cuadrillaGrupo) : '';
+
+    // Si el usuario seleccionó un grupo explícito, buscar la reserva de ese grupo (incluso si ya fue completada con jabas)
+    if (targetGrp) {
+      const matchExact = currentSupervisorReservasHoy.find(
+        (r) =>
+          isMatchingGrupo(r.grupo, targetGrp) &&
+          (!targetMod || normalizeModulo(r.modulo) === targetMod)
+      );
+      if (matchExact) return matchExact;
+      const matchAnyMod = currentSupervisorReservasHoy.find((r) => isMatchingGrupo(r.grupo, targetGrp));
+      if (matchAnyMod) return matchAnyMod;
+    }
 
     // Priorizar reservas pendientes que aún no tengan jabas completadas hoy
     const pendingReservas = currentSupervisorReservasHoy.filter((r) => !isReservaCompletada(r));
@@ -844,14 +904,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       const matchBoth = pool.find(
         (r) =>
           normalizeModulo(r.modulo) === targetMod &&
-          (r.grupo || 'Grupo 01').trim().toLowerCase() === targetGrp
+          isMatchingGrupo(r.grupo || 'Grupo 01', targetGrp)
       );
       if (matchBoth) return matchBoth;
     }
     if (targetGrp) {
-      const matchGrp = pool.find(
-        (r) => (r.grupo || 'Grupo 01').trim().toLowerCase() === targetGrp
-      );
+      const matchGrp = pool.find((r) => isMatchingGrupo(r.grupo || 'Grupo 01', targetGrp));
       if (matchGrp) return matchGrp;
     }
     if (targetMod) {
@@ -974,18 +1032,106 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       return scopedTrabajadores.filter((t) => {
         // Los trabajadores seleccionados activamente en la sesión se mantienen visibles para control del usuario
         if (isDniSelected(t)) return true;
+        // Si el usuario seleccionó un grupo en cuadrillaGrupo y este trabajador pertenece a ese grupo, mantenerlo visible
+        if (cuadrillaGrupo && isMatchingGrupo(t.grupo, cuadrillaGrupo)) return true;
         // Ocultar a los que ya están asignados (con grupo, líder, supervisor o jabas hoy)
         return !isWorkerCompletadoOAsignado(t);
       });
     }
     if (vistaAsignacion === 'asignados') {
-      return scopedTrabajadores.filter((t) => isWorkerCompletadoOAsignado(t) || isDniSelected(t));
+      return scopedTrabajadores.filter((t) => {
+        if (isDniSelected(t)) return true;
+        if (cuadrillaGrupo) return isMatchingGrupo(t.grupo, cuadrillaGrupo);
+        return isWorkerCompletadoOAsignado(t);
+      });
     }
     if (vistaAsignacion === 'con_jabas') {
-      return scopedTrabajadores.filter((t) => hasWorkerJabas(t) || isDniSelected(t));
+      return scopedTrabajadores.filter((t) => {
+        if (isDniSelected(t)) return true;
+        const hasJabas = hasWorkerJabas(t);
+        if (!hasJabas) return false;
+        if (cuadrillaGrupo) return isMatchingGrupo(t.grupo, cuadrillaGrupo);
+        return true;
+      });
+    }
+    if (cuadrillaGrupo) {
+      return scopedTrabajadores.filter((t) => isDniSelected(t) || isMatchingGrupo(t.grupo, cuadrillaGrupo));
     }
     return scopedTrabajadores;
-  }, [scopedTrabajadores, vistaAsignacion, isWorkerCompletadoOAsignado, hasWorkerJabas, isDniSelected]);
+  }, [scopedTrabajadores, vistaAsignacion, isWorkerCompletadoOAsignado, hasWorkerJabas, isDniSelected, cuadrillaGrupo]);
+
+  // Cambio o selección de Grupo de Cuadrilla:
+  // Si el grupo ya tiene una reserva guardada o trabajadores asignados, sincroniza automáticamente
+  // sus trabajadores y líder para que el usuario pueda registrar o continuar el avance de inmediato.
+  const handleSelectGrupo = useCallback(
+    (selectedGrupo: string) => {
+      setCuadrillaGrupo(selectedGrupo);
+      if (!selectedGrupo) return;
+
+      // 1. Buscar si ya existe una reserva activa para este grupo hoy
+      const matchingRes = currentSupervisorReservasHoy.find((r) => isMatchingGrupo(r.grupo, selectedGrupo));
+      if (matchingRes) {
+        if (matchingRes.lider && !cuadrillaLider) {
+          setCuadrillaLider(matchingRes.lider);
+        }
+        const newSelected = new Set<string>();
+        const newGroups: Record<string, string> = {};
+        (matchingRes.trabajadores || []).forEach((w) => {
+          const normD = normalizeDni(w.dni);
+          const rawD = String(w.dni || '').trim();
+          const grp = w.grupo || matchingRes.grupo || selectedGrupo;
+          if (normD) {
+            newSelected.add(normD);
+            newGroups[normD] = grp;
+          }
+          if (rawD) {
+            newSelected.add(rawD);
+            newGroups[rawD] = grp;
+          }
+          if (w.nombres) {
+            const nameKey = `NAME_${normalizeStr(w.nombres)}`;
+            newSelected.add(nameKey);
+            newGroups[nameKey] = grp;
+          }
+        });
+        setSelectedDnis(newSelected);
+        setWorkerAssignedGrupos((prev) => ({ ...prev, ...newGroups }));
+        setLastSavedReserva(matchingRes);
+
+        const count = matchingRes.totalTrabajadores || (matchingRes.trabajadores || []).length;
+        onToast(`👥 ${count} trabajadores de ${selectedGrupo} cargados automáticamente para registro de avance`, 'info');
+        return;
+      }
+
+      // 2. Si no hay reserva pero hay trabajadores en nómina con este grupo asignado
+      const workersInGrupo = trabajadores.filter((t) => isMatchingGrupo(t.grupo, selectedGrupo));
+      if (workersInGrupo.length > 0) {
+        const newSelected = new Set<string>();
+        const newGroups: Record<string, string> = {};
+        workersInGrupo.forEach((w) => {
+          const normD = normalizeDni(w.dni);
+          const rawD = String(w.dni || '').trim();
+          if (normD) {
+            newSelected.add(normD);
+            newGroups[normD] = selectedGrupo;
+          }
+          if (rawD) {
+            newSelected.add(rawD);
+            newGroups[rawD] = selectedGrupo;
+          }
+        });
+        setSelectedDnis(newSelected);
+        setWorkerAssignedGrupos((prev) => ({ ...prev, ...newGroups }));
+
+        const firstWithLider = workersInGrupo.find((w) => w.lider && w.lider.trim());
+        if (firstWithLider && firstWithLider.lider && !cuadrillaLider) {
+          setCuadrillaLider(firstWithLider.lider);
+        }
+        onToast(`👥 ${workersInGrupo.length} trabajadores de ${selectedGrupo} seleccionados automáticamente`, 'info');
+      }
+    },
+    [currentSupervisorReservasHoy, cuadrillaLider, trabajadores, onToast, normalizeDni, normalizeStr]
+  );
 
   // Handle changing group for an individual worker
   const handleWorkerGroupChange = (dni: string, newGroup: string, workerName?: string) => {
@@ -2262,8 +2408,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         r.fecha === targetDate &&
         matchesSupervisor(r.supervisor, targetSupervisor) &&
         r.fundo === targetFundo &&
-        r.modulo === targetModulo &&
-        (r.grupo || 'Grupo 01').trim().toLowerCase() === targetGrupo.toLowerCase()
+        normalizeModulo(r.modulo) === normalizeModulo(targetModulo) &&
+        isMatchingGrupo(r.grupo, targetGrupo)
     );
 
     const reservaId = existingMatch
@@ -2311,13 +2457,12 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
     const countSaved = selectedWorkers.length;
 
-    // Limpiar selección de trabajadores asignados para que el usuario pueda asignar de inmediato el siguiente grupo
-    setSelectedDnis(new Set());
-    setWorkerAssignedGrupos({});
-    setVistaAsignacion('pendientes');
+    // Mantener la reserva guardada y los trabajadores seleccionados para que el usuario pueda avanzar inmediatamente al Paso 2
+    // sin que se le oculten o desaparezcan
+    setVistaAsignacion('asignados');
 
     onToast(
-      `💾 Reserva guardada para ${targetSupervisor}: ${countSaved} trabajadores asignados a ${targetFundo} - ${targetModulo} (${targetGrupo}${targetLider ? ` · Líder: ${targetLider}` : ''}). Selección liberada para asignar el siguiente grupo.`,
+      `💾 Reserva guardada para ${targetSupervisor}: ${countSaved} trabajadores asignados a ${targetFundo} - ${targetModulo} (${targetGrupo}${targetLider ? ` · Líder: ${targetLider}` : ''}). Listos para continuar al Registro de Avance.`,
       'success'
     );
   };
@@ -2454,6 +2599,250 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     onToast('🗑️ Reserva eliminada del registro', 'info');
   };
 
+  // Lista de módulos disponibles para la reserva en cambio masivo
+  const modulosDisponiblesParaReserva = useMemo(() => {
+    if (!reservaParaCambioModulo) return [];
+    const targetFundo = reservaParaCambioModulo.fundo || cuadrillaFundo || 'Santa Teresa';
+    const set = new Set<string>();
+
+    if (targetFundo === 'Santa Teresa') {
+      ['M01', 'M06', 'M07', 'M08', 'M09', 'M10A', 'M10B', 'M11'].forEach((m) => set.add(m));
+    } else if (targetFundo === 'Arena Azul') {
+      ['M01', 'M02', 'M03', 'M04'].forEach((m) => set.add(m));
+    } else if (targetFundo === 'Vivadis') {
+      ['M01', 'M02', 'M03', 'M04', 'M05'].forEach((m) => set.add(m));
+    } else if (targetFundo === 'Ayllu Allpa') {
+      ['M12', 'M13', 'M14', 'M15'].forEach((m) => set.add(m));
+    } else if (targetFundo === 'Ampliacion') {
+      ['M16', 'M17', 'M18'].forEach((m) => set.add(m));
+    }
+
+    if (modulosPorFundo && modulosPorFundo[targetFundo]) {
+      modulosPorFundo[targetFundo].forEach((m) => {
+        if (m && m.trim()) set.add(m.trim().toUpperCase());
+      });
+    }
+
+    trabajadores.forEach((t) => {
+      if ((!targetFundo || t.fundo === targetFundo) && t.modulo && t.modulo.trim()) {
+        set.add(t.modulo.trim().toUpperCase());
+      }
+    });
+
+    if (reservaParaCambioModulo.modulo) {
+      set.add(reservaParaCambioModulo.modulo.trim().toUpperCase());
+    }
+
+    return Array.from(set).sort();
+  }, [reservaParaCambioModulo, cuadrillaFundo, modulosPorFundo, trabajadores]);
+
+  // Abrir modal de cambio masivo de módulo para una reserva específica
+  const handleAbrirCambioModulo = useCallback((res: ReservaCuadrilla) => {
+    setReservaParaCambioModulo(res);
+    setNuevoModuloSeleccionado(res.modulo || '');
+    setOtroModuloManual('');
+  }, []);
+
+  // Confirmar y aplicar cambio masivo de módulo a todos los trabajadores de la cuadrilla
+  const handleConfirmarCambioModulo = async () => {
+    if (!reservaParaCambioModulo) return;
+
+    const targetModulo = (
+      nuevoModuloSeleccionado === '__otro__'
+        ? otroModuloManual
+        : nuevoModuloSeleccionado
+    ).trim().toUpperCase();
+
+    if (!targetModulo) {
+      onToast('⚠️ Por favor ingresa o selecciona un módulo válido', 'warning');
+      return;
+    }
+
+    if (targetModulo === (reservaParaCambioModulo.modulo || '').trim().toUpperCase()) {
+      onToast(`El módulo seleccionado ya es ${targetModulo}`, 'info');
+      setReservaParaCambioModulo(null);
+      return;
+    }
+
+    setIsSavingCambioModulo(true);
+
+    try {
+      const prevModulo = reservaParaCambioModulo.modulo || 'Sin módulo';
+      const targetFundo = reservaParaCambioModulo.fundo || cuadrillaFundo || 'Santa Teresa';
+      const targetSupervisor = reservaParaCambioModulo.supervisor;
+      const workerList = reservaParaCambioModulo.trabajadores || [];
+      const totalWorkers = reservaParaCambioModulo.totalTrabajadores || workerList.length;
+
+      // 1. Registrar módulo nuevo si no existe
+      if (onSaveModulo) {
+        onSaveModulo(targetFundo, targetModulo);
+      }
+
+      const targetFecha = reservaParaCambioModulo.fecha || fechaPersonal || getLocalToday();
+
+      // 2. Construir la NUEVA reserva para el nuevo módulo (Ingreso Adicional)
+      // Preservamos la reserva anterior intacta para no alterar registros ni jabas históricas del módulo previo
+      const nuevaReserva: ReservaCuadrilla = {
+        id: `reserva_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        fecha: targetFecha,
+        supervisor: targetSupervisor,
+        fundo: targetFundo,
+        modulo: targetModulo,
+        grupo: reservaParaCambioModulo.grupo || cuadrillaGrupo || 'Grupo 01',
+        lider: reservaParaCambioModulo.lider || cuadrillaLider || '',
+        totalTrabajadores: totalWorkers,
+        trabajadores: workerList.map((w) => ({
+          ...w,
+          modulo: targetModulo
+        })),
+        timestamp: getLocalISO(),
+        estado: 'pendiente'
+      };
+
+      // 3. Guardar ambas reservas (la anterior en prevModulo + la nueva en targetModulo)
+      const updatedReservas = mergeReservasArrays(reservasState, [nuevaReserva]);
+      setReservasState(updatedReservas);
+      saveReservas(updatedReservas);
+      setLastSavedReserva(nuevaReserva);
+
+      // Sincronizar reserva en el servidor central
+      fetch('/api/reservas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reserva: nuevaReserva })
+      }).catch((err) => console.warn('Error sincronizando nueva reserva en /api/reservas:', err));
+
+      if (onSaveReserva) {
+        onSaveReserva(nuevaReserva);
+      }
+
+      // 4. Crear NUEVOS registros de trabajadores como "Ingreso Adicional" para el nuevo módulo
+      // manteniendo intactos los registros del módulo anterior para que cada trabajador
+      // pueda tener jabas en módulos distintos sin considerarse duplicados.
+      const normTargetMod = normalizeModulo(targetModulo);
+      const normTargetFecha = normalizeDateString(targetFecha) || targetFecha;
+
+      // Identificar claves de trabajadores existentes para no generar copias repetidas si ya existían en ESTE nuevo módulo
+      const existingWorkerModKeys = new Set<string>();
+      trabajadores.forEach((t) => {
+        const c = normalizeDni(t.dni) || String(t.dni || '').trim();
+        const f = normalizeDateString(t.fecha) || '';
+        const m = normalizeModulo(t.modulo);
+        if (c && m) existingWorkerModKeys.add(`${c}__${f}__${m}`);
+      });
+
+      const nuevosRegistrosAdicionales: Trabajador[] = [];
+      const updatedExistingTrabajadores = [...trabajadores];
+
+      workerList.forEach((w, idx) => {
+        const c = normalizeDni(w.dni) || String(w.dni || '').trim();
+        const raw = String(w.dni || '').trim();
+        const normN = normalizeStr(w.nombres);
+        const dedupeKey = c ? `${c}__${normTargetFecha}__${normTargetMod}` : '';
+
+        // Buscar datos base del trabajador previo (nombre, cargo, lider)
+        const prev = trabajadores.find(
+          (t) => (c && normalizeDni(t.dni) === c) || (raw && String(t.dni || '').trim() === raw) || normalizeStr(t.nombres) === normN
+        );
+
+        if (dedupeKey && existingWorkerModKeys.has(dedupeKey)) {
+          // Ya existía un registro para este trabajador en el nuevo módulo hoy: lo actualizamos sin duplicarlo
+          const existIdx = updatedExistingTrabajadores.findIndex(
+            (t) =>
+              (normalizeDni(t.dni) === c || String(t.dni || '').trim() === raw) &&
+              normalizeModulo(t.modulo) === normTargetMod &&
+              (normalizeDateString(t.fecha) === normTargetFecha || !t.fecha)
+          );
+          if (existIdx >= 0) {
+            updatedExistingTrabajadores[existIdx] = {
+              ...updatedExistingTrabajadores[existIdx],
+              supervisor: targetSupervisor,
+              fundo: targetFundo,
+              modulo: targetModulo,
+              grupo: w.grupo || reservaParaCambioModulo.grupo || cuadrillaGrupo || updatedExistingTrabajadores[existIdx].grupo,
+              lider: w.lider || reservaParaCambioModulo.lider || cuadrillaLider || updatedExistingTrabajadores[existIdx].lider,
+              tipo: 'Ingreso Adicional'
+            };
+          }
+          return;
+        }
+
+        // Crear registro como Ingreso Adicional para el nuevo módulo
+        const nuevoIngreso: Trabajador = {
+          id: `TRAB_${c || 'ADIC'}_${targetModulo}_${Date.now()}_${idx}`,
+          fecha: targetFecha,
+          dni: c || raw || (prev?.dni ? String(prev.dni) : ''),
+          nombres: w.nombres || prev?.nombres || `Trabajador ${c || idx}`,
+          fundo: targetFundo,
+          modulo: targetModulo,
+          supervisor: targetSupervisor,
+          grupo: w.grupo || reservaParaCambioModulo.grupo || cuadrillaGrupo || prev?.grupo || 'Grupo 01',
+          lider: w.lider || reservaParaCambioModulo.lider || cuadrillaLider || prev?.lider || '',
+          tipo: 'Ingreso Adicional',
+          jabas: 0 // Inicia en 0 para recibir el nuevo avance en este nuevo módulo
+        };
+
+        nuevosRegistrosAdicionales.push(nuevoIngreso);
+        if (dedupeKey) existingWorkerModKeys.add(dedupeKey);
+      });
+
+      // La nómina total contiene los trabajadores previos intactos + los nuevos registros de ingreso adicional
+      const finalTrabajadores = [...updatedExistingTrabajadores, ...nuevosRegistrosAdicionales];
+
+      saveTrabajadores(finalTrabajadores);
+      if (onUpdateTrabajadores) {
+        onUpdateTrabajadores(finalTrabajadores);
+      }
+
+      // Sincronizar trabajadores con el servidor central
+      fetch('/api/trabajadores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          trabajadores: finalTrabajadores,
+          userRole: session?.rol || 'Supervisor'
+        })
+      }).catch((err) => console.warn('Error sincronizando trabajadores en /api/trabajadores:', err));
+
+      // 5. Actualizar módulo activo localmente para que la cuadrilla pase a trabajar en targetModulo
+      setCuadrillaModulo(targetModulo);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('app_active_modulo', targetModulo);
+        localStorage.setItem('app_active_fundo', targetFundo);
+        if (targetSupervisor) localStorage.setItem('app_active_supervisor', targetSupervisor);
+        if (reservaParaCambioModulo.grupo || cuadrillaGrupo) {
+          localStorage.setItem('app_active_grupo', reservaParaCambioModulo.grupo || cuadrillaGrupo);
+        }
+      }
+
+      // Si hay nuevos registros generados para este módulo, preseleccionarlos
+      if (nuevosRegistrosAdicionales.length > 0) {
+        const nuevosDnis = new Set<string>();
+        nuevosRegistrosAdicionales.forEach((t) => {
+          const norm = normalizeDni(t.dni);
+          const raw = String(t.dni || '').trim();
+          if (norm) nuevosDnis.add(norm);
+          if (raw) nuevosDnis.add(raw);
+          if (t.id) nuevosDnis.add(t.id);
+        });
+        setSelectedDnis(nuevosDnis);
+      }
+
+      const totalCount = nuevosRegistrosAdicionales.length || totalWorkers;
+      onToast(
+        `✅ ¡Cambio a módulo "${targetModulo}" guardado como Ingreso Adicional! Se generaron ${totalCount} registros nuevos. Los registros y jabas del módulo "${prevModulo}" se conservan intactos.`,
+        'success'
+      );
+
+      setReservaParaCambioModulo(null);
+    } catch (error: any) {
+      console.error('Error al cambiar módulo masivo:', error);
+      onToast(`❌ Error al cambiar módulo: ${error?.message || 'Error desconocido'}`, 'error');
+    } finally {
+      setIsSavingCambioModulo(false);
+    }
+  };
+
   // Step 2: Jabas Avance Handlers
   const handleJabasChange = (workerOrDni: any, val: string) => {
     const key =
@@ -2505,13 +2894,62 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return selectedWorkersList.filter((w) => getWorkerJabasCount(w) > 0).length;
   }, [selectedWorkersList, getWorkerJabasCount]);
 
+  const activeCuadrillaReserva = lastSavedReserva || currentSupervisorReservaHoy;
+
+  // Abrir modal de cambio masivo para la cuadrilla activa o trabajadores seleccionados
+  const handleAbrirCambioModuloActiveCuadrilla = useCallback(() => {
+    if (activeCuadrillaReserva) {
+      handleAbrirCambioModulo(activeCuadrillaReserva);
+      return;
+    }
+    if (selectedWorkersList.length > 0) {
+      const pseudoRes: ReservaCuadrilla = {
+        id: `temp_${Date.now()}`,
+        fecha: fechaPersonal || getLocalToday(),
+        supervisor: cuadrillaSupervisor || session.nombre,
+        fundo: cuadrillaFundo || 'Santa Teresa',
+        modulo: cuadrillaModulo || 'M01',
+        grupo: cuadrillaGrupo || 'Grupo 01',
+        lider: cuadrillaLider || '',
+        totalTrabajadores: selectedWorkersList.length,
+        trabajadores: selectedWorkersList.map((w) => ({
+          dni: w.dni,
+          nombres: w.nombres,
+          modulo: cuadrillaModulo || w.modulo || 'M01',
+          grupo: workerAssignedGrupos[w.dni] || cuadrillaGrupo || w.grupo || 'Grupo 01'
+        })),
+        timestamp: getLocalISO()
+      };
+      handleAbrirCambioModulo(pseudoRes);
+    } else {
+      onToast('Selecciona primero trabajadores en tu cuadrilla o una reserva guardada', 'info');
+    }
+  }, [
+    activeCuadrillaReserva,
+    selectedWorkersList,
+    fechaPersonal,
+    cuadrillaSupervisor,
+    session.nombre,
+    cuadrillaFundo,
+    cuadrillaModulo,
+    cuadrillaGrupo,
+    cuadrillaLider,
+    workerAssignedGrupos,
+    handleAbrirCambioModulo,
+    onToast
+  ]);
+
   // Trabajadores efectivos para el Paso 2: si selectedWorkersList tiene trabajadores, los usa;
   // si estuviera vacío por alguna razón, recurre a la reserva activa de hoy o a los trabajadores ya asignados al supervisor
   const step2EffectiveWorkers = useMemo(() => {
     if (selectedWorkersList.length > 0) {
       return selectedWorkersList;
     }
-    const activeRes = lastSavedReserva || currentSupervisorReservaHoy;
+    const targetGrp = cuadrillaGrupo ? normalizeGrupo(cuadrillaGrupo) : '';
+    const groupRes = targetGrp
+      ? currentSupervisorReservasHoy.find((r) => isMatchingGrupo(r.grupo, targetGrp))
+      : null;
+    const activeRes = groupRes || lastSavedReserva || currentSupervisorReservaHoy;
     if (activeRes && Array.isArray(activeRes.trabajadores) && activeRes.trabajadores.length > 0) {
       const resDniSet = new Set(
         activeRes.trabajadores.map((tw) => normalizeDni(tw.dni) || String(tw.dni || '').trim())
@@ -2526,6 +2964,25 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         return resDniSet.has(normD) || resDniSet.has(rawD) || resNameSet.has(normN);
       });
       if (matched.length > 0) return matched.sort((a, b) => a.nombres.localeCompare(b.nombres));
+
+      // Si no coinciden directamente en trabajadores, reconstruir a partir de los registros de la reserva
+      return activeRes.trabajadores.map((tw, idx) => ({
+        id: (tw as any).id || `RES_W_${idx}`,
+        fecha: activeRes.fecha,
+        dni: tw.dni,
+        nombres: tw.nombres,
+        fundo: activeRes.fundo,
+        modulo: (tw as any).modulo || activeRes.modulo,
+        supervisor: activeRes.supervisor,
+        grupo: tw.grupo || activeRes.grupo,
+        lider: (tw as any).lider || activeRes.lider || '',
+        tipo: 'Cosechador' as const,
+        jabas: 0
+      })).sort((a, b) => a.nombres.localeCompare(b.nombres));
+    }
+    if (targetGrp) {
+      const groupWorkers = trabajadores.filter((t) => isMatchingGrupo(t.grupo, targetGrp));
+      if (groupWorkers.length > 0) return groupWorkers.sort((a, b) => a.nombres.localeCompare(b.nombres));
     }
     const sup = (cuadrillaSupervisor || (isSupervisorUser ? sessionSupervisorName : '')).trim();
     if (sup) {
@@ -2540,6 +2997,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     return [];
   }, [
     selectedWorkersList,
+    cuadrillaGrupo,
+    currentSupervisorReservasHoy,
     lastSavedReserva,
     currentSupervisorReservaHoy,
     trabajadores,
@@ -2589,7 +3048,36 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   }, [avanceValues]);
 
   const handleStep1Next = () => {
+    // Si no hay trabajadores seleccionados manualmente, verificar si hay un grupo o reserva activa
     if (selectedWorkersList.length === 0) {
+      const targetGrp = cuadrillaGrupo ? normalizeGrupo(cuadrillaGrupo) : '';
+      const matchingRes =
+        (targetGrp && currentSupervisorReservasHoy.find((r) => isMatchingGrupo(r.grupo, targetGrp))) ||
+        lastSavedReserva ||
+        currentSupervisorReservaHoy;
+
+      if (matchingRes && Array.isArray(matchingRes.trabajadores) && matchingRes.trabajadores.length > 0) {
+        handleLoadReserva(matchingRes);
+        setStep(2);
+        return;
+      }
+
+      if (targetGrp) {
+        const workersInGrp = trabajadores.filter((t) => isMatchingGrupo(t.grupo, targetGrp));
+        if (workersInGrp.length > 0) {
+          const newSelected = new Set<string>();
+          workersInGrp.forEach((w) => {
+            const normD = normalizeDni(w.dni);
+            const rawD = String(w.dni || '').trim();
+            if (normD) newSelected.add(normD);
+            if (rawD) newSelected.add(rawD);
+          });
+          setSelectedDnis(newSelected);
+          setStep(2);
+          return;
+        }
+      }
+
       onToast('⚠️ Selecciona al menos un trabajador para registrar su avance de jabas', 'warning');
       return;
     }
@@ -2619,8 +3107,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
             supervisor: targetSupervisor,
             fundo: targetFundo,
             modulo: targetModulo,
-            grupo: t.grupo || assignedGrp,
-            lider: t.lider || targetLider || '',
+            grupo: assignedGrp || t.grupo || targetGrupo,
+            lider: targetLider || t.lider || '',
             fecha: fechaPersonal || getLocalToday()
           };
         }
@@ -2648,15 +3136,22 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     Object.keys(avanceValues).forEach((key) => {
       const jabas = avanceValues[key];
       if (jabas > 0) {
-        const t = trabajadores.find(
-          (x) =>
-            normalizeDni(x.dni) === normalizeDni(key) ||
-            x.id === key ||
-            String(x.dni || '').trim() === String(key || '').trim()
-        );
+        const t =
+          step2EffectiveWorkers.find(
+            (x) =>
+              normalizeDni(x.dni) === normalizeDni(key) ||
+              x.id === key ||
+              String(x.dni || '').trim() === String(key || '').trim()
+          ) ||
+          trabajadores.find(
+            (x) =>
+              normalizeDni(x.dni) === normalizeDni(key) ||
+              x.id === key ||
+              String(x.dni || '').trim() === String(key || '').trim()
+          );
         const rawResolvedDni = t ? (normalizeDni(t.dni) || t.dni) : key;
         const cleanDni = String(rawResolvedDni).replace(/\D/g, '') || String(rawResolvedDni).trim();
-        const normModulo = (cuadrillaModulo || 'M01').trim().toUpperCase();
+        const normModulo = (t?.modulo || cuadrillaModulo || 'M01').trim().toUpperCase();
         const assignedGrupo =
           workerAssignedGrupos[key] ||
           (t ? workerAssignedGrupos[normalizeDni(t.dni)] || workerAssignedGrupos[t.dni] : undefined) ||
@@ -2667,10 +3162,10 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
           fecha: fechaAvance,
           dni: cleanDni,
           trabajador: t ? t.nombres : String(cleanDni),
-          fundo: cuadrillaFundo || 'Santa Teresa',
+          fundo: cuadrillaFundo || t?.fundo || 'Santa Teresa',
           modulo: normModulo,
           jabas,
-          supervisor: cuadrillaSupervisor || session.nombre,
+          supervisor: cuadrillaSupervisor || t?.supervisor || session.nombre,
           grupo: assignedGrupo,
           lider: t?.lider || cuadrillaLider || '',
           timestamp: nowIso
@@ -2680,30 +3175,35 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
     onSaveAvance(avanceValues, detalleList);
 
-    // Actualizar inmediatamente en la nómina local de trabajadores para que reflejen sus jabas, grupo y líder
-    // y no queden marcados como pendientes ni con "Sin Grupo"
+    // Actualizar inmediatamente en la nómina local de trabajadores respetando el módulo de cada registro
     if (onUpdateTrabajadores) {
-      const savedDniMap = new Map<string, DetalleJaba>();
+      const savedDniModMap = new Map<string, DetalleJaba>();
       detalleList.forEach((d) => {
         const norm = normalizeDni(d.dni);
         const raw = String(d.dni || '').trim();
-        if (norm) savedDniMap.set(norm, d);
-        if (raw) savedDniMap.set(raw, d);
+        const dMod = normalizeModulo(d.modulo);
+        if (norm && dMod) savedDniModMap.set(`${norm}__${dMod}`, d);
+        if (raw && dMod) savedDniModMap.set(`${raw}__${dMod}`, d);
+        if (norm && !savedDniModMap.has(norm)) savedDniModMap.set(norm, d);
+        if (raw && !savedDniModMap.has(raw)) savedDniModMap.set(raw, d);
       });
 
       const updated = trabajadores.map((t) => {
         const norm = normalizeDni(t.dni);
         const raw = String(t.dni || '').trim();
+        const tMod = normalizeModulo(t.modulo);
         const d =
-          (norm && savedDniMap.get(norm)) ||
-          (raw && savedDniMap.get(raw)) ||
-          (t.id && savedDniMap.get(t.id));
+          (norm && tMod && savedDniModMap.get(`${norm}__${tMod}`)) ||
+          (raw && tMod && savedDniModMap.get(`${raw}__${tMod}`)) ||
+          (t.id && savedDniModMap.get(t.id)) ||
+          (!tMod && norm ? savedDniModMap.get(norm) : undefined);
+
         if (d) {
           return {
             ...t,
             supervisor: d.supervisor || t.supervisor,
             fundo: d.fundo || t.fundo,
-            modulo: d.modulo || t.modulo,
+            modulo: t.modulo || d.modulo,
             grupo: d.grupo || t.grupo,
             lider: d.lider || t.lider,
             jabas: Number(d.jabas || 0),
@@ -2715,10 +3215,15 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       onUpdateTrabajadores(updated);
     }
 
-    // Actualizar reservas del día: marcar como completadas las reservas cuyos trabajadores recibieron jabas
+    // Actualizar reservas del día: marcar como completada la reserva que coincida con fecha y módulo
     const savedDnisSet = new Set(detalleList.map((d) => normalizeDni(d.dni) || String(d.dni).trim()));
+    const normCuadMod = normalizeModulo(cuadrillaModulo);
     const updatedReservas = reservasState.map((res) => {
       if (res.fecha !== fechaAvance) return res;
+      const resMod = normalizeModulo(res.modulo);
+      const isTargetModule = !normCuadMod || !resMod || resMod === normCuadMod;
+      if (!isTargetModule) return res;
+
       const resDnis = (res.trabajadores || []).map((tw) => normalizeDni(tw.dni) || String(tw.dni).trim());
       const hasSavedWorker = resDnis.some((dni) => savedDnisSet.has(dni));
       if (hasSavedWorker) {
@@ -2737,12 +3242,17 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       });
     }
 
-    // RESTABLECIMIENTO AUTOMÁTICO COMPLETO:
-    // Al guardar con jabas, se restablecen automáticamente los filtros de cuadrilla, búsqueda y selección
-    handleRestablecerFiltros(true);
+    // Limpiar selección de trabajadores y avances temporales de la sesión
+    setSelectedDnis(new Set());
+    setWorkerAssignedGrupos({});
+    setAvanceValues({});
+    setStep2SearchTerm('');
+
+    // Cambiar la vista a 'con_jabas' para que el usuario pueda ver de inmediato a sus trabajadores con sus jabas registradas
+    setVistaAsignacion('con_jabas');
 
     onToast(
-      `✅ Avance guardado exitosamente (${totalJabasAvance} jabas). Filtros y cuadrilla restablecidos automáticamente.`,
+      `✅ Avance guardado exitosamente (${totalJabasAvance} jabas). Mostrando trabajadores con jabas registradas hoy.`,
       'success'
     );
 
@@ -3003,8 +3513,27 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                     ))}
                   </select>
                 </div>
-                <div className="text-[10px] text-gray-500 flex items-center gap-1">
-                  <span className="font-semibold text-[#1b5e20]">Módulo seleccionado:</span> {cuadrillaModulo || 'Todos'}
+                <div className="flex items-center justify-between text-[10px] text-gray-500 pt-0.5">
+                  <div className="flex items-center gap-1">
+                    <span className="font-semibold text-[#1b5e20]">Módulo:</span> {cuadrillaModulo || 'Todos'}
+                  </div>
+                  {(activeCuadrillaReserva || selectedWorkersList.length > 0) && (
+                    <button
+                      type="button"
+                      onClick={handleAbrirCambioModuloActiveCuadrilla}
+                      className="text-[#1b5e20] hover:text-[#2e7d32] font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                      title="Cambiar módulo masivo a toda la cuadrilla"
+                    >
+                      <Shuffle className="w-3 h-3" />
+                      <span>
+                        Cambiar a cuadrilla (
+                        {activeCuadrillaReserva
+                          ? activeCuadrillaReserva.totalTrabajadores || (activeCuadrillaReserva.trabajadores || []).length
+                          : selectedWorkersList.length}{' '}
+                        trab.)
+                      </span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -3030,7 +3559,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 <div className="relative">
                   <select
                     value={cuadrillaGrupo}
-                    onChange={(e) => setCuadrillaGrupo(e.target.value)}
+                    onChange={(e) => handleSelectGrupo(e.target.value)}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-[#bfcaba] bg-white font-medium text-gray-900 focus:outline-none focus:border-[#2e7d32] focus:ring-1 focus:ring-[#2e7d32]"
                   >
                     <option value="">Seleccionar grupo...</option>
@@ -4002,6 +4531,19 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       . Los {countAsignados} trabajadores están asignados y se han ocultado de la lista de pendientes.
                     </p>
                     <div className="flex flex-wrap items-center justify-center gap-2.5 mt-4">
+                      {cuadrillaGrupo && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setVistaAsignacion('asignados');
+                            handleSelectGrupo(cuadrillaGrupo);
+                          }}
+                          className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white text-xs font-bold py-2 px-3.5 rounded-lg shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <Users className="w-3.5 h-3.5" />
+                          <span>Ver y Cargar {cuadrillaGrupo}</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setVistaAsignacion('asignados')}
@@ -4318,6 +4860,15 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                             ? `⚡ Cargar Cuadrilla (${resCount})`
                             : 'Recargar Cuadrilla'}
                         </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAbrirCambioModulo(activeRes)}
+                        className="text-[11px] font-bold bg-white hover:bg-[#e8f5e9] text-[#1b5e20] border border-[#a5d6a7] px-2.5 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 shadow-2xs active:scale-95"
+                        title="Cambiar módulo de manera masiva a toda la cuadrilla activa"
+                      >
+                        <Shuffle className="w-3.5 h-3.5 text-[#2e7d32]" />
+                        <span>Cambiar Módulo ({activeRes.modulo})</span>
                       </button>
                       <button
                         type="button"
@@ -5216,6 +5767,15 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       <div className="flex items-center gap-2 self-end sm:self-auto">
                         <button
                           type="button"
+                          onClick={() => handleAbrirCambioModulo(res)}
+                          className="bg-white hover:bg-[#e8f5e9] text-[#1b5e20] border border-[#a5d6a7] px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs active:scale-95"
+                          title={`Cambiar módulo masivamente a los ${res.totalTrabajadores || (res.trabajadores || []).length} trabajadores de esta cuadrilla`}
+                        >
+                          <Shuffle className="w-3.5 h-3.5 text-[#2e7d32]" />
+                          <span>Cambiar Módulo</span>
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => handleLoadReserva(res)}
                           className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-xs active:scale-95"
                           title="Cargar esta cuadrilla de trabajadores al panel principal"
@@ -5239,9 +5799,20 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                       <span className="bg-white px-2.5 py-0.5 rounded-md border border-gray-200">
                         📍 <b>Fundo:</b> {res.fundo}
                       </span>
-                      <span className="bg-white px-2.5 py-0.5 rounded-md border border-[#c8e6c9] font-bold text-[#1b5e20]">
-                        🌱 <b>Módulo:</b> {res.modulo}
-                      </span>
+                      <div className="inline-flex items-center gap-1.5">
+                        <span className="bg-white px-2.5 py-0.5 rounded-md border border-[#c8e6c9] font-bold text-[#1b5e20]">
+                          🌱 <b>Módulo:</b> {res.modulo}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleAbrirCambioModulo(res)}
+                          className="bg-[#e8f5e9] hover:bg-[#2e7d32] text-[#1b5e20] hover:text-white border border-[#a5d6a7] px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all shadow-2xs active:scale-95"
+                          title={`Cambiar módulo masivamente a los ${res.totalTrabajadores || (res.trabajadores || []).length} trabajadores de esta cuadrilla`}
+                        >
+                          <Pencil className="w-3 h-3" />
+                          <span>Cambiar</span>
+                        </button>
+                      </div>
                       {res.grupo && (
                         <span className="bg-white px-2.5 py-0.5 rounded-md border border-gray-200">
                           👥 <b>Grupo:</b> {res.grupo}
@@ -5290,6 +5861,210 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 className="px-5 py-2 text-xs font-bold text-gray-700 hover:bg-gray-100 rounded-xl cursor-pointer transition-colors"
               >
                 Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Cambio Masivo de Módulo de Cuadrilla */}
+      {reservaParaCambioModulo && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-gray-200 animate-in zoom-in-95 flex flex-col max-h-[94vh]">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-[#e8f5e9] flex items-center justify-center text-[#1b5e20] shadow-2xs">
+                  <Shuffle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-gray-900 leading-tight">
+                    Cambiar Módulo Masivo
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Actualiza a todos los trabajadores de la cuadrilla simultáneamente
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isSavingCambioModulo) setReservaParaCambioModulo(null);
+                }}
+                disabled={isSavingCambioModulo}
+                className="text-gray-400 hover:text-gray-700 p-1.5 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Contenido scrolleable */}
+            <div className="overflow-y-auto space-y-4 py-2">
+              {/* Info Card de la Cuadrilla */}
+              <div className="p-3.5 bg-[#fcfdfc] rounded-xl border border-emerald-200/80 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="bg-[#2e7d32] text-white text-xs font-bold px-2.5 py-0.5 rounded-md flex items-center gap-1 shadow-2xs">
+                      <UserCheck className="w-3 h-3" />
+                      <span>{reservaParaCambioModulo.supervisor}</span>
+                    </span>
+                    <span className="bg-emerald-100 text-[#1b5e20] text-xs font-bold px-2 py-0.5 rounded-md">
+                      👥 {reservaParaCambioModulo.totalTrabajadores || (reservaParaCambioModulo.trabajadores || []).length} trabajadores
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-gray-500 font-medium">
+                    📅 {reservaParaCambioModulo.fecha}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-xs text-gray-700 pt-1">
+                  <span className="bg-white px-2.5 py-0.5 rounded-md border border-gray-200">
+                    📍 <b>Fundo:</b> {reservaParaCambioModulo.fundo}
+                  </span>
+                  <span className="bg-amber-50 text-amber-900 px-2.5 py-0.5 rounded-md border border-amber-200 font-bold">
+                    🌱 <b>Módulo Actual:</b> {reservaParaCambioModulo.modulo}
+                  </span>
+                  {reservaParaCambioModulo.grupo && (
+                    <span className="bg-white px-2.5 py-0.5 rounded-md border border-gray-200">
+                      👥 <b>Grupo:</b> {reservaParaCambioModulo.grupo}
+                    </span>
+                  )}
+                  {reservaParaCambioModulo.lider && (
+                    <span className="bg-[#fff8e1] px-2.5 py-0.5 rounded-md border border-[#ffe082] text-[#e65100]">
+                      👑 <b>Líder:</b> {reservaParaCambioModulo.lider}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Selector de Nuevo Módulo */}
+              <div className="space-y-2.5">
+                <label className="block text-xs font-bold text-gray-800">
+                  Selecciona el Nuevo Módulo de Destino *
+                </label>
+
+                {/* Grid de módulos en chips interactivos */}
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  {modulosDisponiblesParaReserva.map((mod) => {
+                    const isSelected = nuevoModuloSeleccionado === mod;
+                    const isCurrent = (reservaParaCambioModulo.modulo || '').trim().toUpperCase() === mod;
+                    return (
+                      <button
+                        key={mod}
+                        type="button"
+                        onClick={() => setNuevoModuloSeleccionado(mod)}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
+                          isSelected
+                            ? 'bg-[#1b5e20] text-white border-[#1b5e20] shadow-sm scale-102 ring-2 ring-[#81c784]'
+                            : isCurrent
+                            ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                            : 'bg-white text-gray-700 border-gray-200 hover:border-[#81c784] hover:bg-[#e8f5e9]'
+                        }`}
+                      >
+                        <span className="text-sm">{mod}</span>
+                        {isCurrent && (
+                          <span className="text-[9px] bg-amber-200 text-amber-900 px-1 rounded font-medium">
+                            Actual
+                          </span>
+                        )}
+                        {isSelected && !isCurrent && (
+                          <span className="text-[9px] text-emerald-100 font-medium">
+                            Nuevo
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setNuevoModuloSeleccionado('__otro__')}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex flex-col items-center justify-center ${
+                      nuevoModuloSeleccionado === '__otro__'
+                        ? 'bg-[#1b5e20] text-white border-[#1b5e20] shadow-sm ring-2 ring-[#81c784]'
+                        : 'bg-gray-50 text-gray-700 border-gray-300 hover:bg-gray-100'
+                    }`}
+                  >
+                    <span>+ Otro</span>
+                    <span className="text-[9px] font-normal opacity-80">Manual</span>
+                  </button>
+                </div>
+
+                {/* Input manual si seleccionó __otro__ */}
+                {nuevoModuloSeleccionado === '__otro__' && (
+                  <div className="pt-2 animate-in fade-in">
+                    <label className="block text-[11px] font-semibold text-gray-700 mb-1">
+                      Escribe el nombre del nuevo módulo (Ej: M05, M10B, etc.):
+                    </label>
+                    <input
+                      type="text"
+                      value={otroModuloManual}
+                      onChange={(e) => setOtroModuloManual(e.target.value.toUpperCase())}
+                      placeholder="Ej: M10C"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-[#bfcaba] bg-white font-bold text-gray-900 focus:outline-none focus:border-[#2e7d32] focus:ring-1 focus:ring-[#2e7d32]"
+                      autoFocus
+                    />
+                  </div>
+                )}
+
+                {/* Nota de impacto masivo / Ingreso Adicional */}
+                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-950 text-xs flex items-start gap-2.5 mt-2">
+                  <Info className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                  <div className="leading-relaxed">
+                    <b>Ingreso Adicional:</b> Se registrará un nuevo ingreso al módulo{' '}
+                    <span className="font-bold underline text-emerald-800">
+                      {nuevoModuloSeleccionado === '__otro__'
+                        ? (otroModuloManual || '...')
+                        : (nuevoModuloSeleccionado || '...')}
+                    </span>{' '}
+                    para los{' '}
+                    <b>
+                      {reservaParaCambioModulo.totalTrabajadores ||
+                        (reservaParaCambioModulo.trabajadores || []).length}
+                    </b>{' '}
+                    trabajadores de la cuadrilla de <b>{reservaParaCambioModulo.supervisor}</b>.
+                    <p className="mt-1 text-[11px] text-emerald-800">
+                      ✨ <b>Sin duplicados:</b> Los registros y jabas del módulo anterior ({reservaParaCambioModulo.modulo}) se conservan intactos. Si los trabajadores tienen jabas en módulos distintos, se guardan como nuevos registros independientes.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Acciones */}
+            <div className="pt-4 border-t border-gray-100 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={isSavingCambioModulo}
+                onClick={() => setReservaParaCambioModulo(null)}
+                className="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-xl cursor-pointer transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={
+                  isSavingCambioModulo ||
+                  !nuevoModuloSeleccionado ||
+                  (nuevoModuloSeleccionado === '__otro__' && !otroModuloManual.trim()) ||
+                  (nuevoModuloSeleccionado !== '__otro__' &&
+                    nuevoModuloSeleccionado === (reservaParaCambioModulo.modulo || '').trim().toUpperCase())
+                }
+                onClick={handleConfirmarCambioModulo}
+                className="bg-[#2e7d32] hover:bg-[#1b5e20] disabled:bg-gray-300 disabled:text-gray-500 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer transition-all shadow-sm active:scale-95"
+              >
+                {isSavingCambioModulo ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Guardando cambio masivo...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>
+                      Confirmar Cambio ({reservaParaCambioModulo.totalTrabajadores || (reservaParaCambioModulo.trabajadores || []).length} trab.)
+                    </span>
+                  </>
+                )}
               </button>
             </div>
           </div>

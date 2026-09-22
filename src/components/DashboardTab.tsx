@@ -309,10 +309,24 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
   // Comprehensive General Metrics Aggregations
   const metrics = useMemo(() => {
-    // 1. Programas & Lotes
-    let totalProgs = filteredProgramas.length + filteredProgramaGeneral.length;
+    // 1. Programas & Lotes (filtrados por diaSeleccionado si está activo)
+    const progsForDay = diaSeleccionado
+      ? filteredProgramas.filter((p) => {
+          const d = normalizeDateString(p.fecha) || (p.fechaRegistro ? normalizeDateString(p.fechaRegistro.slice(0, 10)) : '');
+          return d === diaSeleccionado;
+        })
+      : filteredProgramas;
+
+    const progsGenForDay = diaSeleccionado
+      ? filteredProgramaGeneral.filter((p) => {
+          const d = normalizeDateString(p.fecha || p.fechaRegistro || p.createdAt || '');
+          return d === diaSeleccionado;
+        })
+      : filteredProgramaGeneral;
+
+    let totalProgs = progsForDay.length + progsGenForDay.length;
     let lotesCount = 0;
-    filteredProgramas.forEach((p) => {
+    progsForDay.forEach((p) => {
       lotesCount += p.totalLotes || (p.lotes ? p.lotes.length : 0);
     });
 
@@ -327,12 +341,13 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     // DetalleJabas (Field harvest tareo records)
     filteredDetalleJabas.forEach((d) => {
       const j = Number(d.jabas) || 0;
-      jabasTareo += j;
-      if (d.dni) trabSet.add(d.dni);
-
-      // If a day is selected, filter chart to that day
       const dDate = normalizeDateString(d.fecha) || (d.timestamp ? normalizeDateString(d.timestamp.slice(0, 10)) : '');
+
+      // If a day is selected, filter tareo jabas and active workers to that day
       if (!diaSeleccionado || dDate === diaSeleccionado) {
+        jabasTareo += j;
+        if (d.dni) trabSet.add(d.dni);
+
         const f = d.fundo ? d.fundo.trim() : 'Sin Fundo';
         if (!fundoMap[f]) fundoMap[f] = { jabas: 0, tareo: 0, ejecucion: 0 };
         fundoMap[f].jabas += j;
@@ -349,10 +364,11 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     // Programas (Execution parts)
     filteredProgramas.forEach((p) => {
       const j = Number(p.jabas) || 0;
-      jabasEjecucionPartes += j;
-
       const pDate = normalizeDateString(p.fecha) || (p.fechaRegistro ? normalizeDateString(p.fechaRegistro.slice(0, 10)) : '');
+
       if (!diaSeleccionado || pDate === diaSeleccionado) {
+        jabasEjecucionPartes += j;
+
         const f = p.fundo ? p.fundo.trim() : 'Sin Fundo';
         if (!fundoMap[f]) fundoMap[f] = { jabas: 0, tareo: 0, ejecucion: 0 };
         fundoMap[f].ejecucion += j;
@@ -361,30 +377,36 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         if (fundoMap[f].tareo === 0) {
           fundoMap[f].jabas += j;
         }
-      }
 
-      if (p.avance) {
-        Object.entries(p.avance).forEach(([dni]) => {
-          trabSet.add(dni);
-        });
+        if (p.avance) {
+          Object.entries(p.avance).forEach(([dni]) => {
+            trabSet.add(dni);
+          });
+        }
       }
     });
 
     // Validaciones
     let jabasValidadas = 0;
     filteredValidaciones.forEach((v) => {
-      jabasValidadas += Number(v.jabasConformes) || Number(v.totalJabas) || 0;
-      if (v.items && Array.isArray(v.items)) {
-        v.items.forEach((it) => {
-          if (it.dni) trabSet.add(it.dni);
-        });
+      const vDate = normalizeDateString(v.fecha) || (v.timestamp ? normalizeDateString(v.timestamp.slice(0, 10)) : '');
+      if (!diaSeleccionado || vDate === diaSeleccionado) {
+        jabasValidadas += Number(v.jabasConformes) || Number(v.totalJabas) || 0;
+        if (v.items && Array.isArray(v.items)) {
+          v.items.forEach((it) => {
+            if (it.dni) trabSet.add(it.dni);
+          });
+        }
       }
     });
 
     // Also collect from trabajadores list
     trabajadores.forEach((t) => {
+      const tDate = t.fecha ? normalizeDateString(t.fecha) : '';
       if (!t.fecha || isDateInPeriod(t.fecha)) {
-        if (t.dni) trabSet.add(t.dni);
+        if (!diaSeleccionado || tDate === diaSeleccionado) {
+          if (t.dni) trabSet.add(t.dni);
+        }
       }
     });
 
@@ -1399,22 +1421,75 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
           {/* Jabas por Fundo Visual Chart */}
           <div className="bg-white rounded-2xl shadow-sm border border-[#e0e0e0] p-4 sm:p-6">
-            <div className="flex items-center justify-between pb-3 border-b border-[#f0f0f0] mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#f0f0f0] mb-4 gap-2.5">
               <div className="flex items-center gap-2">
                 <BarChart3 className="w-5 h-5 text-[#2e7d32]" />
-                <h3 className="text-sm sm:text-base font-bold text-[#1b5e20]">
-                  Jabas Recolectadas por Fundo
-                </h3>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-[#1b5e20]">
+                    Jabas Recolectadas por Fundo
+                  </h3>
+                  <p className="text-[11px] text-gray-500">
+                    Distribución de cosecha acumulada o por fecha específica
+                  </p>
+                </div>
               </div>
-              <span className="text-xs text-[#2e7d32] font-extrabold bg-[#e8f5e9] px-2.5 py-1 rounded-full border border-[#a5d6a7]">
-                Total: {metrics.jabasByFundo.reduce((sum, f) => sum + f.count, 0).toLocaleString()} jabas {diaSeleccionado ? `(Día ${formatDateDDMMAAAA(diaSeleccionado)})` : `(Total)`}
-              </span>
+
+              {/* Filtro interactivo de fecha para este panel */}
+              <div className="flex items-center gap-2 flex-wrap self-end sm:self-auto">
+                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1 shadow-2xs">
+                  <Calendar className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                  <select
+                    value={diaSeleccionado}
+                    onChange={(e) => setDiaSeleccionado(e.target.value)}
+                    className="text-xs bg-transparent font-bold text-gray-800 focus:outline-none cursor-pointer pr-1"
+                  >
+                    <option value="">Todo el período ({diasDesglose.length} días)</option>
+                    {diasDesglose.map((d) => (
+                      <option key={d.fecha} value={d.fecha}>
+                        {d.fechaFormateada} {d.isToday ? '(Hoy)' : ''} — {d.recogidas} jabas
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <input
+                  type="date"
+                  value={diaSeleccionado}
+                  onChange={(e) => setDiaSeleccionado(e.target.value)}
+                  className="px-2 py-1 text-xs rounded-xl border border-gray-200 bg-gray-50 text-gray-700 focus:outline-none focus:border-emerald-600 cursor-pointer shadow-2xs font-medium"
+                  title="Elegir fecha para filtrar gráfico"
+                />
+
+                {diaSeleccionado ? (
+                  <button
+                    type="button"
+                    onClick={() => setDiaSeleccionado('')}
+                    className="px-2 py-1 rounded-xl text-xs font-bold text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 transition-all cursor-pointer shadow-2xs"
+                    title="Ver total de todos los días"
+                  >
+                    ✕ Ver Total
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setDiaSeleccionado(getLocalToday())}
+                    className="px-2 py-1 rounded-xl text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-all cursor-pointer shadow-2xs"
+                    title="Ver solo jabas de hoy"
+                  >
+                    Hoy
+                  </button>
+                )}
+
+                <span className="text-xs text-[#2e7d32] font-extrabold bg-[#e8f5e9] px-2.5 py-1 rounded-full border border-[#a5d6a7]">
+                  Total: {metrics.jabasByFundo.reduce((sum, f) => sum + f.count, 0).toLocaleString()} jabas
+                </span>
+              </div>
             </div>
 
             {metrics.jabasByFundo.length === 0 ? (
               <div className="py-12 text-center text-gray-400 text-xs flex flex-col items-center gap-2">
                 <TreePine className="w-8 h-8 text-gray-300" />
-                <span>Sin datos de cosecha para el período seleccionado.</span>
+                <span>Sin datos de cosecha para {diaSeleccionado ? `el día ${formatDateDDMMAAAA(diaSeleccionado)}` : 'el período seleccionado'}.</span>
                 <span className="text-[11px] text-gray-400">Registra jabas en la pestaña de Personal o Ejecución para visualizarlas aquí.</span>
               </div>
             ) : (
@@ -1472,15 +1547,20 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           {/* Group Performance Breakdown */}
           {metrics.jabasByGrupo.length > 0 && (
             <div className="bg-white rounded-2xl shadow-sm border border-[#e0e0e0] p-4 sm:p-6">
-              <div className="flex items-center justify-between pb-3 border-b border-[#f0f0f0] mb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#f0f0f0] mb-3 gap-2">
                 <div className="flex items-center gap-2">
                   <Award className="w-4 h-4 text-[#ff8f00]" />
                   <h3 className="text-xs sm:text-sm font-bold text-[#1b5e20] uppercase tracking-wider">
                     Rendimiento por Grupo / Cuadrilla
                   </h3>
+                  {diaSeleccionado && (
+                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-300">
+                      Día: {formatDateDDMMAAAA(diaSeleccionado)}
+                    </span>
+                  )}
                 </div>
                 <span className="text-[11px] text-[#757575]">
-                  {metrics.jabasByGrupo.length} grupos activos
+                  {metrics.jabasByGrupo.length} grupos activos {diaSeleccionado ? `en el día ${formatDateDDMMAAAA(diaSeleccionado)}` : 'en el período'}
                 </span>
               </div>
 

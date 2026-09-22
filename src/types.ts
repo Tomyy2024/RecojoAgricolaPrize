@@ -81,7 +81,7 @@ export interface Programa {
   numTrab: string;
   tipo: string;
   jabas: string | number;
-  ddc: string | number;
+  ddc?: string | number;
   lotes: SelectedLote[];
   totalLotes: number;
   fechaRegistro: string;
@@ -99,10 +99,30 @@ export interface ProgramaGeneral {
   haTotal: string;
   numTrabajadores: string;
   observaciones: string;
+  fecha?: string;
   fechaRegistro: string;
   createdAt?: string;
   updatedAt?: string;
   supervisor?: string;
+}
+
+export interface ProgramacionDiaria {
+  id: string;
+  fecha: string;
+  fundo: string;
+  modulo: string;
+  haTotal: string;
+  numTrab: string;
+  tipo: 'Suelo' | 'Maceta' | string;
+  jabas: string | number;
+  ddc?: string | number;
+  lotes: SelectedLote[];
+  totalLotes: number;
+  fechaRegistro: string;
+  supervisor?: string;
+  estado?: 'Programado' | 'En Ejecución' | 'Completado' | string;
+  variedad?: string;
+  observaciones?: string;
 }
 
 export interface DetalleJaba {
@@ -188,6 +208,7 @@ export interface ValidacionSupervisor {
 
 export type TabId = 
   | 'programaGeneral'
+  | 'programacionDiaria'
   | 'programa'
   | 'trabajadores'
   | 'validacion'

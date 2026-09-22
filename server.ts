@@ -44,6 +44,7 @@ function getInitialData() {
     lideres: [],
     reservas: [],
     auditoriaIngresos: [],
+    programacionDiaria: [],
     lastUpdated: new Date().toISOString()
   };
 }
@@ -771,12 +772,17 @@ async function startServer() {
           const rawDni = String(t.dni || '').trim();
           const effectiveDni = dni || rawDni;
           const tFecha = t.fecha ? normalizeDateServer(t.fecha) : targetFechaNorm;
-          const key = effectiveDni ? `${effectiveDni}__${tFecha || 's_f'}` : (t.id ? `${t.id}__${tFecha}` : `idx_${i}__${tFecha}__${t.nombres}`);
+          const tMod = String(t.modulo || 'SM').trim().toUpperCase();
+          const key = effectiveDni
+            ? `${effectiveDni}__${tFecha || 's_f'}__${tMod}`
+            : t.id
+            ? `${t.id}__${tFecha}__${tMod}`
+            : `idx_${i}__${tFecha}__${tMod}__${t.nombres}`;
           if (!seen.has(key)) {
             seen.add(key);
             incomingClean.push({
               ...t,
-              id: t.id || `w_${effectiveDni || i}_${tFecha || 'sf'}`,
+              id: t.id || `w_${effectiveDni || i}_${tFecha || 'sf'}_${tMod}`,
               dni: effectiveDni,
               nombres: t.nombres ? String(t.nombres).trim() : '',
               supervisor: t.supervisor ? String(t.supervisor).trim() : '',
@@ -799,12 +805,14 @@ async function startServer() {
           otrasFechas.forEach((w: any, idx: number) => {
             const dni = String(w.dni || '').trim();
             const wf = normalizeDateServer(w.fecha) || '';
-            mapWorkers.set(dni ? `${dni}__${wf}` : (w.id || `idx_${idx}`), w);
+            const mod = String(w.modulo || 'SM').trim().toUpperCase();
+            mapWorkers.set(dni ? `${dni}__${wf}__${mod}` : (w.id ? `${w.id}__${mod}` : `idx_${idx}`), w);
           });
           incomingClean.forEach((w: any, idx: number) => {
             const dni = String(w.dni || '').trim();
             const wf = normalizeDateServer(w.fecha) || targetFechaNorm;
-            mapWorkers.set(dni ? `${dni}__${wf}` : (w.id || `idx_in_${idx}`), { ...w, fecha: wf });
+            const mod = String(w.modulo || 'SM').trim().toUpperCase();
+            mapWorkers.set(dni ? `${dni}__${wf}__${mod}` : (w.id ? `${w.id}__${mod}` : `idx_in_${idx}`), { ...w, fecha: wf });
           });
           db.trabajadores = Array.from(mapWorkers.values());
         } else if (effectiveModo === 'append' || effectiveModo === 'append_date') {
@@ -812,13 +820,15 @@ async function startServer() {
           (db.trabajadores || []).forEach((t: any, i: number) => {
             const dni = String(t.dni || '').replace(/\s+/g, '').trim();
             const tFecha = t.fecha ? normalizeDateServer(t.fecha) : '';
-            const key = dni ? `${dni}__${tFecha || 's_f'}` : (t.id ? `${t.id}__${tFecha}` : `idx_${i}__${tFecha}__${t.nombres}`);
+            const mod = String(t.modulo || 'SM').trim().toUpperCase();
+            const key = dni ? `${dni}__${tFecha || 's_f'}__${mod}` : (t.id ? `${t.id}__${tFecha}__${mod}` : `idx_${i}__${tFecha}__${mod}__${t.nombres}`);
             existingMap.set(key, t);
           });
           incomingClean.forEach((t: any) => {
             const dni = String(t.dni || '').replace(/\s+/g, '').trim();
             const tFecha = t.fecha ? normalizeDateServer(t.fecha) : (targetFechaNorm || '');
-            const key = dni ? `${dni}__${tFecha || 's_f'}` : `${t.id}__${tFecha}`;
+            const mod = String(t.modulo || 'SM').trim().toUpperCase();
+            const key = dni ? `${dni}__${tFecha || 's_f'}__${mod}` : `${t.id}__${tFecha}__${mod}`;
             existingMap.set(key, { ...t, fecha: tFecha });
           });
           db.trabajadores = Array.from(existingMap.values());
@@ -1709,6 +1719,13 @@ async function startServer() {
         }
         if (Array.isArray(incoming.programaGeneral)) {
           db.programaGeneral = sanitizeAndMergeProgramaGeneralServer(db.programaGeneral || [], incoming.programaGeneral);
+        }
+        if (Array.isArray(incoming.programacionesDiarias) || Array.isArray(incoming.programacionDiaria)) {
+          const list = incoming.programacionesDiarias || incoming.programacionDiaria;
+          const pMap = new Map<string, any>();
+          (db.programacionDiaria || []).forEach((p: any) => { if (p && p.id) pMap.set(p.id, p); });
+          list.forEach((p: any) => { if (p && p.id) pMap.set(p.id, p); });
+          db.programacionDiaria = Array.from(pMap.values());
         }
 
         // SEGURIDAD CRÍTICA: Únicamente el usuario con rol Administrador puede actualizar la nómina central (db.trabajadores).

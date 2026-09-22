@@ -2,6 +2,7 @@ import React from 'react';
 import { TabId, UserRole, DeviceViewMode } from '../types';
 import { 
   Sprout, 
+  CalendarCheck,
   ClipboardList, 
   Users, 
   CheckCheck,
@@ -30,8 +31,14 @@ interface TabConfig {
 const TABS: TabConfig[] = [
   {
     id: 'programaGeneral',
-    label: 'General',
+    label: 'Programa Semanal',
     icon: <Sprout className="w-5 h-5" />,
+    roles: ['Administrador', 'Supervisor']
+  },
+  {
+    id: 'programacionDiaria',
+    label: 'Programación Diaria',
+    icon: <CalendarCheck className="w-5 h-5" />,
     roles: ['Administrador', 'Supervisor']
   },
   {
@@ -108,7 +115,7 @@ export const Navigation: React.FC<NavigationProps> = ({
               <button
                 key={tab.id}
                 onClick={() => onSelectTab(tab.id)}
-                className={`flex-1 min-w-[70px] sm:min-w-[84px] py-2 px-1 sm:px-2 rounded-xl flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
+                className={`flex-1 min-w-[72px] sm:min-w-[88px] py-2 px-1 sm:px-2 rounded-xl flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
                   isActive
                     ? 'bg-[#2e7d32] text-white shadow-md font-bold'
                     : 'text-[#5f6368] hover:text-[#2e7d32] hover:bg-[#f1f8e9] font-medium'
@@ -117,7 +124,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                 <div className={`mb-1 transition-transform ${isActive ? 'scale-110' : ''}`}>
                   {tab.icon}
                 </div>
-                <span className="text-[10px] sm:text-[11px] uppercase tracking-tighter sm:tracking-normal truncate max-w-full">
+                <span className="text-[9px] sm:text-[10.5px] uppercase tracking-tighter sm:tracking-normal text-center leading-tight max-w-full">
                   {tab.label}
                 </span>
               </button>

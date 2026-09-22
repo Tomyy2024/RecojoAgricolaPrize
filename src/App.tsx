@@ -16,7 +16,8 @@ import {
   SyncLogEntry, 
   ValidacionSupervisor,
   DeviceViewMode,
-  ReservaCuadrilla
+  ReservaCuadrilla,
+  ProgramacionDiaria
 } from './types';
 import { 
   initializeStorage, 
@@ -28,6 +29,9 @@ import {
   saveProgramas, 
   getProgramaGeneral, 
   saveProgramaGeneral, 
+  getProgramacionesDiarias,
+  saveProgramacionesDiarias,
+  deleteProgramacionDiariaFromStorage,
   getTrabajadores, 
   saveTrabajadores, 
   getDetalleJabas, 
@@ -72,6 +76,7 @@ import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
 import { LoginScreen } from './components/LoginScreen';
 import { ProgramaGeneralTab } from './components/ProgramaGeneralTab';
+import { ProgramacionDiariaTab } from './components/ProgramacionDiariaTab';
 import { ProgramaWizardTab } from './components/ProgramaWizardTab';
 import { TrabajadoresTab } from './components/TrabajadoresTab';
 import { ValidacionTab } from './components/ValidacionTab';
@@ -143,7 +148,7 @@ export default function App() {
       setActiveTab('dashboard');
     } else if (
       session.rol === 'Supervisor' &&
-      !['programaGeneral', 'programa', 'trabajadores', 'validacion', 'gruposLideres'].includes(activeTab)
+      !['programaGeneral', 'programacionDiaria', 'programa', 'trabajadores', 'validacion', 'gruposLideres'].includes(activeTab)
     ) {
       setActiveTab('programaGeneral');
     }
@@ -152,6 +157,8 @@ export default function App() {
   // Application Data States
   const [programas, setProgramasState] = useState<Programa[]>(() => getProgramas());
   const [programaGeneral, setProgramaGeneralState] = useState<ProgramaGeneral[]>(() => getProgramaGeneral());
+  const [programacionesDiarias, setProgramacionesDiariasState] = useState<ProgramacionDiaria[]>(() => getProgramacionesDiarias());
+  const [initialProgramacionForEjecucion, setInitialProgramacionForEjecucion] = useState<ProgramacionDiaria | null>(null);
   const [trabajadores, setTrabajadoresState] = useState<Trabajador[]>(() => getTrabajadores());
   const [detalleJabas, setDetalleJabasState] = useState<DetalleJaba[]>(() => getDetalleJabas());
   const [usuarios, setUsuariosState] = useState<Usuario[]>(() => getUsuarios());
@@ -239,6 +246,11 @@ export default function App() {
       setProgramaGeneralState(d.programaGeneral);
       saveProgramaGeneral(d.programaGeneral);
     }
+    if (Array.isArray(d.programacionesDiarias) || Array.isArray(d.programacionDiaria)) {
+      const pDiarias = d.programacionesDiarias || d.programacionDiaria;
+      setProgramacionesDiariasState(pDiarias);
+      saveProgramacionesDiarias(pDiarias);
+    }
     if (Array.isArray(d.trabajadores)) {
       const isLocked = isOfflineNominaLocked();
       const currentWorkers = getTrabajadores();
@@ -292,7 +304,12 @@ export default function App() {
           const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
           const rawDni = String(t.dni || '').trim();
           const tFecha = t.fecha ? (normalizeDateString(t.fecha) || t.fecha) : '';
-          const key = cleanDni ? `${cleanDni}__${tFecha || 's_f'}` : (t.id ? `${t.id}__${tFecha}` : `idx_${i}__${tFecha}__${t.nombres}`);
+          const tModulo = String(t.modulo || 'SM').trim().toUpperCase();
+          const key = cleanDni
+            ? `${cleanDni}__${tFecha || 's_f'}__${tModulo}`
+            : t.id
+            ? `${t.id}__${tFecha}__${tModulo}`
+            : `idx_${i}__${tFecha}__${tModulo}__${t.nombres}`;
 
           const existingLocal = (cleanDni ? localWorkersMap.get(cleanDni) : null) || (t.id ? localWorkersMap.get(t.id) : null);
           const grupoFinal = t.grupo !== undefined && t.grupo !== null
@@ -506,6 +523,7 @@ export default function App() {
         userName: currentName,
         programas: getProgramas(),
         programaGeneral: getProgramaGeneral(),
+        programacionesDiarias: getProgramacionesDiarias(),
         detalleJabas: getDetalleJabas(),
         usuarios: getUsuarios(),
         validaciones: getValidaciones(),
@@ -743,6 +761,7 @@ export default function App() {
     setTrabajadoresState([]);
     setProgramasState([]);
     setProgramaGeneralState([]);
+    setProgramacionesDiariasState([]);
     setDetalleJabasState([]);
     setValidacionesState([]);
     setGruposState([]);
@@ -823,8 +842,30 @@ export default function App() {
   const handleSaveProgramaGeneral = (list: ProgramaGeneral[]) => {
     setProgramaGeneralState(list);
     saveProgramaGeneral(list);
-    addLog(`🌾 Programa General actualizado (${list.length} registros)`, 'ok');
+    addLog(`🌾 Programa Semanal actualizado (${list.length} registros)`, 'ok');
     triggerAutoSync('Programa General', { programaGeneral: list });
+  };
+
+  const handleSaveProgramacionDiaria = (item: ProgramacionDiaria) => {
+    const updated = [item, ...programacionesDiarias.filter((p) => p.id !== item.id)];
+    setProgramacionesDiariasState(updated);
+    saveProgramacionesDiarias(updated);
+    addLog(`📅 Programación Diaria guardada: ${item.id} (${item.fundo} - ${item.modulo})`, 'ok');
+    triggerAutoSync('Programacion Diaria', { programacionesDiarias: updated });
+  };
+
+  const handleDeleteProgramacionDiaria = (id: string) => {
+    const updated = programacionesDiarias.filter((p) => p.id !== id);
+    setProgramacionesDiariasState(updated);
+    deleteProgramacionDiariaFromStorage(id);
+    addLog(`🗑️ Programación Diaria eliminada: ${id}`, 'info');
+    triggerAutoSync('Eliminar Programacion Diaria', { programacionesDiarias: updated });
+  };
+
+  const handleGoToEjecucionFromProgramacion = (item: ProgramacionDiaria) => {
+    setInitialProgramacionForEjecucion(item);
+    setActiveTab('programa');
+    addToast(`🚀 Cargando Programación Diaria ${item.id} en Ejecución...`, 'info');
   };
 
   const handleSaveAvance = (avanceMap: Record<string, number>, newDetalleList: DetalleJaba[]) => {
@@ -836,7 +877,8 @@ export default function App() {
     // Update full worker context (Supervisor, Fundo, Modulo, Grupo, Lider, Jabas) based on this cuadrilla record
     const workerUpdates: Record<string, { supervisor?: string; fundo?: string; modulo?: string; grupo?: string; lider?: string; nombres?: string; fecha?: string; jabas?: number }> = {};
     const hoy = getLocalToday();
-    const workerJabasToday: Record<string, number> = {};
+    const workerJabasByModToday: Record<string, number> = {};
+    const workerJabasTotalToday: Record<string, number> = {};
 
     mergedDetalle.forEach((d) => {
       const dFecha = String(d.fecha || '').trim();
@@ -846,8 +888,11 @@ export default function App() {
         if (d.dni) {
           const cleanD = String(d.dni).replace(/\s+/g, '').trim();
           const rawD = String(d.dni).trim();
-          if (cleanD) workerJabasToday[cleanD] = j;
-          if (rawD) workerJabasToday[rawD] = j;
+          const modD = String(d.modulo || '').trim().toUpperCase();
+          if (cleanD && modD) workerJabasByModToday[`${cleanD}__${modD}`] = j;
+          if (rawD && modD) workerJabasByModToday[`${rawD}__${modD}`] = j;
+          if (cleanD) workerJabasTotalToday[cleanD] = (workerJabasTotalToday[cleanD] || 0) + j;
+          if (rawD && rawD !== cleanD) workerJabasTotalToday[rawD] = (workerJabasTotalToday[rawD] || 0) + j;
         }
       }
     });
@@ -856,6 +901,7 @@ export default function App() {
       if (d.dni) {
         const cleanD = String(d.dni).replace(/\s+/g, '').trim();
         const rawD = String(d.dni).trim();
+        const modD = String(d.modulo || '').trim().toUpperCase();
         const obj = {
           supervisor: d.supervisor,
           fundo: d.fundo,
@@ -866,10 +912,15 @@ export default function App() {
           fecha: d.fecha || hoy,
           jabas: Number(d.jabas) || 0
         };
-        workerUpdates[rawD] = obj;
+        if (modD) {
+          if (cleanD) workerUpdates[`${cleanD}__${modD}`] = obj;
+          if (rawD) workerUpdates[`${rawD}__${modD}`] = obj;
+        }
         if (cleanD) workerUpdates[cleanD] = obj;
+        if (rawD) workerUpdates[rawD] = obj;
         if (d.trabajador) {
           const normName = d.trabajador.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+          if (modD) workerUpdates[`NAME_${normName}__${modD}`] = obj;
           workerUpdates[`NAME_${normName}`] = obj;
         }
       }
@@ -878,50 +929,78 @@ export default function App() {
     let updatedWorkers = trabajadores.map((t) => {
       const cleanD = String(t.dni || '').replace(/\s+/g, '').trim();
       const rawD = String(t.dni || '').trim();
+      const tMod = String(t.modulo || '').trim().toUpperCase();
       const normName = t.nombres ? t.nombres.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '';
-      const u = (cleanD && workerUpdates[cleanD]) || (rawD && workerUpdates[rawD]) || (t.id && workerUpdates[t.id]) || (normName && workerUpdates[`NAME_${normName}`]);
-      const currentJabasToday = (cleanD && workerJabasToday[cleanD]) || (rawD && workerJabasToday[rawD]) || 0;
+
+      // Match by DNI and module first, so workers in different modules keep their own module & jabas
+      const u =
+        (tMod && cleanD && workerUpdates[`${cleanD}__${tMod}`]) ||
+        (tMod && rawD && workerUpdates[`${rawD}__${tMod}`]) ||
+        (tMod && normName && workerUpdates[`NAME_${normName}__${tMod}`]) ||
+        (t.id && workerUpdates[t.id]) ||
+        (cleanD && workerUpdates[cleanD]) ||
+        (rawD && workerUpdates[rawD]) ||
+        (normName && workerUpdates[`NAME_${normName}`]);
+
+      const specificJabasToday =
+        (tMod && cleanD && workerJabasByModToday[`${cleanD}__${tMod}`]) ||
+        (tMod && rawD && workerJabasByModToday[`${rawD}__${tMod}`]);
+      const currentJabasToday =
+        specificJabasToday !== undefined
+          ? specificJabasToday
+          : (cleanD && workerJabasTotalToday[cleanD]) || (rawD && workerJabasTotalToday[rawD]) || 0;
+
       if (u) {
         return {
           ...t,
           supervisor: u.supervisor || t.supervisor,
           fundo: u.fundo || t.fundo,
-          modulo: u.modulo || t.modulo,
+          modulo: t.modulo || u.modulo,
           grupo: u.grupo || t.grupo,
           lider: u.lider || t.lider,
           fecha: u.fecha || t.fecha,
-          jabas: currentJabasToday > 0 ? currentJabasToday : (Number(u.jabas) || Number(t.jabas) || 0)
+          jabas: specificJabasToday !== undefined ? specificJabasToday : (Number(u.jabas) || Number(t.jabas) || 0)
         };
       }
-      if (currentJabasToday > 0) {
+      if (specificJabasToday !== undefined) {
         return {
           ...t,
-          jabas: currentJabasToday
+          jabas: specificJabasToday
         };
       }
       return t;
     });
 
-    // Add any workers not previously in the roster
-    const existingDniSet = new Set(trabajadores.map((t) => t.dni));
+    // Add any workers not previously in the roster (keyed by DNI + Modulo to support distinct records)
+    const existingWorkerModSet = new Set(
+      trabajadores.map(
+        (t) => `${String(t.dni).replace(/\s+/g, '').trim()}__${String(t.modulo || '').trim().toUpperCase()}`
+      )
+    );
     newDetalleList.forEach((d) => {
-      if (d.dni && !existingDniSet.has(d.dni)) {
-        existingDniSet.add(d.dni);
-        updatedWorkers = [
-          {
-            id: `TRAB_${d.dni}`,
-            fecha: d.fecha || getLocalToday(),
-            dni: d.dni,
-            nombres: d.trabajador || `Trabajador ${d.dni}`,
-            fundo: d.fundo || 'Santa Teresa',
-            modulo: d.modulo || 'M01',
-            supervisor: d.supervisor || '',
-            grupo: d.grupo || '',
-            lider: d.lider || '',
-            tipo: 'Cosechero'
-          },
-          ...updatedWorkers
-        ];
+      if (d.dni) {
+        const cleanD = String(d.dni).replace(/\s+/g, '').trim();
+        const modD = String(d.modulo || 'M01').trim().toUpperCase();
+        const key = `${cleanD}__${modD}`;
+        if (!existingWorkerModSet.has(key)) {
+          existingWorkerModSet.add(key);
+          updatedWorkers = [
+            {
+              id: `TRAB_${cleanD}_${modD}`,
+              fecha: d.fecha || getLocalToday(),
+              dni: cleanD,
+              nombres: d.trabajador || `Trabajador ${cleanD}`,
+              fundo: d.fundo || 'Santa Teresa',
+              modulo: d.modulo || 'M01',
+              supervisor: d.supervisor || '',
+              grupo: d.grupo || '',
+              lider: d.lider || '',
+              tipo: 'Ingreso Adicional',
+              jabas: Number(d.jabas) || 0
+            },
+            ...updatedWorkers
+          ];
+        }
       }
     });
 
@@ -1327,13 +1406,15 @@ export default function App() {
       trabajadores.forEach((t) => {
         const cleanDni = String(t.dni || '').trim();
         const tf = normalizeDateString(t.fecha) || 'sin_fecha';
-        const key = cleanDni ? `${cleanDni}__${tf}` : (t.id || `idx_${t.nombres}`);
+        const mod = String(t.modulo || 'SM').trim().toUpperCase();
+        const key = cleanDni ? `${cleanDni}__${tf}__${mod}` : (t.id ? `${t.id}__${mod}` : `idx_${t.nombres}__${mod}`);
         existingMap.set(key, t);
       });
       workersWithFecha.forEach((t) => {
         const cleanDni = String(t.dni || '').trim();
         const tf = normalizeDateString(t.fecha) || 'sin_fecha';
-        const key = cleanDni ? `${cleanDni}__${tf}` : (t.id || `idx_${t.nombres}`);
+        const mod = String(t.modulo || 'SM').trim().toUpperCase();
+        const key = cleanDni ? `${cleanDni}__${tf}__${mod}` : (t.id ? `${t.id}__${mod}` : `idx_${t.nombres}__${mod}`);
         existingMap.set(key, t);
       });
       mergedList = Array.from(existingMap.values());
@@ -1800,11 +1881,25 @@ export default function App() {
           />
         )}
 
+        {activeTab === 'programacionDiaria' && (
+          <ProgramacionDiariaTab
+            session={session}
+            programacionesDiarias={programacionesDiarias}
+            onSaveProgramacion={handleSaveProgramacionDiaria}
+            onDeleteProgramacion={handleDeleteProgramacionDiaria}
+            onGoToEjecucion={handleGoToEjecucionFromProgramacion}
+            onToast={addToast}
+          />
+        )}
+
         {activeTab === 'programa' && (
           <ProgramaWizardTab
             session={session}
             onSavePrograma={handleSavePrograma}
             onToast={addToast}
+            programacionesDiarias={programacionesDiarias}
+            initialProgramacion={initialProgramacionForEjecucion}
+            onClearInitialProgramacion={() => setInitialProgramacionForEjecucion(null)}
           />
         )}
 
@@ -1854,6 +1949,7 @@ export default function App() {
             lideres={lideres}
             validaciones={validaciones}
             grupos={grupos}
+            reservas={reservas}
             onSaveValidacion={handleSaveValidacion}
             onDeleteValidacion={handleDeleteValidacion}
             onDeleteLider={handleDeleteLider}
