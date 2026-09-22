@@ -889,6 +889,14 @@ export function deleteProgramacionDiariaFromStorage(id: string): ProgramacionDia
   return updated;
 }
 
+export function normalizeGrupo(g?: string | null): string {
+  if (!g) return '';
+  const clean = String(g).toLowerCase().replace(/\s+/g, ' ').trim();
+  const match = clean.match(/grupo\s*0*(\d+)/i);
+  if (match) return `grupo ${parseInt(match[1], 10)}`;
+  return clean;
+}
+
 // Detalle Jabas - Sanitización, deduplicación y persistencia limpia
 export function sanitizeAndDeduplicateDetalleJabas(list: DetalleJaba[]): DetalleJaba[] {
   if (!Array.isArray(list)) return [];
@@ -915,10 +923,14 @@ export function sanitizeAndDeduplicateDetalleJabas(list: DetalleJaba[]): Detalle
     }
 
     const normModulo = String(item.modulo || 'M01').trim().toUpperCase();
+    const normGrupo = normalizeGrupo(item.grupo);
+    const grpSlug = normGrupo ? normGrupo.replace(/[^a-z0-9]/g, '_') : 'nogrp';
     const personKey = cleanDni || (trabajador ? trabajador.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '');
-    // Clave unívoca por fecha, persona y módulo para evitar cualquier duplicación accidental
-    const primaryKey = `${normFecha}_${personKey}_${normModulo}`;
-    const cleanId = `JABA_${normFecha}_${cleanDni || 'P'}_${normModulo}`;
+    // Clave unívoca por fecha, persona, módulo y grupo para evitar colisiones entre grupos distintos
+    const primaryKey = `${normFecha}_${personKey}_${normModulo}_${grpSlug}`;
+    const cleanId = item.id && String(item.id).startsWith('JABA_') && String(item.id).includes(grpSlug)
+      ? String(item.id).trim()
+      : `JABA_${normFecha}_${cleanDni || 'P'}_${normModulo}_${grpSlug}`;
 
     const cleanRecord: DetalleJaba = {
       id: cleanId,
@@ -1142,14 +1154,16 @@ export function mergeReservasArrays(
 
     // Check if there is an existing reservation with the same date, supervisor, fundo, modulo and grupo
     const normSup = normalizeSupervisorKey(item.supervisor);
-    const itemGrp = (item.grupo || 'Grupo 01').trim().toLowerCase();
+    const itemGrp = normalizeGrupo(item.grupo || 'Grupo 01');
+    const itemMod = (item.modulo || '').trim().toUpperCase();
+    const itemFundo = (item.fundo || '').trim().toLowerCase();
     const existingMatch = Array.from(map.values()).find(
       (e) =>
         e.fecha === item.fecha &&
         normalizeSupervisorKey(e.supervisor) === normSup &&
-        e.fundo === item.fundo &&
-        e.modulo === item.modulo &&
-        (e.grupo || 'Grupo 01').trim().toLowerCase() === itemGrp
+        (e.fundo || '').trim().toLowerCase() === itemFundo &&
+        (e.modulo || '').trim().toUpperCase() === itemMod &&
+        normalizeGrupo(e.grupo || 'Grupo 01') === itemGrp
     );
 
     if (existingMatch) {

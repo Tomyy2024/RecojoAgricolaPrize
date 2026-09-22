@@ -86,7 +86,7 @@ function doPost(e) {
     var timestamp = new Date();
 
     // 1. Guardar Registro de Jabas / Avance Detallado
-    if (payload.detalleJabas && payload.detalleJabas.length > 0) {
+    if (payload.detalleJabas && Array.isArray(payload.detalleJabas)) {
       var sheetJabas = getOrCreateSheet(ss, 'Registro_Avance', [
         'ID', 'Fecha', 'Hora_Registro', 'Supervisor', 'Fundo', 'Modulo', 'Grupo', 'Lider', 'DNI', 'Trabajador', 'Jabas'
       ]);

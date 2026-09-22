@@ -1908,12 +1908,33 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       // 5. Notificar al servidor backend
       try {
         const gUrl = getGsheetUrl();
+        const removedJabaIds = (currentDetalle || [])
+          .filter((d) => {
+            const normD = normalizeDni(d.dni);
+            const rawD = String(d.dni || '').trim();
+            const itemId = String(d.id || '').trim();
+            const nameKey = d.trabajador ? `NAME_${normalizeStr(d.trabajador)}` : '';
+            const matches =
+              (normD && targetDniSet.has(normD)) ||
+              (rawD && targetDniSet.has(rawD)) ||
+              (itemId && targetIdSet.has(itemId)) ||
+              (nameKey && targetNameKeys.has(nameKey));
+            if (!matches) return false;
+            if (todasFechas) return true;
+            const dFecha = d.fecha ? normalizeDateString(d.fecha) : (d.timestamp ? normalizeDateString(d.timestamp) : '');
+            return dFecha === targetDate;
+          })
+          .map((d) => d.id)
+          .filter(Boolean);
+
         await fetch('/api/eliminar-personal-con-jabas', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             dnis: targetDnis,
             ids: targetWorkers.map((w) => w.id).filter(Boolean),
+            names: targetWorkers.map((w) => w.nombres).filter(Boolean),
+            jabaIds: removedJabaIds,
             fecha: targetDate,
             todasFechas,
             eliminarDeNomina: tipoAccion === 'eliminar_nomina_y_jabas',
@@ -4169,6 +4190,132 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 </div>
               </div>
 
+              {/* Selector de Vista de Asignación en Pantalla (Filtros y Tarjetas de Estado) */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-[#d0ded0]/80">
+                <div className="flex items-center gap-2 flex-wrap text-xs">
+                  <span className="text-gray-600 text-[11px] font-bold whitespace-nowrap flex items-center gap-1">
+                    <Filter className="w-3.5 h-3.5 text-[#2e7d32]" />
+                    <span>Estado:</span>
+                  </span>
+
+                  {/* 1. Solo Pendientes por Asignar (DEFAULT) */}
+                  <button
+                    type="button"
+                    onClick={() => setVistaAsignacion('pendientes')}
+                    className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                      vistaAsignacion === 'pendientes' || (vistaAsignacion as string) === 'sin_jabas'
+                        ? 'bg-[#2e7d32] text-white shadow-xs ring-1 ring-[#1b5e20]'
+                        : 'bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100'
+                    }`}
+                    title="Oculta automáticamente a los trabajadores asignados (con grupo, líder o jabas hoy) y muestra solo los pendientes"
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>Solo Pendientes</span>
+                    <span
+                      className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
+                        vistaAsignacion === 'pendientes' || (vistaAsignacion as string) === 'sin_jabas'
+                          ? 'bg-[#1b5e20] text-white'
+                          : 'bg-emerald-200 text-emerald-900'
+                      }`}
+                    >
+                      {countPendientes}
+                    </span>
+                  </button>
+
+                  {/* 2. Ya Asignados */}
+                  <button
+                    type="button"
+                    onClick={() => setVistaAsignacion('asignados')}
+                    className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                      vistaAsignacion === 'asignados'
+                        ? 'bg-purple-600 text-white shadow-xs ring-1 ring-purple-700'
+                        : 'bg-purple-50 text-purple-900 border border-purple-200 hover:bg-purple-100'
+                    }`}
+                    title="Mostrar los trabajadores que ya cuentan con Grupo o Líder asignado en la cuadrilla"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>Ya Asignados</span>
+                    <span
+                      className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
+                        vistaAsignacion === 'asignados' ? 'bg-purple-800 text-white' : 'bg-purple-200 text-purple-900'
+                      }`}
+                    >
+                      {countAsignados}
+                    </span>
+                  </button>
+
+                  {/* 3. Con Jabas */}
+                  <button
+                    type="button"
+                    onClick={() => setVistaAsignacion('con_jabas')}
+                    className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                      vistaAsignacion === 'con_jabas'
+                        ? 'bg-amber-600 text-white shadow-xs ring-1 ring-amber-700'
+                        : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
+                    }`}
+                    title="Mostrar los trabajadores que tienen avance registrado en la fecha consultada"
+                  >
+                    <Package className="w-3.5 h-3.5" />
+                    <span>Con Jabas</span>
+                    <span
+                      className={`px-2 py-0.5 text-[10px] rounded-full font-extrabold ${
+                        vistaAsignacion === 'con_jabas' ? 'bg-amber-800 text-white' : 'bg-amber-200 text-amber-900'
+                      }`}
+                    >
+                      {countConJabasTotal} pers. · {jabasTotalDisplay} jabas
+                    </span>
+                  </button>
+
+                  {/* 4. Ver Todos */}
+                  <button
+                    type="button"
+                    onClick={() => setVistaAsignacion('todos')}
+                    className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                      vistaAsignacion === 'todos'
+                        ? 'bg-[#1b5e20] text-white shadow-xs ring-1 ring-[#1b5e20]'
+                        : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                    }`}
+                    title="Mostrar la nómina completa sin ocultar a ningún trabajador"
+                  >
+                    <ListFilter className="w-3.5 h-3.5" />
+                    <span>Ver Todos</span>
+                    <span
+                      className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
+                        vistaAsignacion === 'todos' ? 'bg-emerald-800 text-white' : 'bg-gray-100 text-gray-700'
+                      }`}
+                    >
+                      {countTodos}
+                    </span>
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-wrap ml-auto">
+                  {isAdmin && countConJabasTotal > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleOpenEliminarMasivoConJabasModal}
+                      className="px-2.5 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white shadow-xs cursor-pointer transition-all active:scale-95 whitespace-nowrap"
+                      title="Eliminar personal con jabas asignadas o limpiar sus registros de avance (Solo Administrador)"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-white" />
+                      <span>Eliminar Personal con Jabas ({countConJabasTotal})</span>
+                    </button>
+                  )}
+
+                  {countAsignados > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleDesasignarTodos}
+                      className="px-2.5 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 cursor-pointer transition-all active:scale-95 whitespace-nowrap"
+                      title="Quitar grupo y líder a todos los asignados para reiniciar la nómina a 'Sin Grupo ni Líder'"
+                    >
+                      <RotateCcw className="w-3 h-3 text-red-600" />
+                      <span>Desasignar Todos ({countAsignados})</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {/* Chips de fechas disponibles en la nómina para selección rápida */}
               {fechasDisponiblesTrabajadores.length > 0 && (
                 <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-[#e0ebd0] text-xs">
@@ -4314,130 +4461,6 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
                 </button>
               </div>
             )}
-
-            {/* Selector de Vista de Asignación en Pantalla */}
-            <div className="flex items-center gap-2 mb-3 text-xs overflow-x-auto pb-1">
-              <span className="text-gray-500 text-[11px] font-semibold whitespace-nowrap flex items-center gap-1">
-                <Filter className="w-3.5 h-3.5 text-[#2e7d32]" />
-                <span>Estado:</span>
-              </span>
-
-              {/* 1. Solo Pendientes por Asignar (DEFAULT) */}
-              <button
-                type="button"
-                onClick={() => setVistaAsignacion('pendientes')}
-                className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-                  vistaAsignacion === 'pendientes' || (vistaAsignacion as string) === 'sin_jabas'
-                    ? 'bg-[#2e7d32] text-white shadow-xs ring-1 ring-[#1b5e20]'
-                    : 'bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100'
-                }`}
-                title="Oculta automáticamente a los trabajadores asignados (con grupo, líder o jabas hoy) y muestra solo los pendientes"
-              >
-                <Clock className="w-3.5 h-3.5" />
-                <span>Solo Pendientes</span>
-                <span
-                  className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
-                    vistaAsignacion === 'pendientes' || (vistaAsignacion as string) === 'sin_jabas'
-                      ? 'bg-[#1b5e20] text-white'
-                      : 'bg-emerald-200 text-emerald-900'
-                  }`}
-                >
-                  {countPendientes}
-                </span>
-              </button>
-
-              {/* 2. Ya Asignados */}
-              <button
-                type="button"
-                onClick={() => setVistaAsignacion('asignados')}
-                className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-                  vistaAsignacion === 'asignados'
-                    ? 'bg-purple-600 text-white shadow-xs ring-1 ring-purple-700'
-                    : 'bg-purple-50 text-purple-900 border border-purple-200 hover:bg-purple-100'
-                }`}
-                title="Mostrar los trabajadores que ya cuentan con Grupo o Líder asignado en la cuadrilla"
-              >
-                <Users className="w-3.5 h-3.5" />
-                <span>Ya Asignados</span>
-                <span
-                  className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
-                    vistaAsignacion === 'asignados' ? 'bg-purple-800 text-white' : 'bg-purple-200 text-purple-900'
-                  }`}
-                >
-                  {countAsignados}
-                </span>
-              </button>
-
-              {/* 3. Con Jabas */}
-              <button
-                type="button"
-                onClick={() => setVistaAsignacion('con_jabas')}
-                className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-                  vistaAsignacion === 'con_jabas'
-                    ? 'bg-amber-600 text-white shadow-xs ring-1 ring-amber-700'
-                    : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
-                }`}
-                title="Mostrar los trabajadores que tienen avance registrado en la fecha consultada"
-              >
-                <Package className="w-3.5 h-3.5" />
-                <span>Con Jabas</span>
-                <span
-                  className={`px-2 py-0.5 text-[10px] rounded-full font-extrabold ${
-                    vistaAsignacion === 'con_jabas' ? 'bg-amber-800 text-white' : 'bg-amber-200 text-amber-900'
-                  }`}
-                >
-                  {countConJabasTotal} pers. · {jabasTotalDisplay} jabas
-                </span>
-              </button>
-
-              {/* 4. Ver Todos */}
-              <button
-                type="button"
-                onClick={() => setVistaAsignacion('todos')}
-                className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-                  vistaAsignacion === 'todos'
-                    ? 'bg-[#1b5e20] text-white shadow-xs ring-1 ring-[#1b5e20]'
-                    : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-                }`}
-                title="Mostrar la nómina completa sin ocultar a ningún trabajador"
-              >
-                <ListFilter className="w-3.5 h-3.5" />
-                <span>Ver Todos</span>
-                <span
-                  className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold ${
-                    vistaAsignacion === 'todos' ? 'bg-emerald-800 text-white' : 'bg-gray-100 text-gray-700'
-                  }`}
-                >
-                  {countTodos}
-                </span>
-              </button>
-
-              <div className="flex items-center gap-1.5 ml-auto">
-                {isAdmin && countConJabasTotal > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleOpenEliminarMasivoConJabasModal}
-                    className="px-2.5 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white shadow-xs cursor-pointer transition-all active:scale-95 whitespace-nowrap"
-                    title="Eliminar personal con jabas asignadas o limpiar sus registros de avance (Solo Administrador)"
-                  >
-                    <Trash2 className="w-3.5 h-3.5 text-white" />
-                    <span>Eliminar Personal con Jabas ({countConJabasTotal})</span>
-                  </button>
-                )}
-
-                {countAsignados > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleDesasignarTodos}
-                    className="px-2.5 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 cursor-pointer transition-all active:scale-95 whitespace-nowrap"
-                    title="Quitar grupo y líder a todos los asignados para reiniciar la nómina a 'Sin Grupo ni Líder'"
-                  >
-                    <RotateCcw className="w-3 h-3 text-red-600" />
-                    <span>Desasignar Todos ({countAsignados})</span>
-                  </button>
-                )}
-              </div>
-            </div>
 
             {/* Listado de Tarjetas de Trabajadores con renderizado de alto rendimiento */}
             <div className="max-h-96 overflow-y-auto space-y-2 rounded-xl border border-[#e0e0e0] p-2 bg-[#fafafa]">
