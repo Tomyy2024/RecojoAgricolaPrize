@@ -562,51 +562,56 @@ export function getTrabajadores(): Trabajador[] {
       list = INITIAL_TRABAJADORES;
     }
 
-    const seen = new Set<string>();
-    const unique: Trabajador[] = [];
-    (Array.isArray(list) ? list : []).forEach((t, i) => {
-      const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
-      const tFecha = t.fecha ? normalizeDateString(t.fecha) : '';
-      const tModulo = String(t.modulo || 'SM').trim().toUpperCase();
-      const key = cleanDni
-        ? `${cleanDni}__${tFecha || 's_f'}__${tModulo}`
-        : t.id
-        ? `${t.id}__${tFecha}__${tModulo}`
-        : `idx_${i}__${tFecha}__${tModulo}__${t.nombres}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        unique.push({
-          ...t,
-          dni: cleanDni || String(t.dni || '').trim()
-        });
-      }
-    });
-    return unique;
+    return sanitizeAndDeduplicateTrabajadores(list);
   } catch {
     return [];
   }
 }
 
-export function saveTrabajadores(trabajadores: Trabajador[], version?: number, timestamp?: number) {
-  const seen = new Set<string>();
-  const unique: Trabajador[] = [];
-  (Array.isArray(trabajadores) ? trabajadores : []).forEach((t, i) => {
-    const cleanDni = String(t.dni || '').replace(/\s+/g, '').trim();
+export function sanitizeAndDeduplicateTrabajadores(list: Trabajador[]): Trabajador[] {
+  if (!Array.isArray(list)) return [];
+  const map = new Map<string, Trabajador>();
+
+  list.forEach((t, i) => {
+    if (!t) return;
+    const cleanDni = normalizeDniString(t.dni);
     const tFecha = t.fecha ? normalizeDateString(t.fecha) : '';
-    const tModulo = String(t.modulo || 'SM').trim().toUpperCase();
-    const key = cleanDni
-      ? `${cleanDni}__${tFecha || 's_f'}__${tModulo}`
-      : t.id
-      ? `${t.id}__${tFecha}__${tModulo}`
-      : `idx_${i}__${tFecha}__${tModulo}__${t.nombres}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      unique.push({
-        ...t,
-        dni: cleanDni || String(t.dni || '').trim()
+    const normName = t.nombres ? t.nombres.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '';
+    const key = cleanDni ? `${cleanDni}__${tFecha || 'sf'}` : (normName ? `${normName}__${tFecha || 'sf'}` : (t.id ? `${t.id}__${tFecha || 'sf'}` : `idx_${i}`));
+
+    const tMod = normalizeModulo(t.modulo);
+    const cleanRecord: Trabajador = {
+      ...t,
+      dni: cleanDni || String(t.dni || '').trim(),
+      modulo: t.modulo ? tMod : (cleanDni ? '' : tMod)
+    };
+
+    if (map.has(key)) {
+      const existing = map.get(key)!;
+      const hasSpecificMod = cleanRecord.modulo && cleanRecord.modulo !== 'SM' && cleanRecord.modulo !== 'M01';
+      const existingHasSpecificMod = existing.modulo && existing.modulo !== 'SM' && existing.modulo !== 'M01';
+      const bestModulo = hasSpecificMod ? cleanRecord.modulo : (existingHasSpecificMod ? existing.modulo : (cleanRecord.modulo || existing.modulo));
+
+      map.set(key, {
+        ...existing,
+        ...cleanRecord,
+        supervisor: cleanRecord.supervisor || existing.supervisor,
+        fundo: cleanRecord.fundo || existing.fundo,
+        modulo: bestModulo,
+        grupo: cleanRecord.grupo || existing.grupo,
+        lider: cleanRecord.lider || existing.lider,
+        jabas: Number(cleanRecord.jabas !== undefined && cleanRecord.jabas > 0 ? cleanRecord.jabas : (existing.jabas || 0))
       });
+    } else {
+      map.set(key, cleanRecord);
     }
   });
+
+  return Array.from(map.values());
+}
+
+export function saveTrabajadores(trabajadores: Trabajador[], version?: number, timestamp?: number) {
+  const unique = sanitizeAndDeduplicateTrabajadores(trabajadores);
   localStorage.setItem(KEYS.TRABAJADORES, JSON.stringify(unique));
   if (version !== undefined) {
     setNominaVersion(version);
@@ -937,6 +942,26 @@ export function normalizeGrupo(g?: string | null): string {
   return clean;
 }
 
+export function normalizeModulo(mod?: string | null): string {
+  if (!mod) return 'M01';
+  const clean = String(mod).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, '');
+  const match = clean.match(/^m(?:odulo)?0*(\d+)([a-z]?)$/i);
+  if (match) {
+    const num = parseInt(match[1], 10);
+    const letter = match[2] ? match[2].toUpperCase() : '';
+    return `M${num < 10 ? '0' + num : num}${letter}`;
+  }
+  return clean.toUpperCase() || 'M01';
+}
+
+export function normalizeDniString(dni?: string | number | null): string {
+  if (dni === null || dni === undefined) return '';
+  let str = String(dni).replace(/\s+/g, '').trim();
+  str = str.replace(/\.0+$/, '');
+  const digits = str.replace(/\D/g, '');
+  return digits || str;
+}
+
 // Detalle Jabas - Sanitización, deduplicación y persistencia limpia
 export function sanitizeAndDeduplicateDetalleJabas(list: DetalleJaba[]): DetalleJaba[] {
   if (!Array.isArray(list)) return [];
@@ -944,8 +969,7 @@ export function sanitizeAndDeduplicateDetalleJabas(list: DetalleJaba[]): Detalle
 
   list.forEach((item) => {
     if (!item || typeof item !== 'object') return;
-    const rawDni = String(item.dni || '').trim();
-    const cleanDni = rawDni.replace(/\D/g, '') || rawDni;
+    const cleanDni = normalizeDniString(item.dni);
     const trabajador = String(item.trabajador || '').trim();
     const jabas = Number(item.jabas) || 0;
 
@@ -962,15 +986,11 @@ export function sanitizeAndDeduplicateDetalleJabas(list: DetalleJaba[]): Detalle
       normFecha = getLocalToday();
     }
 
-    const normModulo = String(item.modulo || 'M01').trim().toUpperCase();
-    const normGrupo = normalizeGrupo(item.grupo);
-    const grpSlug = normGrupo ? normGrupo.replace(/[^a-z0-9]/g, '_') : 'nogrp';
+    const normModulo = normalizeModulo(item.modulo);
     const personKey = cleanDni || (trabajador ? trabajador.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '');
-    // Clave unívoca por fecha, persona, módulo y grupo para evitar colisiones entre grupos distintos
-    const primaryKey = `${normFecha}_${personKey}_${normModulo}_${grpSlug}`;
-    const cleanId = item.id && String(item.id).startsWith('JABA_') && String(item.id).includes(grpSlug)
-      ? String(item.id).trim()
-      : `JABA_${normFecha}_${cleanDni || 'P'}_${normModulo}_${grpSlug}`;
+    // Clave unívoca por fecha, persona y módulo: un trabajador sólo tiene un registro de avance por módulo y día
+    const primaryKey = `${normFecha}_${personKey}_${normModulo}`;
+    const cleanId = `JABA_${normFecha}_${cleanDni || 'P'}_${normModulo}`;
 
     const cleanRecord: DetalleJaba = {
       id: cleanId,
@@ -988,7 +1008,7 @@ export function sanitizeAndDeduplicateDetalleJabas(list: DetalleJaba[]): Detalle
 
     if (map.has(primaryKey)) {
       const existing = map.get(primaryKey)!;
-      // Priorizar el registro más reciente por timestamp
+      // Priorizar el registro con mayor información o el más reciente
       const isItemNewer = (item.timestamp || '') >= (existing.timestamp || '');
       const newer = isItemNewer ? cleanRecord : existing;
       const older = isItemNewer ? existing : cleanRecord;
@@ -996,11 +1016,15 @@ export function sanitizeAndDeduplicateDetalleJabas(list: DetalleJaba[]): Detalle
         ...older,
         ...newer,
         id: cleanId,
-        jabas: newer.jabas, // Respetar estrictamente la jaba asignada más reciente (no duplicar ni sumar)
+        fecha: normFecha,
+        modulo: normModulo,
+        dni: cleanDni,
+        jabas: newer.jabas, // Respetar la jaba asignada más reciente (no duplicar ni sumar)
         trabajador: newer.trabajador && !newer.trabajador.startsWith('Trabajador ') ? newer.trabajador : older.trabajador,
         supervisor: newer.supervisor || older.supervisor,
         grupo: newer.grupo || older.grupo,
         lider: newer.lider || older.lider,
+        fundo: newer.fundo || older.fundo,
         timestamp: newer.timestamp || older.timestamp
       });
     } else {

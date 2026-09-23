@@ -6,7 +6,15 @@ import {
   UploadCloud, Loader2
 } from 'lucide-react';
 import { DetalleJaba, UserRole } from '../types';
-import { deleteDetalleJabaFromStorage, deleteDetalleJabasFromStorage, saveDetalleJabas, getGsheetUrl, replicarAvanceAlSheet } from '../utils/storage';
+import { 
+  deleteDetalleJabaFromStorage, 
+  deleteDetalleJabasFromStorage, 
+  saveDetalleJabas, 
+  getGsheetUrl, 
+  replicarAvanceAlSheet,
+  sanitizeAndDeduplicateDetalleJabas,
+  normalizeModulo
+} from '../utils/storage';
 
 interface RegistroAvanceModalProps {
   isOpen: boolean;
@@ -38,33 +46,38 @@ export const RegistroAvanceModal: React.FC<RegistroAvanceModalProps> = ({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
 
+  // Registros deduplicados y sanitizados como única fuente de verdad
+  const cleanDetalleJabas = useMemo(() => {
+    return sanitizeAndDeduplicateDetalleJabas(detalleJabas || []);
+  }, [detalleJabas]);
+
   // Available dates
   const availableDates = useMemo(() => {
     const dates = new Set<string>();
-    detalleJabas.forEach(d => {
+    cleanDetalleJabas.forEach(d => {
       if (d.fecha) dates.add(d.fecha);
     });
     return Array.from(dates).sort().reverse();
-  }, [detalleJabas]);
+  }, [cleanDetalleJabas]);
 
   // Available modulos
   const availableModulos = useMemo(() => {
     const mods = new Set<string>();
-    detalleJabas.forEach(d => {
-      if (d.modulo) mods.add(d.modulo);
+    cleanDetalleJabas.forEach(d => {
+      if (d.modulo) mods.add(normalizeModulo(d.modulo));
     });
     return Array.from(mods).sort();
-  }, [detalleJabas]);
+  }, [cleanDetalleJabas]);
 
-  // Filtered records
+  // Filtered records (sin duplicados)
   const filteredRecords = useMemo(() => {
-    return detalleJabas.filter(item => {
+    return cleanDetalleJabas.filter(item => {
       // Date filter
       if (filterFecha !== 'todas' && item.fecha !== filterFecha) {
         return false;
       }
       // Modulo filter
-      if (filterModulo !== 'todos' && item.modulo !== filterModulo) {
+      if (filterModulo !== 'todos' && normalizeModulo(item.modulo) !== normalizeModulo(filterModulo)) {
         return false;
       }
       // Search term
@@ -81,7 +94,7 @@ export const RegistroAvanceModal: React.FC<RegistroAvanceModalProps> = ({
       }
       return true;
     });
-  }, [detalleJabas, filterFecha, filterModulo, searchTerm]);
+  }, [cleanDetalleJabas, filterFecha, filterModulo, searchTerm]);
 
   // Statistics
   const stats = useMemo(() => {

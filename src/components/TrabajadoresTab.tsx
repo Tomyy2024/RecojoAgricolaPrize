@@ -20,7 +20,8 @@ import {
   parsePastedWorkers,
   ParsedWorkerResult,
   replicarTrabajadoresAlSheet,
-  sanitizeAndDeduplicateDetalleJabas
+  sanitizeAndDeduplicateDetalleJabas,
+  sanitizeAndDeduplicateTrabajadores
 } from '../utils/storage';
 import { 
   Users, 
@@ -679,15 +680,15 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       const t = effectiveTrabajadores[i];
       const cleanDni = normalizeDni(t.dni);
       const tFecha = t.fecha ? normalizeDateString(t.fecha) : '';
-      const tMod = normalizeModulo(t.modulo) || 'SM';
-      // Clave única compuesta incluyendo módulo para permitir ingresos adicionales en módulos distintos sin considerarlos duplicados
-      const uniqueKey = t.id ? `${t.id}__${tMod}` : (cleanDni ? `${cleanDni}__${tFecha || 'sf'}__${tMod}` : `idx_${i}__${t.nombres}__${tMod}`);
+      const normName = normalizeStr(t.nombres);
+      // Clave unívoca por persona y fecha para garantizar que no existan duplicados en la lista de trabajadores
+      const uniqueKey = cleanDni ? `${cleanDni}__${tFecha || 'sf'}` : (normName ? `${normName}__${tFecha || 'sf'}` : (t.id ? `${t.id}__${tFecha || 'sf'}` : `idx_${i}`));
       if (!seenKey.has(uniqueKey)) {
         seenKey.add(uniqueKey);
         list.push({
           ...t,
           dni: cleanDni || String(t.dni || '').trim(),
-          _normName: normalizeStr(t.nombres),
+          _normName: normName,
           _cleanDni: cleanDni,
           _normSupervisor: normalizeStr(t.supervisor),
           _normFundo: normalizeStr(t.fundo),
@@ -751,6 +752,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
 
     // Deduplicar estrictamente detalleJabas para prevenir cualquier conteo duplicado accidental
     const cleanList = sanitizeAndDeduplicateDetalleJabas(detalleJabas || []);
+    const seenWorkerMod = new Set<string>();
 
     cleanList.forEach((d) => {
       // La fecha comercial d.fecha es la fuente primaria y exacta (nunca usar timestamps UTC que desfasen el día)
@@ -761,18 +763,23 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
           const norm = normalizeDni(d.dni);
           const raw = String(d.dni || '').trim();
           const dMod = normalizeModulo(d.modulo);
+          const personKey = norm || raw;
 
-          // Claves específicas por módulo
-          if (norm && dMod) map[`${norm}__${dMod}`] = (map[`${norm}__${dMod}`] || 0) + jabas;
-          if (raw && dMod) map[`${raw}__${dMod}`] = (map[`${raw}__${dMod}`] || 0) + jabas;
+          const wmKey = `${personKey}__${dMod}`;
+          if (seenWorkerMod.has(wmKey)) return;
+          seenWorkerMod.add(wmKey);
+
+          // Claves específicas por módulo (asignar exactamente el valor de jabas)
+          if (norm && dMod) map[`${norm}__${dMod}`] = jabas;
+          if (raw && dMod) map[`${raw}__${dMod}`] = jabas;
 
           // Claves generales acumuladas
           if (norm) map[norm] = (map[norm] || 0) + jabas;
           if (raw && raw !== norm) map[raw] = (map[raw] || 0) + jabas;
-          if (d.id) map[d.id] = (map[d.id] || 0) + jabas;
+          if (d.id) map[d.id] = jabas;
           if (d.trabajador) {
             const normName = normalizeStr(d.trabajador);
-            if (dMod) map[`NAME_${normName}__${dMod}`] = (map[`NAME_${normName}__${dMod}`] || 0) + jabas;
+            if (dMod) map[`NAME_${normName}__${dMod}`] = jabas;
             map[`NAME_${normName}`] = (map[`NAME_${normName}`] || 0) + jabas;
           }
         }
@@ -2932,7 +2939,8 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     trabajadores.forEach((t, idx) => {
       if (isDniSelected(t)) {
         const normDni = normalizeDni(t.dni);
-        const uniqueKey = t.id || (normDni ? `${normDni}__${t.nombres}` : `idx_${idx}__${t.nombres}`);
+        const normName = normalizeStr(t.nombres);
+        const uniqueKey = normDni || (normName ? `NAME_${normName}` : (t.id || `idx_${idx}`));
         if (!seenKey.has(uniqueKey)) {
           seenKey.add(uniqueKey);
           list.push(t);
@@ -2940,7 +2948,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
       }
     });
     return list.sort((a, b) => a.nombres.localeCompare(b.nombres));
-  }, [trabajadores, selectedDnis, isDniSelected, normalizeDni]);
+  }, [trabajadores, selectedDnis, isDniSelected, normalizeDni, normalizeStr]);
 
   // Número de trabajadores seleccionados que actualmente tienen jabas asignadas
   const selectedConJabasCount = useMemo(() => {
@@ -2995,59 +3003,77 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
   // Trabajadores efectivos para el Paso 2: si selectedWorkersList tiene trabajadores, los usa;
   // si estuviera vacío por alguna razón, recurre a la reserva activa de hoy o a los trabajadores ya asignados al supervisor
   const step2EffectiveWorkers = useMemo(() => {
-    if (selectedWorkersList.length > 0) {
-      return selectedWorkersList;
-    }
-    const targetGrp = cuadrillaGrupo ? normalizeGrupo(cuadrillaGrupo) : '';
-    const groupRes = targetGrp
-      ? currentSupervisorReservasHoy.find((r) => isMatchingGrupo(r.grupo, targetGrp))
-      : null;
-    const activeRes = groupRes || lastSavedReserva || currentSupervisorReservaHoy;
-    if (activeRes && Array.isArray(activeRes.trabajadores) && activeRes.trabajadores.length > 0) {
-      const resDniSet = new Set(
-        activeRes.trabajadores.map((tw) => normalizeDni(tw.dni) || String(tw.dni || '').trim())
-      );
-      const resNameSet = new Set(
-        activeRes.trabajadores.map((tw) => normalizeStr(tw.nombres))
-      );
-      const matched = trabajadores.filter((t) => {
-        const normD = normalizeDni(t.dni);
-        const rawD = String(t.dni || '').trim();
-        const normN = normalizeStr(t.nombres);
-        return resDniSet.has(normD) || resDniSet.has(rawD) || resNameSet.has(normN);
-      });
-      if (matched.length > 0) return matched.sort((a, b) => a.nombres.localeCompare(b.nombres));
+    const rawList: Trabajador[] = (() => {
+      if (selectedWorkersList.length > 0) {
+        return selectedWorkersList;
+      }
+      const targetGrp = cuadrillaGrupo ? normalizeGrupo(cuadrillaGrupo) : '';
+      const groupRes = targetGrp
+        ? currentSupervisorReservasHoy.find((r) => isMatchingGrupo(r.grupo, targetGrp))
+        : null;
+      const activeRes = groupRes || lastSavedReserva || currentSupervisorReservaHoy;
+      if (activeRes && Array.isArray(activeRes.trabajadores) && activeRes.trabajadores.length > 0) {
+        const resDniSet = new Set(
+          activeRes.trabajadores.map((tw) => normalizeDni(tw.dni) || String(tw.dni || '').trim())
+        );
+        const resNameSet = new Set(
+          activeRes.trabajadores.map((tw) => normalizeStr(tw.nombres))
+        );
+        const matched = trabajadores.filter((t) => {
+          const normD = normalizeDni(t.dni);
+          const rawD = String(t.dni || '').trim();
+          const normN = normalizeStr(t.nombres);
+          return resDniSet.has(normD) || resDniSet.has(rawD) || resNameSet.has(normN);
+        });
+        if (matched.length > 0) return matched;
 
-      // Si no coinciden directamente en trabajadores, reconstruir a partir de los registros de la reserva
-      return activeRes.trabajadores.map((tw, idx) => ({
-        id: (tw as any).id || `RES_W_${idx}`,
-        fecha: activeRes.fecha,
-        dni: tw.dni,
-        nombres: tw.nombres,
-        fundo: activeRes.fundo,
-        modulo: (tw as any).modulo || activeRes.modulo,
-        supervisor: activeRes.supervisor,
-        grupo: tw.grupo || activeRes.grupo,
-        lider: (tw as any).lider || activeRes.lider || '',
-        tipo: 'Cosechador' as const,
-        jabas: 0
-      })).sort((a, b) => a.nombres.localeCompare(b.nombres));
-    }
-    if (targetGrp) {
-      const groupWorkers = trabajadores.filter((t) => isMatchingGrupo(t.grupo, targetGrp));
-      if (groupWorkers.length > 0) return groupWorkers.sort((a, b) => a.nombres.localeCompare(b.nombres));
-    }
-    const sup = (cuadrillaSupervisor || (isSupervisorUser ? sessionSupervisorName : '')).trim();
-    if (sup) {
-      const scoped = trabajadores.filter(
-        (t) =>
-          matchesSupervisor(sup, t.supervisor) &&
-          (!cuadrillaFundo || normalizeStr(t.fundo) === normalizeStr(cuadrillaFundo)) &&
-          (!cuadrillaModulo || normalizeModulo(t.modulo) === normalizeModulo(cuadrillaModulo))
-      );
-      if (scoped.length > 0) return scoped.sort((a, b) => a.nombres.localeCompare(b.nombres));
-    }
-    return [];
+        // Si no coinciden directamente en trabajadores, reconstruir a partir de los registros de la reserva
+        return activeRes.trabajadores.map((tw, idx) => ({
+          id: (tw as any).id || `RES_W_${idx}`,
+          fecha: activeRes.fecha,
+          dni: tw.dni,
+          nombres: tw.nombres,
+          fundo: activeRes.fundo,
+          modulo: (tw as any).modulo || activeRes.modulo,
+          supervisor: activeRes.supervisor,
+          grupo: tw.grupo || activeRes.grupo,
+          lider: (tw as any).lider || activeRes.lider || '',
+          tipo: 'Cosechador' as const,
+          jabas: 0
+        }));
+      }
+      if (targetGrp) {
+        const groupWorkers = trabajadores.filter((t) => isMatchingGrupo(t.grupo, targetGrp));
+        if (groupWorkers.length > 0) return groupWorkers;
+      }
+      const sup = (cuadrillaSupervisor || (isSupervisorUser ? sessionSupervisorName : '')).trim();
+      if (sup) {
+        const scoped = trabajadores.filter(
+          (t) =>
+            matchesSupervisor(sup, t.supervisor) &&
+            (!cuadrillaFundo || normalizeStr(t.fundo) === normalizeStr(cuadrillaFundo)) &&
+            (!cuadrillaModulo || normalizeModulo(t.modulo) === normalizeModulo(cuadrillaModulo))
+        );
+        if (scoped.length > 0) return scoped;
+      }
+      return [];
+    })();
+
+    // Deduplicación estricta por persona para garantizar que ningún cosechador aparezca duplicado en el Paso 2
+    const seen = new Set<string>();
+    const deduplicated: Trabajador[] = [];
+    rawList.forEach((w, idx) => {
+      const normD = normalizeDni(w.dni);
+      const rawD = String(w.dni || '').trim();
+      const normN = normalizeStr(w.nombres);
+      const key = normD || rawD || (normN ? `NAME_${normN}` : (w.id || `idx_${idx}`));
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduplicated.push(w);
+      }
+    });
+
+    return deduplicated.sort((a, b) => a.nombres.localeCompare(b.nombres));
   }, [
     selectedWorkersList,
     cuadrillaGrupo,
@@ -3186,6 +3212,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
     const fechaAvance = fechaPersonal || getLocalToday();
     const nowIso = getLocalISO();
     const detalleList: DetalleJaba[] = [];
+    const seenDniMod = new Set<string>();
 
     Object.keys(avanceValues).forEach((key) => {
       const jabas = avanceValues[key];
@@ -3205,11 +3232,15 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
           );
         const rawResolvedDni = t ? (normalizeDni(t.dni) || t.dni) : key;
         const cleanDni = String(rawResolvedDni).replace(/\D/g, '') || String(rawResolvedDni).trim();
-        const normModulo = (t?.modulo || cuadrillaModulo || 'M01').trim().toUpperCase();
+        const normModulo = normalizeModulo(t?.modulo || cuadrillaModulo || 'M01');
         const assignedGrupo =
           workerAssignedGrupos[key] ||
           (t ? workerAssignedGrupos[normalizeDni(t.dni)] || workerAssignedGrupos[t.dni] : undefined) ||
           cuadrillaGrupo;
+
+        const dedupeKey = `${fechaAvance}_${cleanDni}_${normModulo}`;
+        if (seenDniMod.has(dedupeKey)) return;
+        seenDniMod.add(dedupeKey);
 
         detalleList.push({
           id: `JABA_${fechaAvance}_${cleanDni}_${normModulo}`,
@@ -3271,7 +3302,7 @@ export const TrabajadoresTab: React.FC<TrabajadoresTabProps> = ({
         }
         return t;
       });
-      onUpdateTrabajadores(updatedWorkersList);
+      onUpdateTrabajadores(sanitizeAndDeduplicateTrabajadores(updatedWorkersList));
     }
 
     // Replicar directamente a Google Sheets ('Registro_Avance' y 'Trabajadores')

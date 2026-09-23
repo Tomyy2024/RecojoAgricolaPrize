@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Trabajador, DetalleJaba, ValidacionSupervisor, Programa } from '../types';
-import { getLocalToday, formatDateDDMMAAAA, normalizeDateString } from '../utils/storage';
+import { getLocalToday, formatDateDDMMAAAA, normalizeDateString, sanitizeAndDeduplicateDetalleJabas, normalizeDniString } from '../utils/storage';
 import { 
   CheckCircle2, 
   Clock, 
@@ -68,7 +68,8 @@ export const RegistroStatusMonitor: React.FC<RegistroStatusMonitorProps> = ({
 
   // Group DetalleJabas for selected date
   const registrosDelDia = useMemo(() => {
-    return detalleJabas.filter((d) => normalizeDateString(d.fecha) === normSelectedFecha);
+    const clean = sanitizeAndDeduplicateDetalleJabas(detalleJabas || []);
+    return clean.filter((d) => normalizeDateString(d.fecha) === normSelectedFecha);
   }, [detalleJabas, normSelectedFecha]);
 
   // Validaciones del día
@@ -100,16 +101,9 @@ export const RegistroStatusMonitor: React.FC<RegistroStatusMonitorProps> = ({
   const registrosMap = useMemo(() => {
     const map = new Map<string, DetalleJaba>();
     registrosDelDia.forEach((r) => {
-      if (r.dni) {
-        const existing = map.get(r.dni);
-        if (existing) {
-          map.set(r.dni, {
-            ...r,
-            jabas: Number(existing.jabas || 0) + Number(r.jabas || 0)
-          });
-        } else {
-          map.set(r.dni, { ...r, jabas: Number(r.jabas || 0) });
-        }
+      const cleanD = normalizeDniString(r.dni);
+      if (cleanD) {
+        map.set(cleanD, r);
       }
     });
     return map;

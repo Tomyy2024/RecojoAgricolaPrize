@@ -37,6 +37,7 @@ import {
   getDetalleJabas, 
   saveDetalleJabas, 
   sanitizeAndDeduplicateDetalleJabas,
+  sanitizeAndDeduplicateTrabajadores,
   getUsuarios, 
   saveUsuarios, 
   getGrupos, 
@@ -979,27 +980,24 @@ export default function App() {
       return t;
     });
 
-    // Add any workers not previously in the roster (keyed by DNI + Modulo to support distinct records)
-    const existingWorkerModSet = new Set(
-      trabajadores.map(
-        (t) => `${String(t.dni).replace(/\s+/g, '').trim()}__${String(t.modulo || '').trim().toUpperCase()}`
-      )
+    // Add any workers not previously in the roster (keyed strictly by clean DNI to avoid duplicates)
+    const existingWorkerDniSet = new Set(
+      trabajadores.map((t) => String(t.dni || '').replace(/\D/g, '') || String(t.dni || '').trim())
     );
     newDetalleList.forEach((d) => {
       if (d.dni) {
-        const cleanD = String(d.dni).replace(/\s+/g, '').trim();
-        const modD = String(d.modulo || 'M01').trim().toUpperCase();
-        const key = `${cleanD}__${modD}`;
-        if (!existingWorkerModSet.has(key)) {
-          existingWorkerModSet.add(key);
+        const cleanD = String(d.dni).replace(/\D/g, '') || String(d.dni).trim();
+        const modD = d.modulo || 'M01';
+        if (cleanD && !existingWorkerDniSet.has(cleanD)) {
+          existingWorkerDniSet.add(cleanD);
           updatedWorkers = [
             {
-              id: `TRAB_${cleanD}_${modD}`,
+              id: `TRAB_${cleanD}_${Date.now()}`,
               fecha: d.fecha || getLocalToday(),
               dni: cleanD,
               nombres: d.trabajador || `Trabajador ${cleanD}`,
               fundo: d.fundo || 'Santa Teresa',
-              modulo: d.modulo || 'M01',
+              modulo: modD,
               supervisor: d.supervisor || '',
               grupo: d.grupo || '',
               lider: d.lider || '',
@@ -1012,8 +1010,9 @@ export default function App() {
       }
     });
 
-    setTrabajadoresState(updatedWorkers);
-    saveTrabajadores(updatedWorkers);
+    const finalWorkers = sanitizeAndDeduplicateTrabajadores(updatedWorkers);
+    setTrabajadoresState(finalWorkers);
+    saveTrabajadores(finalWorkers);
 
     // Actualizar reservas de hoy vinculadas a los trabajadores guardados con jabas para marcarlas como completadas
     const savedDnisSet = new Set(newDetalleList.map((d) => String(d.dni || '').replace(/\s+/g, '').trim()));

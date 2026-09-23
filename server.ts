@@ -226,6 +226,58 @@ function normalizeGrupoServer(g?: string | null): string {
   return clean;
 }
 
+function normalizeModuloServer(mod?: string | null): string {
+  if (!mod) return 'M01';
+  const clean = String(mod).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, '');
+  const match = clean.match(/^m(?:odulo)?0*(\d+)([a-z]?)$/i);
+  if (match) {
+    const num = parseInt(match[1], 10);
+    const letter = match[2] ? match[2].toUpperCase() : '';
+    return `M${num < 10 ? '0' + num : num}${letter}`;
+  }
+  return clean.toUpperCase() || 'M01';
+}
+
+function sanitizeAndDeduplicateTrabajadoresServer(list: any[]): any[] {
+  if (!Array.isArray(list)) return [];
+  const map = new Map<string, any>();
+  list.forEach((t, i) => {
+    if (!t || typeof t !== 'object') return;
+    const cleanDni = String(t.dni || '').replace(/\D/g, '') || String(t.dni || '').trim();
+    const tFecha = normalizeDateServer(t.fecha) || '2026-09-22';
+    const normName = t.nombres ? String(t.nombres).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '';
+    const key = cleanDni ? `${cleanDni}__${tFecha}` : (normName ? `${normName}__${tFecha}` : (t.id ? `${t.id}__${tFecha}` : `idx_${i}`));
+
+    const tMod = normalizeModuloServer(t.modulo);
+    const cleanRecord = {
+      ...t,
+      dni: cleanDni || String(t.dni || '').trim(),
+      modulo: t.modulo ? tMod : (cleanDni ? '' : tMod)
+    };
+
+    if (map.has(key)) {
+      const existing = map.get(key);
+      const hasSpecificMod = cleanRecord.modulo && cleanRecord.modulo !== 'SM' && cleanRecord.modulo !== 'M01';
+      const existingHasSpecificMod = existing.modulo && existing.modulo !== 'SM' && existing.modulo !== 'M01';
+      const bestModulo = hasSpecificMod ? cleanRecord.modulo : (existingHasSpecificMod ? existing.modulo : (cleanRecord.modulo || existing.modulo));
+
+      map.set(key, {
+        ...existing,
+        ...cleanRecord,
+        supervisor: cleanRecord.supervisor || existing.supervisor,
+        fundo: cleanRecord.fundo || existing.fundo,
+        modulo: bestModulo,
+        grupo: cleanRecord.grupo || existing.grupo,
+        lider: cleanRecord.lider || existing.lider,
+        jabas: Number(cleanRecord.jabas !== undefined && cleanRecord.jabas > 0 ? cleanRecord.jabas : (existing.jabas || 0))
+      });
+    } else {
+      map.set(key, cleanRecord);
+    }
+  });
+  return Array.from(map.values());
+}
+
 function sanitizeAndDeduplicateDetalleJabas(list: any[]): any[] {
   if (!Array.isArray(list)) return [];
   const map = new Map<string, any>();
@@ -247,15 +299,12 @@ function sanitizeAndDeduplicateDetalleJabas(list: any[]): any[] {
       fecha = '2026-09-11';
     }
 
-    const normModulo = String(item.modulo || 'M01').trim().toUpperCase();
+    const normModulo = normalizeModuloServer(item.modulo);
     const normGrupo = normalizeGrupoServer(item.grupo);
-    const grpSlug = normGrupo ? normGrupo.replace(/[^a-z0-9]/g, '_') : 'nogrp';
     const personKey = cleanDni || (trabajador ? trabajador.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '');
-    // Clave unívoca por fecha, persona, módulo y grupo para evitar colisiones entre grupos distintos
-    const primaryKey = `${fecha}_${personKey}_${normModulo}_${grpSlug}`;
-    const cleanId = item.id && String(item.id).startsWith('JABA_') && String(item.id).includes(grpSlug)
-      ? String(item.id).trim()
-      : `JABA_${fecha}_${cleanDni || 'P'}_${normModulo}_${grpSlug}`;
+    // Clave unívoca por fecha, persona y módulo: un trabajador sólo tiene un registro de avance por módulo y fecha
+    const primaryKey = `${fecha}_${personKey}_${normModulo}`;
+    const cleanId = `JABA_${fecha}_${cleanDni || 'P'}_${normModulo}`;
 
     const cleanRecord = {
       id: cleanId,
@@ -280,11 +329,15 @@ function sanitizeAndDeduplicateDetalleJabas(list: any[]): any[] {
         ...older,
         ...newer,
         id: cleanId,
-        jabas: newer.jabas,
+        fecha: fecha,
+        modulo: normModulo,
+        dni: cleanDni,
+        jabas: newer.jabas, // Respetar la jaba asignada más reciente (no duplicar ni sumar)
         trabajador: newer.trabajador && !newer.trabajador.startsWith('Trabajador ') ? newer.trabajador : older.trabajador,
         supervisor: newer.supervisor || older.supervisor,
         grupo: newer.grupo || older.grupo,
         lider: newer.lider || older.lider,
+        fundo: newer.fundo || older.fundo,
         timestamp: newer.timestamp || older.timestamp
       });
     } else {
@@ -1175,18 +1228,18 @@ async function startServer() {
       if (Array.isArray(trabajadores) && trabajadores.length > 0) {
         const workerMap = new Map<string, any>();
         (db.trabajadores || []).forEach((w: any) => {
-          const dni = String(w.dni || '').trim();
-          const mod = String(w.modulo || '').trim().toUpperCase();
-          const key = dni && mod ? `${dni}__${mod}` : (dni || w.id);
-          workerMap.set(key, w);
-          if (dni && !workerMap.has(dni)) workerMap.set(dni, w);
+          const cleanDni = String(w.dni || '').replace(/\D/g, '') || String(w.dni || '').trim();
+          const normName = w.nombres ? String(w.nombres).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '';
+          const key = cleanDni || normName || w.id;
+          if (key) workerMap.set(key, w);
         });
 
         trabajadores.forEach((incomingW: any) => {
-          const dni = String(incomingW.dni || '').trim();
-          const mod = String(incomingW.modulo || '').trim().toUpperCase();
-          const key = dni && mod ? `${dni}__${mod}` : (dni || incomingW.id);
-          const existing = workerMap.get(key) || (dni ? workerMap.get(dni) : null);
+          const cleanDni = String(incomingW.dni || '').replace(/\D/g, '') || String(incomingW.dni || '').trim();
+          const normName = incomingW.nombres ? String(incomingW.nombres).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '';
+          const key = cleanDni || normName || incomingW.id;
+          if (!key) return;
+          const existing = workerMap.get(key);
           if (existing) {
             const merged = {
               ...existing,
@@ -1199,13 +1252,12 @@ async function startServer() {
               fecha: incomingW.fecha || existing.fecha
             };
             workerMap.set(key, merged);
-            if (dni) workerMap.set(dni, merged);
           } else {
             workerMap.set(key, incomingW);
           }
         });
 
-        db.trabajadores = Array.from(workerMap.values());
+        db.trabajadores = sanitizeAndDeduplicateTrabajadoresServer(Array.from(workerMap.values()));
         db.nominaVersion = (db.nominaVersion || 1) + 1;
         db.nominaTimestamp = Date.now();
         db.nominaLastUpdated = new Date().toISOString();
@@ -1567,7 +1619,9 @@ async function startServer() {
       });
 
       if (workersToAdd.length > 0) {
-        db.trabajadores = [...(db.trabajadores || []), ...workersToAdd];
+        db.trabajadores = sanitizeAndDeduplicateTrabajadoresServer([...(db.trabajadores || []), ...workersToAdd]);
+      } else {
+        db.trabajadores = sanitizeAndDeduplicateTrabajadoresServer(db.trabajadores || []);
       }
 
       db.version = (db.version || 1) + 1;
@@ -1836,11 +1890,12 @@ async function startServer() {
       const purgedCount = previousCount - cleanList.length;
 
       db.detalleJabas = cleanList;
+      db.trabajadores = sanitizeAndDeduplicateTrabajadoresServer(db.trabajadores || []);
       db.version = (db.version || 1) + 1;
       db.lastUpdated = new Date().toISOString();
       saveDatabase(db);
 
-      await syncToCloudFirestore({ detalleJabas: db.detalleJabas });
+      await syncToCloudFirestore({ detalleJabas: db.detalleJabas, trabajadores: db.trabajadores });
       if (url) {
         await pushDetalleJabasToGoogleSheet(url, db.detalleJabas);
       }
